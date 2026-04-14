@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jarvis-cognitive-os"
+version = "0.1.0"
+description = "Modular local cognitive operating system core inspired by JARVIS."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "APScheduler>=3.10.4",
+  "fastapi>=0.115.0",
+  "httpx>=0.28.1",
+  "matplotlib>=3.10.0",
+  "numpy>=2.1.0",
+  "Pillow>=11.2.0",
+  "pydantic>=2.11.0",
+  "pydantic-settings>=2.8.0",
+  "scipy>=1.17.0",
+  "SQLAlchemy>=2.0.40",
+  "sympy>=1.14.0",
+  "typer>=0.16.0",
+  "uvicorn>=0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.5",
+]
+desktop = [
+  "PySide6>=6.8.0",
+  "pywin32>=308",
+]
+voice = [
+  "faster-whisper>=1.1.1",
+  "numpy>=2.1.0",
+  "coqui-tts[codec]>=0.27.5,<0.28",
+  "torch>=2.11,<2.12",
+  "torchaudio>=2.11,<2.12",
+  "transformers>=4.57,<4.58",
+  "pyttsx3>=2.98",
+  "sounddevice>=0.4.7",
+]
+
+[project.scripts]
+jarvis = "jarvis.cli:app"
+jarvis-desktop = "jarvis.desktop:main"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
