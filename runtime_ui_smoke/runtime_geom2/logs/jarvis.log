@@ -1,0 +1,4 @@
+{"timestamp": "2026-04-08T19:45:09.100937+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler started", "taskName": null}
+{"timestamp": "2026-04-08T19:45:09.106245+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_started", "taskName": null, "modules": ["memory", "indexing", "research", "science", "security", "writer", "writing", "interface", "vision", "voice", "voice_interface", "system_runtime", "unity_runtime", "autonomy", "operations"]}
+{"timestamp": "2026-04-08T19:45:19.161236+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler has been shut down", "taskName": null}
+{"timestamp": "2026-04-08T19:45:19.161836+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_stopped", "taskName": null}

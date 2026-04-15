@@ -1,0 +1,6 @@
+{"timestamp": "2026-04-08T21:18:00.474937+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler started", "taskName": null}
+{"timestamp": "2026-04-08T21:18:00.480312+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_started", "taskName": null, "modules": ["memory", "indexing", "research", "science", "security", "writer", "writing", "interface", "vision", "voice", "voice_interface", "system_runtime", "unity_runtime", "autonomy", "operations"]}
+{"timestamp": "2026-04-08T21:18:00.480658+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "models_runtime:general_assistant", "query": "hola"}
+{"timestamp": "2026-04-08T21:18:11.165846+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "models_runtime:general_assistant", "query": "que es un telefono"}
+{"timestamp": "2026-04-08T21:18:33.123211+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler has been shut down", "taskName": null}
+{"timestamp": "2026-04-08T21:18:33.123933+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_stopped", "taskName": null}

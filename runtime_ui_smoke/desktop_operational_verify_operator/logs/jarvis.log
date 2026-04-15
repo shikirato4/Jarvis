@@ -1,0 +1,6 @@
+{"timestamp": "2026-04-08T21:18:44.535350+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler started", "taskName": null}
+{"timestamp": "2026-04-08T21:18:44.541048+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_started", "taskName": null, "modules": ["memory", "indexing", "research", "science", "security", "writer", "writing", "interface", "vision", "voice", "voice_interface", "system_runtime", "unity_runtime", "autonomy", "operations"]}
+{"timestamp": "2026-04-08T21:18:58.381273+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "writing_runtime.continue", "query": "continua mi libro"}
+{"timestamp": "2026-04-08T21:19:09.177971+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "writing_runtime.analyze", "query": "ves la historia que tengo abierta en Word?"}
+{"timestamp": "2026-04-08T21:19:19.956223+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler has been shut down", "taskName": null}
+{"timestamp": "2026-04-08T21:19:19.956798+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_stopped", "taskName": null}

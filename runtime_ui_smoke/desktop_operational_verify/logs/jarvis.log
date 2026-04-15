@@ -1,0 +1,5 @@
+{"timestamp": "2026-04-08T21:20:33.272675+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler started", "taskName": null}
+{"timestamp": "2026-04-08T21:20:33.278150+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_started", "taskName": null, "modules": ["memory", "indexing", "research", "science", "security", "writer", "writing", "interface", "vision", "voice", "voice_interface", "system_runtime", "unity_runtime", "autonomy", "operations"]}
+{"timestamp": "2026-04-08T21:20:33.376164+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "science_runtime", "query": "calcula la derivada de x**2"}
+{"timestamp": "2026-04-08T21:20:44.235290+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler has been shut down", "taskName": null}
+{"timestamp": "2026-04-08T21:20:44.235969+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_stopped", "taskName": null}

@@ -1,0 +1,11 @@
+{"timestamp": "2026-04-08T20:15:05.043650+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler started", "taskName": null}
+{"timestamp": "2026-04-08T20:15:05.048432+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_started", "taskName": null, "modules": ["memory", "indexing", "research", "science", "security", "writer", "writing", "interface", "vision", "voice", "voice_interface", "system_runtime", "unity_runtime", "autonomy", "operations"]}
+{"timestamp": "2026-04-08T20:15:05.633052+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "models_runtime:general_assistant", "query": "hola"}
+{"timestamp": "2026-04-08T20:15:13.999506+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "models_runtime:general_assistant", "query": "que es un telefono"}
+{"timestamp": "2026-04-08T20:15:22.250104+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "runtime_router", "query": "calcula la derivada de x**2"}
+{"timestamp": "2026-04-08T20:15:22.259151+00:00", "level": "WARNING", "logger": "jarvis.app", "message": "semantic_retrieval_degraded", "taskName": null, "query": "calcula la derivada de x**2", "collection": null}
+{"timestamp": "2026-04-08T20:15:31.382366+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "runtime_router", "query": "abre notepad"}
+{"timestamp": "2026-04-08T20:15:39.680251+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "runtime_router", "query": "analiza la seguridad de la contrasena hunter2"}
+{"timestamp": "2026-04-08T20:15:39.687430+00:00", "level": "WARNING", "logger": "jarvis.app", "message": "semantic_retrieval_degraded", "taskName": null, "query": "analiza la seguridad de la contrasena hunter2", "collection": null}
+{"timestamp": "2026-04-08T20:15:47.904009+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler has been shut down", "taskName": null}
+{"timestamp": "2026-04-08T20:15:47.904520+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_stopped", "taskName": null}

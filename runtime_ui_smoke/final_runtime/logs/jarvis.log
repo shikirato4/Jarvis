@@ -1,0 +1,9 @@
+{"timestamp": "2026-04-08T20:26:13.669954+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler started", "taskName": null}
+{"timestamp": "2026-04-08T20:26:13.675457+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_started", "taskName": null, "modules": ["memory", "indexing", "research", "science", "security", "writer", "writing", "interface", "vision", "voice", "voice_interface", "system_runtime", "unity_runtime", "autonomy", "operations"]}
+{"timestamp": "2026-04-08T20:26:13.676116+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "models_runtime:general_assistant", "query": "hola"}
+{"timestamp": "2026-04-08T20:26:24.173499+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "models_runtime:general_assistant", "query": "que es un telefono"}
+{"timestamp": "2026-04-08T20:26:34.380165+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "runtime_router", "query": "calcula la derivada de x**2"}
+{"timestamp": "2026-04-08T20:26:34.385878+00:00", "level": "WARNING", "logger": "jarvis.app", "message": "semantic_retrieval_degraded", "taskName": null, "query": "calcula la derivada de x**2", "collection": null}
+{"timestamp": "2026-04-08T20:26:44.580373+00:00", "level": "INFO", "logger": "jarvis.desktop.chat", "message": "desktop_chat_route", "taskName": null, "route": "runtime_router", "query": "abre notepad"}
+{"timestamp": "2026-04-08T20:26:54.724910+00:00", "level": "INFO", "logger": "apscheduler.scheduler", "message": "Scheduler has been shut down", "taskName": null}
+{"timestamp": "2026-04-08T20:26:54.725478+00:00", "level": "INFO", "logger": "jarvis.app", "message": "jarvis_stopped", "taskName": null}
