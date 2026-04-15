@@ -1,1 +1,0 @@
-in this folder you need to put an archieve with 30 seconds about the voice that will have jarvis, the type of the archieve is an .wav
