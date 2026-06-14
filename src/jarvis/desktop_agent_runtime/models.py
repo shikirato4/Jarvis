@@ -56,11 +56,37 @@ class DesktopVerificationStatus(StrEnum):
     FAILED = "failed"
 
 
+class DesktopAgentAutonomyMode(StrEnum):
+    PASSIVE = "passive"
+    ASSISTIVE = "assistive"
+    ACTIVE = "active"
+
+
+class DesktopAgentSourceSurface(StrEnum):
+    DESKTOP_CHAT = "desktop_chat"
+    DESKTOP_VOICE = "desktop_voice"
+    API = "api"
+    CLI = "cli"
+    RUNTIME = "runtime"
+    UNKNOWN = "unknown"
+
+
 class DesktopStepActionType(StrEnum):
+    OBSERVE_SCREEN = "observe_screen"
     OPEN_APPLICATION = "open_application"
     FOCUS_WINDOW = "focus_window"
+    CLICK_TARGET = "click_target"
+    TYPE_IN_TARGET = "type_in_target"
+    SCROLL = "scroll"
     SEARCH_FILE = "search_file"
+    OPEN_FILE = "open_file"
+    OPEN_FOLDER = "open_folder"
     OPEN_PATH = "open_path"
+    CREATE_FILE = "create_file"
+    CREATE_FOLDER = "create_folder"
+    COPY_FILE = "copy_file"
+    MOVE_FILE = "move_file"
+    RENAME_FILE = "rename_file"
     WRITE_TEXT = "write_text"
     HOTKEY = "hotkey"
     WRITING_CONTINUE = "writing_continue"
@@ -136,6 +162,12 @@ class DesktopAgentExpectation(JarvisBaseModel):
     selection_contains: list[str] = Field(default_factory=list)
     clipboard_contains: list[str] = Field(default_factory=list)
     search_results_min: int | None = None
+    file_exists: bool | None = None
+    folder_exists: bool | None = None
+    path_exists: bool | None = None
+    path_kind: str | None = None
+    path_contains: str | None = None
+    action_data_contains: dict[str, Any] = Field(default_factory=dict)
     action_success_required: bool = True
 
 
@@ -230,6 +262,8 @@ class DesktopWorldState(JarvisBaseModel):
     mission_id: str
     goal_id: str
     current_goal: str
+    autonomy_mode: DesktopAgentAutonomyMode = DesktopAgentAutonomyMode.ASSISTIVE
+    source_surface: DesktopAgentSourceSurface = DesktopAgentSourceSurface.UNKNOWN
     current_subgoal: str | None = None
     phase: DesktopAgentPhase = DesktopAgentPhase.OBSERVING
     current_step_id: str | None = None
@@ -255,7 +289,13 @@ class DesktopWorldState(JarvisBaseModel):
     last_observation_summary: str | None = None
     target_application: str | None = None
     target_window_title: str | None = None
+    target_path: str | None = None
+    active_path: str | None = None
     last_recovery_strategy: str | None = None
+    loop_iteration: int = 0
+    observe_count: int = 0
+    verify_count: int = 0
+    recovery_count: int = 0
     memory: DesktopAgentOperationalMemory = Field(default_factory=DesktopAgentOperationalMemory)
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
@@ -313,6 +353,8 @@ class DesktopAgentMissionRequest(JarvisBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     max_steps: int | None = None
     max_retries_per_step: int | None = None
+    autonomy_mode: DesktopAgentAutonomyMode = DesktopAgentAutonomyMode.ASSISTIVE
+    source_surface: DesktopAgentSourceSurface = DesktopAgentSourceSurface.UNKNOWN
     dry_run: bool = False
     verbose_trace: bool = False
     wait_for_completion: bool = True
@@ -348,5 +390,6 @@ class DesktopAgentMissionReceipt(JarvisBaseModel):
     replan_count: int = 0
     last_verification_note: str | None = None
     last_recovery_note: str | None = None
+    metrics: dict[str, float] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

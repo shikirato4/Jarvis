@@ -8,8 +8,9 @@ from jarvis.core.errors import CapabilityUnavailableError, ModelProviderError
 from jarvis.core.events import EventBus
 from jarvis.core.modes import ModeManager
 
-from .base import ModelRequest, ModelResponse, ProviderHealth
+from .base import ModelRequest, ModelResponse, ProviderHealth, StreamChunk
 from .catalog import ModelCatalog
+from .ollama import OllamaProvider
 from .registry import ProviderRegistry
 from .router import ModelRouter
 
@@ -54,7 +55,7 @@ class ModelService:
         if strict_provider is not None:
             blocked_candidates = [profile for profile in candidates if profile.provider.casefold() != strict_provider.casefold()]
             if blocked_candidates:
-                self._logger.warning(
+                self._logger.debug(
                     "model_provider_blocked",
                     extra={
                         "correlation_id": request.correlation_id,
@@ -210,6 +211,117 @@ class ModelService:
         if strict_provider is not None:
             raise ModelProviderError(f"general conversation requires provider '{strict_provider}' and the request failed: {last_error}")
         raise ModelProviderError(str(last_error))
+
+    def stream(self, request: ModelRequest, *, cancel_check=None):
+        request = request.model_copy(update={"stream": True})
+        requested_logical_model = request.logical_model or "auto"
+        strict_provider = self._strict_provider_for_request(request)
+        candidates = self._router.route(request, preferred_provider_order=self._preferred_provider_order_for_request(request))
+        if strict_provider is not None:
+            candidates = [profile for profile in candidates if profile.provider.casefold() == strict_provider.casefold()]
+        if not candidates:
+            yield StreamChunk(done=True, error="no model candidates available", metadata={"logical_model": requested_logical_model})
+            return
+        last_error: Exception | None = None
+        for profile in candidates:
+            provider = self._provider_registry.get(profile.provider)
+            if provider is None:
+                continue
+            endpoint_mode = str(getattr(self._settings, "ollama_stream_endpoint", "openai") or "openai").casefold()
+            if endpoint_mode == "native" and profile.provider == "gpt_oss":
+                native_provider = self._native_ollama_provider()
+                yield from self._stream_provider(
+                    native_provider,
+                    request,
+                    provider_name="ollama",
+                    model_name=profile.model_name,
+                    temperature=request.temperature if request.temperature is not None else profile.temperature,
+                    timeout_seconds=request.timeout_seconds if request.timeout_seconds is not None else profile.timeout_seconds,
+                    cancel_check=cancel_check,
+                )
+                return
+            try:
+                saw_content = False
+                terminal_chunk: StreamChunk | None = None
+                for chunk in self._stream_provider(
+                    provider,
+                    request,
+                    provider_name=profile.provider,
+                    model_name=profile.model_name,
+                    temperature=request.temperature if request.temperature is not None else profile.temperature,
+                    timeout_seconds=request.timeout_seconds if request.timeout_seconds is not None else profile.timeout_seconds,
+                    cancel_check=cancel_check,
+                ):
+                    if chunk.text:
+                        saw_content = True
+                    if chunk.done:
+                        terminal_chunk = chunk
+                    if (
+                        chunk.done
+                        and not saw_content
+                        and not chunk.metadata.get("cancelled")
+                        and chunk.metadata.get("reason") == "no_output"
+                        and endpoint_mode == "auto"
+                        and profile.provider == "gpt_oss"
+                    ):
+                        native_provider = self._native_ollama_provider()
+                        native_had_content = False
+                        for native_chunk in self._stream_provider(
+                            native_provider,
+                            request,
+                            provider_name="ollama",
+                            model_name=profile.model_name,
+                            temperature=request.temperature if request.temperature is not None else profile.temperature,
+                            timeout_seconds=request.timeout_seconds if request.timeout_seconds is not None else profile.timeout_seconds,
+                            cancel_check=cancel_check,
+                        ):
+                            native_chunk.metadata.setdefault("fallback_from", "openai_compatible")
+                            if native_chunk.text:
+                                native_had_content = True
+                            yield native_chunk
+                        if native_had_content:
+                            return
+                        yield chunk
+                        return
+                    yield chunk
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                continue
+        message = str(last_error) if last_error is not None else "streaming failed"
+        yield StreamChunk(done=True, error=message[:300], metadata={"logical_model": requested_logical_model})
+
+    def _native_ollama_provider(self):
+        return self._provider_registry.get("ollama") or OllamaProvider(self._settings)
+
+    def _stream_provider(
+        self,
+        provider,
+        request: ModelRequest,
+        *,
+        provider_name: str,
+        model_name: str,
+        temperature: float | None,
+        timeout_seconds: float | None,
+        cancel_check=None,
+    ):
+        stream_infer = getattr(provider, "stream_infer", None)
+        if stream_infer is None:
+            response = self.infer(request.model_copy(update={"stream": False}))
+            yield StreamChunk(text=response.content, metadata={"provider": response.provider_name, "model": response.model_name, "fallback": "non_streaming"})
+            yield StreamChunk(done=True, metadata={"streaming_supported": False})
+            return
+        for chunk in stream_infer(
+            request,
+            model_name=model_name,
+            temperature=temperature,
+            timeout_seconds=timeout_seconds,
+            cancel_check=cancel_check,
+        ):
+            chunk.metadata.setdefault("provider", provider_name)
+            chunk.metadata.setdefault("model", model_name)
+            chunk.metadata.setdefault("streaming_supported", True)
+            yield chunk
 
     def _strict_provider_for_request(self, request: ModelRequest) -> str | None:
         if request.logical_model == "general_assistant" or request.task_type == "assistant":

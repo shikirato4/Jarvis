@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from jarvis.bootstrap import build_application
 from jarvis.desktop_runtime import DesktopRuntimeService, JarvisDesktopWindow, create_qt_application, pyside_available
+from jarvis.environment import detect_environment
+from jarvis.persistent_config import load_persistent_config
 
 
 def build_desktop_runtime(settings=None, *, start: bool = True):
@@ -15,7 +17,15 @@ def build_desktop_runtime(settings=None, *, start: bool = True):
 def main() -> int:
     if not pyside_available():
         raise SystemExit("PySide6 is required to launch the JARVIS desktop app. Install it with `python -m pip install PySide6`.")
+        
+    p_config = load_persistent_config()
+    env_status = detect_environment(
+        ollama_base_url=p_config.local_base_url,
+        prefer_model=p_config.local_model
+    )
+        
     backend, desktop = build_desktop_runtime(start=False)
+    desktop.set_environment_status(env_status)
     desktop.start_backend_async()
     qt_app = create_qt_application()
     window = JarvisDesktopWindow(desktop)

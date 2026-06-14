@@ -90,6 +90,15 @@ class DesktopVoiceState(JarvisBaseModel):
     speaking: bool = False
     provider: str | None = None
     backend: str | None = None
+    profile_name: str | None = None
+    clone_backend: str | None = None
+    clone_status: str | None = None
+    clone_ready: bool = False
+    clone_error: str | None = None
+    sample_quality: float | None = None
+    speaker_wav_effective: str | None = None
+    fallback_reason: str | None = None
+    tts_start_ms: float | None = None
     last_correlation_id: str | None = None
     input_enabled: bool = True
     input_muted: bool = False
@@ -114,3 +123,6 @@ class DesktopShellState(JarvisBaseModel):
     panel_snapshot: DesktopPanelSnapshot = Field(default_factory=DesktopPanelSnapshot)
     conversation: list[DesktopChatMessage] = Field(default_factory=list)
     voice: DesktopVoiceState = Field(default_factory=DesktopVoiceState)
+    llm_mode: str = "disabled"
+    llm_provider: str = "none"
+    dev_runtime: dict[str, Any] = Field(default_factory=dict)

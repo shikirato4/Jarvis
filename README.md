@@ -114,6 +114,26 @@ src/jarvis/
 - `src/jarvis/api/app.py`: HTTP entry point.
 - `src/jarvis/__main__.py`: module execution entry point.
 
+## Iniciar la Interfaz Desktop
+
+JARVIS incluye una interfaz de control desktop oficial. Inicia la aplicación de forma segura con:
+
+```powershell
+python -m jarvis.desktop
+```
+
+El arranque es autoconfigurable: detecta tu conexión a internet y tu proveedor local de modelos (por defecto Ollama en `http://127.0.0.1:11434`), y ajusta la interfaz automáticamente en modo `auto`, `offline` o `disabled`.
+
+Si deseas diagnosticar el estado del entorno de red y los modelos detectados, usa el comando de diagnóstico:
+
+```powershell
+python -m jarvis doctor
+```
+o su equivalente para el Code Agent:
+```powershell
+python -m jarvis code doctor
+```
+
 ## Example Commands
 
 ```bash
@@ -128,6 +148,33 @@ python -m jarvis tool memory.lookup --payload "{\"query\": \"jarvis\", \"limit\"
 python -m jarvis tool model.chat --payload "{logical_model: 'general_assistant', prompt: 'Summarize the workspace state'}"
 python -m jarvis serve
 ```
+
+## Python Environment
+
+Keep the virtual environment at the repository root, not inside `src/jarvis`.
+
+Recommended setup on Windows:
+
+```powershell
+cd C:\Users\GAMER\Documents\jarvis
+py -3.12 -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -e .[desktop,voice]
+python -m pip install -e .[dev]
+```
+
+Recommended validation commands:
+
+```powershell
+python --version
+python -c "import jarvis; print('ok')"
+python -m compileall src\jarvis
+python -m pytest tests/test_voice_runtime.py -q
+python -m pytest tests/test_desktop_runtime_routing.py -q
+```
+
+Remove any legacy repo-local virtual environment backups after the root `.venv` is confirmed working. Keeping virtual environments or archived copies inside the indexed workspace will slow down searches, validation, and indexing.
 
 ## Registering New Capabilities
 

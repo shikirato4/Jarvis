@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 from uuid import uuid4
 
@@ -30,11 +31,113 @@ class DesktopAgentPlanner:
         lowered = goal.casefold()
         steps: list[DesktopAgentStep]
         strategy = "grounded_generic"
-        if self._is_browser_search(lowered):
+        if self._is_screen_read_goal(lowered):
+            strategy = "grounded_screen_read"
+            steps = [
+                self._step(
+                    "observe-screen",
+                    "Observar pantalla",
+                    DesktopStepActionType.OBSERVE_SCREEN,
+                    "Capturar la ventana activa o la pantalla visible y extraer su contexto.",
+                    {"target_type": "active_window"},
+                    DesktopAgentExpectation(action_success_required=True),
+                    subgoal="obtener evidencia visual real del escritorio actual",
+                    success_label="captura y contexto visual disponibles",
+                    alternatives=["retry with full-screen awareness", "re-observe after refocus"],
+                )
+            ]
+        elif self._is_browser_search(lowered):
             strategy = "grounded_browser_search"
             app, query = self._extract_browser_search(goal)
             world.target_application = app
             steps = self._browser_search_steps(app, query, world)
+        elif self._is_save_document_goal(lowered):
+            strategy = "grounded_save_document"
+            target_window = self._extract_target_window(goal) or "Word"
+            world.target_window_title = target_window
+            steps = [
+                self._step(
+                    "focus-save-window",
+                    f"Enfocar {target_window}",
+                    DesktopStepActionType.FOCUS_WINDOW,
+                    f"Enfocar {target_window}.",
+                    {"target_window": target_window},
+                    DesktopAgentExpectation(active_window_contains=target_window),
+                    subgoal="tener en foco la ventana donde se guardara el documento",
+                    success_label="ventana objetivo activa",
+                    alternatives=["refocus matching window"],
+                ),
+                self._step(
+                    "save-document",
+                    "Guardar documento",
+                    DesktopStepActionType.HOTKEY,
+                    "Guardar mediante atajo estandar.",
+                    {"keys": ("ctrl", "s"), "target_window": target_window},
+                    DesktopAgentExpectation(active_window_contains=target_window, action_success_required=True),
+                    subgoal="persistir el documento actual",
+                    success_label="atajo de guardado enviado",
+                    alternatives=["retry after refocus"],
+                ),
+            ]
+        elif self._is_create_file_goal(lowered):
+            strategy = "grounded_create_file"
+            app = self._extract_application(goal)
+            world.target_application = app
+            steps = [
+                self._step(
+                    "open-editor",
+                    f"Abrir {app}",
+                    DesktopStepActionType.OPEN_APPLICATION,
+                    f"Abrir {app}.",
+                    {"application": app},
+                    DesktopAgentExpectation(active_window_contains=app, process_name_contains=self._infer_process_hint(app)),
+                    subgoal=f"tener {app} disponible",
+                    success_label=f"{app} abierto",
+                    alternatives=["focus existing editor"],
+                ),
+                self._step(
+                    "focus-editor",
+                    f"Enfocar {app}",
+                    DesktopStepActionType.FOCUS_WINDOW,
+                    f"Enfocar {app}.",
+                    {"target_window": app},
+                    DesktopAgentExpectation(active_window_contains=app, process_name_contains=self._infer_process_hint(app)),
+                    subgoal=f"confirmar foco en {app}",
+                    success_label=f"{app} activo",
+                    alternatives=["search another matching editor window"],
+                ),
+                self._step(
+                    "new-file",
+                    "Crear archivo",
+                    DesktopStepActionType.HOTKEY,
+                    "Crear un archivo nuevo con el atajo estandar.",
+                    {"keys": ("ctrl", "n"), "target_window": app},
+                    DesktopAgentExpectation(active_window_contains=app, action_success_required=True),
+                    subgoal="crear un archivo nuevo en el editor",
+                    success_label="atajo de nuevo archivo enviado",
+                    alternatives=["retry after refocus"],
+                ),
+            ]
+        elif self._is_click_target_goal(lowered):
+            strategy = "grounded_visual_click"
+            click_goal = self._extract_click_goal(goal)
+            target_window = str(click_goal.get("target_window") or "")
+            world.target_window_title = target_window or None
+            steps = self._click_target_steps(
+                str(click_goal["label"]),
+                kind=str(click_goal["kind"]) if click_goal.get("kind") else None,
+                target_window=target_window or None,
+            )
+        elif self._is_form_fill_goal(lowered):
+            strategy = "grounded_form_fill"
+            form_goal = self._extract_form_goal(goal)
+            target_window = str(form_goal.get("target_window") or "")
+            world.target_window_title = target_window or None
+            steps = self._form_fill_steps(
+                target_window=target_window or None,
+                fields=list(form_goal["fields"]),
+                submit_label=str(form_goal["submit_label"]) if form_goal.get("submit_label") else None,
+            )
         elif self._is_open_and_type(lowered):
             strategy = "grounded_open_and_type"
             app = self._extract_application(goal)
@@ -137,6 +240,205 @@ class DesktopAgentPlanner:
                     subgoal="abrir el archivo encontrado sin salir del flujo seguro",
                     success_label="archivo abierto",
                     alternatives=["abort safely if path is ambiguous"],
+                ),
+            ]
+        elif self._is_search_file_goal(lowered):
+            strategy = "grounded_file_search_only"
+            query = self._extract_file_query(goal)
+            steps = [
+                self._step(
+                    "search-file",
+                    "Buscar archivo",
+                    DesktopStepActionType.SEARCH_FILE,
+                    f"Buscar archivo '{query}'.",
+                    {"query": query, "target_kind": "file"},
+                    DesktopAgentExpectation(search_results_min=1),
+                    subgoal="localizar el archivo solicitado",
+                    success_label="archivo localizado",
+                    alternatives=["broaden search", "search common folders"],
+                )
+            ]
+        elif self._is_open_file_goal(lowered):
+            strategy = "grounded_open_file"
+            query = self._extract_file_query(goal)
+            steps = [
+                self._step(
+                    "search-file",
+                    "Buscar archivo",
+                    DesktopStepActionType.SEARCH_FILE,
+                    f"Buscar archivo '{query}'.",
+                    {"query": query, "target_kind": "file"},
+                    DesktopAgentExpectation(search_results_min=1),
+                    subgoal="encontrar candidatos seguros para el archivo",
+                    success_label="archivo localizado",
+                    alternatives=["broaden search", "search common folders"],
+                ),
+                self._step(
+                    "open-file",
+                    "Abrir archivo",
+                    DesktopStepActionType.OPEN_FILE,
+                    "Abrir el archivo encontrado.",
+                    {"result_from": "search-file"},
+                    DesktopAgentExpectation(path_exists=True, file_exists=True, path_kind="file", action_success_required=True),
+                    risk=DesktopAgentRiskLevel.MEDIUM,
+                    subgoal="abrir el archivo encontrado",
+                    success_label="archivo abierto",
+                    alternatives=["reveal in folder if open fails"],
+                ),
+            ]
+        elif self._is_open_folder_goal(lowered):
+            strategy = "grounded_open_folder"
+            folder_query = self._extract_folder_query(goal)
+            direct_path = self._resolve_special_folder_goal(folder_query)
+            if direct_path is not None:
+                world.target_path = str(direct_path)
+                steps = [
+                    self._step(
+                        "open-folder",
+                        "Abrir carpeta",
+                        DesktopStepActionType.OPEN_FOLDER,
+                        f"Abrir la carpeta '{folder_query}'.",
+                        {"path": str(direct_path)},
+                        DesktopAgentExpectation(path_exists=True, folder_exists=True, path_kind="folder"),
+                        subgoal="abrir la carpeta objetivo en el Explorador",
+                        success_label="carpeta abierta",
+                        alternatives=["reveal in explorer"],
+                    )
+                ]
+            else:
+                steps = [
+                    self._step(
+                        "search-folder",
+                        "Buscar carpeta",
+                        DesktopStepActionType.SEARCH_FILE,
+                        f"Buscar carpeta '{folder_query}'.",
+                        {"query": folder_query, "target_kind": "folder"},
+                        DesktopAgentExpectation(search_results_min=1),
+                        subgoal="encontrar una carpeta candidata",
+                        success_label="carpeta localizada",
+                        alternatives=["broaden search"],
+                    ),
+                    self._step(
+                        "open-folder",
+                        "Abrir carpeta",
+                        DesktopStepActionType.OPEN_FOLDER,
+                        "Abrir la carpeta encontrada.",
+                        {"result_from": "search-folder"},
+                        DesktopAgentExpectation(path_exists=True, folder_exists=True, path_kind="folder"),
+                        subgoal="abrir la carpeta localizada",
+                        success_label="carpeta abierta",
+                        alternatives=["reveal containing folder"],
+                    ),
+                ]
+        elif self._is_create_folder_goal(lowered):
+            strategy = "grounded_create_folder"
+            folder_name, parent_path = self._extract_create_folder_goal(goal)
+            world.target_path = str(parent_path / folder_name)
+            steps = [
+                self._step(
+                    "create-folder",
+                    "Crear carpeta",
+                    DesktopStepActionType.CREATE_FOLDER,
+                    f"Crear la carpeta '{folder_name}'.",
+                    {"path": str(parent_path / folder_name)},
+                    DesktopAgentExpectation(path_exists=True, folder_exists=True, path_kind="folder"),
+                    subgoal="crear la carpeta pedida en la ubicacion correcta",
+                    success_label="carpeta creada",
+                    alternatives=["re-check destination path"],
+                )
+            ]
+        elif self._is_create_named_file_goal(lowered):
+            strategy = "grounded_create_named_file"
+            file_name, parent_path = self._extract_create_file_goal(goal)
+            world.target_path = str(parent_path / file_name)
+            steps = [
+                self._step(
+                    "create-file",
+                    "Crear archivo",
+                    DesktopStepActionType.CREATE_FILE,
+                    f"Crear el archivo '{file_name}'.",
+                    {"path": str(parent_path / file_name)},
+                    DesktopAgentExpectation(path_exists=True, file_exists=True, path_kind="file"),
+                    subgoal="crear el archivo solicitado sin sobrescribir a ciegas",
+                    success_label="archivo creado",
+                    alternatives=["re-check destination path"],
+                )
+            ]
+        elif self._is_copy_file_goal(lowered):
+            strategy = "grounded_copy_file"
+            source_query, destination_path = self._extract_copy_move_goal(goal)
+            steps = self._search_then_file_op_steps(
+                source_query=source_query,
+                destination_path=destination_path,
+                action_type=DesktopStepActionType.COPY_FILE,
+                op_step_id="copy-file",
+                op_title="Copiar archivo",
+                op_action="Copiar el archivo encontrado al destino seguro.",
+            )
+        elif self._is_move_file_goal(lowered):
+            strategy = "grounded_move_file"
+            source_query, destination_path = self._extract_copy_move_goal(goal)
+            steps = self._search_then_file_op_steps(
+                source_query=source_query,
+                destination_path=destination_path,
+                action_type=DesktopStepActionType.MOVE_FILE,
+                op_step_id="move-file",
+                op_title="Mover archivo",
+                op_action="Mover el archivo encontrado al destino seguro.",
+                risk=DesktopAgentRiskLevel.MEDIUM,
+            )
+        elif self._is_rename_file_goal(lowered):
+            strategy = "grounded_rename_file"
+            source_query, new_name = self._extract_rename_goal(goal)
+            steps = [
+                self._step(
+                    "search-file",
+                    "Buscar archivo",
+                    DesktopStepActionType.SEARCH_FILE,
+                    f"Buscar archivo '{source_query}'.",
+                    {"query": source_query, "target_kind": "file"},
+                    DesktopAgentExpectation(search_results_min=1),
+                    subgoal="resolver el archivo que se renombrara",
+                    success_label="archivo localizado",
+                    alternatives=["broaden search"],
+                ),
+                self._step(
+                    "rename-file",
+                    "Renombrar archivo",
+                    DesktopStepActionType.RENAME_FILE,
+                    f"Renombrar a '{new_name}'.",
+                    {"result_from": "search-file", "new_name": new_name},
+                    DesktopAgentExpectation(path_exists=True, file_exists=True, path_contains=new_name.casefold(), path_kind="file"),
+                    subgoal="renombrar el archivo sin sobrescribir por error",
+                    success_label="archivo renombrado",
+                    alternatives=["abort if ambiguous"],
+                ),
+            ]
+        elif self._is_open_explorer_goal(lowered):
+            strategy = "grounded_open_explorer"
+            world.target_application = "explorer"
+            steps = [
+                self._step(
+                    "open-explorer",
+                    "Abrir Explorador",
+                    DesktopStepActionType.OPEN_APPLICATION,
+                    "Abrir Explorador de archivos.",
+                    {"application": "explorer"},
+                    DesktopAgentExpectation(active_window_contains="explor", process_name_contains="explorer"),
+                    subgoal="tener el Explorador listo",
+                    success_label="Explorador abierto",
+                    alternatives=["focus existing explorer window"],
+                ),
+                self._step(
+                    "focus-explorer",
+                    "Enfocar Explorador",
+                    DesktopStepActionType.FOCUS_WINDOW,
+                    "Enfocar la ventana del Explorador.",
+                    {"target_window": "explorador"},
+                    DesktopAgentExpectation(active_window_contains="explor"),
+                    subgoal="confirmar la ventana del Explorador",
+                    success_label="Explorador activo",
+                    alternatives=["search explorer window"],
                 ),
             ]
         elif self._is_word_continue(lowered):
@@ -465,6 +767,133 @@ class DesktopAgentPlanner:
         )
         return steps
 
+    def _search_then_file_op_steps(
+        self,
+        *,
+        source_query: str,
+        destination_path: Path,
+        action_type: DesktopStepActionType,
+        op_step_id: str,
+        op_title: str,
+        op_action: str,
+        risk: DesktopAgentRiskLevel = DesktopAgentRiskLevel.LOW,
+    ) -> list[DesktopAgentStep]:
+        return [
+            self._step(
+                "search-file",
+                "Buscar archivo",
+                DesktopStepActionType.SEARCH_FILE,
+                f"Buscar archivo '{source_query}'.",
+                {"query": source_query, "target_kind": "file"},
+                DesktopAgentExpectation(search_results_min=1),
+                subgoal="resolver el archivo origen",
+                success_label="archivo origen localizado",
+                alternatives=["broaden search"],
+            ),
+            self._step(
+                op_step_id,
+                op_title,
+                action_type,
+                op_action,
+                {"result_from": "search-file", "destination_path": str(destination_path)},
+                DesktopAgentExpectation(path_exists=True, path_contains=destination_path.name.casefold()),
+                risk=risk,
+                subgoal="completar la operacion de archivo de forma segura",
+                success_label="operacion de archivo completada",
+                alternatives=["abort if overwrite confirmation is required"],
+            ),
+        ]
+
+    def _click_target_steps(self, label: str, *, kind: str | None, target_window: str | None) -> list[DesktopAgentStep]:
+        steps: list[DesktopAgentStep] = []
+        if target_window:
+            steps.append(
+                self._step(
+                    "focus-target-window",
+                    f"Enfocar {target_window}",
+                    DesktopStepActionType.FOCUS_WINDOW,
+                    f"Enfocar {target_window}.",
+                    {"target_window": target_window},
+                    DesktopAgentExpectation(active_window_contains=target_window),
+                    subgoal="asegurar la ventana correcta antes de actuar",
+                    success_label="ventana destino activa",
+                    alternatives=["re-observe current window"],
+                )
+            )
+        steps.append(
+            self._step(
+                "click-visual-target",
+                f"Hacer click en {label}",
+                DesktopStepActionType.CLICK_TARGET,
+                f"Hacer click sobre el objetivo visual '{label}'.",
+                {"label": label, "kind": kind, "target_window": target_window},
+                DesktopAgentExpectation(
+                    active_window_contains=target_window or None,
+                    expected_targets=[label],
+                    action_success_required=True,
+                ),
+                subgoal=f"activar el objetivo visual '{label}'",
+                success_label=f"objetivo '{label}' activado",
+                alternatives=["retry without kind filter", "broaden visual search"],
+            )
+        )
+        return steps
+
+    def _form_fill_steps(self, *, target_window: str | None, fields: list[tuple[str, str]], submit_label: str | None) -> list[DesktopAgentStep]:
+        steps: list[DesktopAgentStep] = []
+        if target_window:
+            steps.append(
+                self._step(
+                    "focus-form-window",
+                    f"Enfocar {target_window}",
+                    DesktopStepActionType.FOCUS_WINDOW,
+                    f"Enfocar {target_window}.",
+                    {"target_window": target_window},
+                    DesktopAgentExpectation(active_window_contains=target_window),
+                    subgoal="trabajar sobre la ventana del formulario",
+                    success_label="ventana del formulario activa",
+                    alternatives=["retry window focus"],
+                )
+            )
+        for index, (field_label, value) in enumerate(fields, start=1):
+            steps.append(
+                self._step(
+                    f"focus-field-{index}",
+                    f"Localizar campo {field_label}",
+                    DesktopStepActionType.CLICK_TARGET,
+                    f"Enfocar el campo '{field_label}'.",
+                    {"label": field_label, "kind": "input", "target_window": target_window},
+                    DesktopAgentExpectation(
+                        active_window_contains=target_window or None,
+                        expected_targets=[field_label],
+                        action_success_required=True,
+                    ),
+                    subgoal=f"llevar el foco al campo '{field_label}'",
+                    success_label=f"campo '{field_label}' enfocado",
+                    alternatives=["retry as generic text field", "broaden visual search"],
+                )
+            )
+            steps.append(
+                self._step(
+                    f"write-field-{index}",
+                    f"Escribir {field_label}",
+                    DesktopStepActionType.WRITE_TEXT,
+                    f"Escribir el valor para '{field_label}'.",
+                    {"text": value, "target_window": target_window},
+                    DesktopAgentExpectation(
+                        active_window_contains=target_window or None,
+                        visible_text_contains=[value[:60]] if value else [],
+                        action_success_required=True,
+                    ),
+                    subgoal=f"completar el campo '{field_label}'",
+                    success_label=f"valor escrito en '{field_label}'",
+                    alternatives=["refocus field and retry"],
+                )
+            )
+        if submit_label:
+            steps.extend(self._click_target_steps(submit_label, kind="button", target_window=target_window))
+        return steps
+
     def _step(
         self,
         step_id: str,
@@ -500,6 +929,12 @@ class DesktopAgentPlanner:
         return "abre " in lowered and "busca " in lowered and any(browser in lowered for browser in ("chrome", "opera", "edge"))
 
     @staticmethod
+    def _is_screen_read_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("pantalla", "screen", "escritorio", "desktop", "ventana")) and any(
+            token in lowered for token in ("que hay", "qué hay", "que ves", "qué ves", "lee", "leer", "describe", "mira", "ver")
+        )
+
+    @staticmethod
     def _is_write_to_active_window(lowered: str) -> bool:
         return "ventana activa" in lowered and ("escribe" in lowered or "escribir" in lowered)
 
@@ -508,12 +943,70 @@ class DesktopAgentPlanner:
         return lowered.startswith("abre ") and ("escribe esto" in lowered or "escribir" in lowered)
 
     @staticmethod
+    def _is_click_target_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("haz click", "haz clic", "click en", "clic en")) and any(
+            token in lowered for token in ("boton", "button", "campo", "input", "enviar", "send")
+        )
+
+    @staticmethod
+    def _is_form_fill_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("llena este formulario", "rellena este formulario", "completa este formulario", "fill this form"))
+
+    @staticmethod
     def _is_file_search_and_open(lowered: str) -> bool:
         return "archivo" in lowered and ("abre" in lowered or "abr" in lowered) and "busca" in lowered
 
     @staticmethod
+    def _is_search_file_goal(lowered: str) -> bool:
+        return "archivo" in lowered and any(token in lowered for token in ("busca", "buscar", "encuentra")) and "abre" not in lowered
+
+    @staticmethod
+    def _is_open_file_goal(lowered: str) -> bool:
+        return "archivo" in lowered and any(token in lowered for token in ("abre", "abrir", "open")) and "busca" not in lowered
+
+    @staticmethod
+    def _is_open_folder_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("abre la carpeta", "abrir carpeta", "open folder", "abre carpeta"))
+
+    @staticmethod
+    def _is_open_explorer_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("abre explorador", "abre el explorador", "abre explorer", "abrir explorador"))
+
+    @staticmethod
+    def _is_create_folder_goal(lowered: str) -> bool:
+        return "carpeta" in lowered and any(token in lowered for token in ("crea", "crear", "nueva"))
+
+    @staticmethod
+    def _is_create_named_file_goal(lowered: str) -> bool:
+        return "archivo" in lowered and any(token in lowered for token in ("crea", "crear")) and not any(
+            token in lowered for token in ("vscode", "vs code", "visual studio code", "word", "notepad")
+        )
+
+    @staticmethod
+    def _is_copy_file_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("copia", "copiar")) and "archivo" in lowered
+
+    @staticmethod
+    def _is_move_file_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("mueve", "mover")) and "archivo" in lowered
+
+    @staticmethod
+    def _is_rename_file_goal(lowered: str) -> bool:
+        return any(token in lowered for token in ("renombra", "renombrar")) and "archivo" in lowered
+
+    @staticmethod
     def _is_word_continue(lowered: str) -> bool:
         return "word" in lowered and ("contin" in lowered or "anade" in lowered or "añade" in lowered or "libro" in lowered or "documento" in lowered)
+
+    @staticmethod
+    def _is_save_document_goal(lowered: str) -> bool:
+        return ("guarda" in lowered or "guardar" in lowered) and ("documento" in lowered or "document" in lowered)
+
+    @staticmethod
+    def _is_create_file_goal(lowered: str) -> bool:
+        return ("crea un archivo" in lowered or "crear un archivo" in lowered or "new file" in lowered) and any(
+            token in lowered for token in ("vscode", "vs code", "visual studio code", "word", "notepad")
+        )
 
     @staticmethod
     def _extract_browser_search(goal: str) -> tuple[str, str]:
@@ -532,12 +1025,127 @@ class DesktopAgentPlanner:
         match = re.search(r"(?:escribe esto|anade este texto|añade este texto)\s*:?\s*(.+)$", goal, flags=re.IGNORECASE)
         return match.group(1).strip() if match else ""
 
+    @classmethod
+    def _extract_click_goal(cls, goal: str) -> dict[str, str | None]:
+        target_window = cls._extract_target_window(goal)
+        kind = None
+        label = goal
+        folded = goal.casefold()
+        markers = (
+            ("boton que diga", "button"),
+            ("boton ", "button"),
+            ("button ", "button"),
+            ("campo ", "input"),
+            ("input ", "input"),
+        )
+        for marker, detected_kind in markers:
+            index = folded.rfind(marker)
+            if index >= 0:
+                label = goal[index + len(marker) :].strip()
+                kind = detected_kind
+                break
+        if kind is None and any(token in folded for token in ("enviar", "send")):
+            label = "Enviar" if "enviar" in folded else "Send"
+            kind = "button"
+        label = re.sub(r"\s+en\s+.+$", "", label, flags=re.IGNORECASE).strip(" .:\"'")
+        return {"label": label or "objetivo", "kind": kind, "target_window": target_window}
+
+    @classmethod
+    def _extract_form_goal(cls, goal: str) -> dict[str, object]:
+        target_window = cls._extract_target_window(goal)
+        payload = goal.split(":", 1)[1] if ":" in goal else goal
+        fields: list[tuple[str, str]] = []
+        for part in re.split(r"[,\n;]+", payload):
+            chunk = part.strip()
+            if not chunk:
+                continue
+            match = re.match(r"(.+?)\s*(?:=|:)\s*(.+)$", chunk)
+            if match:
+                fields.append((match.group(1).strip(" ."), match.group(2).strip()))
+        submit_label = "Enviar" if "enviar" in goal.casefold() else None
+        return {"fields": fields, "submit_label": submit_label, "target_window": target_window}
+
     @staticmethod
     def _extract_file_query(goal: str) -> str:
         match = re.search(r"busca(?:\s+este)?\s+archivo\s*(.+?)(?:\s+y\s+abrelo|\s+y\s+ábrelo|$)", goal, flags=re.IGNORECASE)
         if match:
             return match.group(1).strip(" :\"'")
+        match = re.search(r"abre(?:\s+el)?\s+archivo\s+(.+)$", goal, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" :\"'")
         return goal
+
+    def _extract_folder_query(self, goal: str) -> str:
+        match = re.search(r"abre(?:\s+la)?\s+carpeta(?:\s+del\s+proyecto)?\s+(.+)$", goal, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" :\"'")
+        return goal
+
+    def _resolve_special_folder_goal(self, query: str) -> Path | None:
+        lowered = query.casefold()
+        if lowered in {"jarvis", "proyecto jarvis", "project jarvis"} or ("jarvis" in lowered and "proyecto" in lowered):
+            return self._settings.resolved_workspace_root
+        if any(token in lowered for token in ("documentos", "documents", "descargas", "downloads", "escritorio", "desktop")):
+            return self._resolve_location_phrase(query)
+        return None
+
+    def _extract_create_folder_goal(self, goal: str) -> tuple[str, Path]:
+        name_match = re.search(r"carpeta(?:\s+llamada)?\s+(.+?)(?:\s+en\s+|$)", goal, flags=re.IGNORECASE)
+        folder_name = (name_match.group(1).strip(" .\"'") if name_match else "Nueva carpeta") or "Nueva carpeta"
+        location = self._extract_location_phrase(goal)
+        return folder_name, self._resolve_location_phrase(location)
+
+    def _extract_create_file_goal(self, goal: str) -> tuple[str, Path]:
+        name_match = re.search(r"archivo(?:\s+llamado)?\s+(.+?)(?:\s+en\s+|$)", goal, flags=re.IGNORECASE)
+        file_name = (name_match.group(1).strip(" .\"'") if name_match else "nuevo.txt") or "nuevo.txt"
+        location = self._extract_location_phrase(goal)
+        return file_name, self._resolve_location_phrase(location)
+
+    def _extract_copy_move_goal(self, goal: str) -> tuple[str, Path]:
+        source_match = re.search(r"archivo\s+(.+?)(?:\s+a\s+|$)", goal, flags=re.IGNORECASE)
+        source_query = (source_match.group(1).strip(" .\"'") if source_match else goal) or goal
+        destination_phrase = self._extract_destination_phrase(goal)
+        return source_query, self._resolve_location_phrase(destination_phrase)
+
+    def _extract_rename_goal(self, goal: str) -> tuple[str, str]:
+        match = re.search(r"renombra(?:\s+este)?\s+archivo\s+(.+?)\s+a\s+(.+)$", goal, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip(" .\"'"), match.group(2).strip(" .\"'")
+        match = re.search(r"renombra(?:\s+este)?\s+archivo\s+a\s+(.+)$", goal, flags=re.IGNORECASE)
+        if match:
+            return "archivo", match.group(1).strip(" .\"'")
+        return goal, "renamed-file"
+
+    @staticmethod
+    def _extract_location_phrase(goal: str) -> str:
+        match = re.search(r"\s+en\s+(.+)$", goal, flags=re.IGNORECASE)
+        return match.group(1).strip(" .\"'") if match else "documentos"
+
+    @staticmethod
+    def _extract_destination_phrase(goal: str) -> str:
+        match = re.search(r"\s+a\s+(.+)$", goal, flags=re.IGNORECASE)
+        return match.group(1).strip(" .\"'") if match else "documentos"
+
+    def _resolve_location_phrase(self, phrase: str) -> Path:
+        lowered = phrase.casefold()
+        known_locations = {str(key).casefold(): Path(value).expanduser().resolve(strict=False) for key, value in self._settings.system_known_locations.items()}
+        if "descargas" in lowered or "downloads" in lowered:
+            if "downloads" in known_locations:
+                return known_locations["downloads"]
+            return (Path.home() / "Downloads").resolve(strict=False)
+        if "escritorio" in lowered or "desktop" in lowered:
+            if "desktop" in known_locations:
+                return known_locations["desktop"]
+            return (Path.home() / "Desktop").resolve(strict=False)
+        if "document" in lowered or "documentos" in lowered:
+            if "documents" in known_locations:
+                return known_locations["documents"]
+            return (Path.home() / "Documents").resolve(strict=False)
+        if "jarvis" in lowered and "proyecto" in lowered:
+            return self._settings.resolved_workspace_root
+        if any(token in phrase for token in ("\\", "/", ":")):
+            return Path(phrase).expanduser().resolve(strict=False)
+        return self._settings.resolved_workspace_root
 
     @staticmethod
     def _infer_process_hint(application: str) -> str | None:
@@ -549,9 +1157,26 @@ class DesktopAgentPlanner:
             "vscode": "code",
             "visual studio code": "code",
             "notepad": "notepad",
+            "explorer": "explorer",
+            "explorador": "explorer",
         }
         lowered = application.casefold()
         for key, value in mapping.items():
             if key in lowered:
                 return value
         return lowered or None
+
+    @staticmethod
+    def _extract_target_window(goal: str) -> str | None:
+        lowered = goal.casefold()
+        if "word" in lowered:
+            return "Word"
+        if "chrome" in lowered:
+            return "Chrome"
+        if "opera" in lowered:
+            return "Opera"
+        if "explorer" in lowered or "explorador" in lowered:
+            return "Explorador"
+        if "vscode" in lowered or "vs code" in lowered or "visual studio code" in lowered:
+            return "VSCode"
+        return None

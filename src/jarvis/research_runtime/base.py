@@ -24,6 +24,9 @@ class ModelServiceResearchAdapter:
         self._models = models
 
     def infer_json(self, *, task_type: str, logical_model: str | None, prompt: str, correlation_id: str, metadata: dict[str, Any]) -> dict[str, Any] | None:
+        settings = getattr(self._models, "_settings", None)
+        if settings is not None and not getattr(settings, "ollama_enabled", True):
+            return None
         try:
             response = self._models.infer(
                 ModelRequest(

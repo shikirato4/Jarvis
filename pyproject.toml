@@ -57,3 +57,12 @@ where = ["src"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+norecursedirs = [
+  ".git",
+  ".venv",
+  ".venv312",
+  ".venv_legacy_src_backup",
+  ".pytest_cache",
+  ".pytest_tmp",
+  "runtime",
+]

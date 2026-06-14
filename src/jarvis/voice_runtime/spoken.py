@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from pathlib import Path
 
 from jarvis.config import Settings
+
+from .voice_profile import VoiceProfile, build_default_voice_profiles
 
 _FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
@@ -15,10 +16,11 @@ _HEADER_RE = re.compile(r"^\s{0,3}#{1,6}\s*", re.MULTILINE)
 _BOLD_ITALIC_RE = re.compile(r"(\*\*|__|\*|_)")
 _WHITESPACE_RE = re.compile(r"\s+")
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_WINDOWS_PATH_RE = re.compile(r"\b[A-Za-z]:\\(?:[^\\/:*?\"<>|\r\n]+\\)*[^\\/:*?\"<>|\r\n]*")
+_TECH_TOKEN_RE = re.compile(r"\b(GPT[\s-]*OSS|OCR|UI|CPU|GPU|RAM|VSCode|pyttsx3|Coqui XTTS)\b", re.IGNORECASE)
 _SLANG_REPLACEMENTS = {
     "bro": "entendido",
     "wey": "entendido",
-    "wey,": "entendido,",
     "we": "nosotros",
     "mira": "observe",
     "claro": "entendido",
@@ -33,7 +35,7 @@ _FILLER_PHRASES = (
     "pues",
     "la verdad",
     "basicamente",
-    "básicamente",
+    "basicamente,",
     "literalmente",
     "osea",
     "o sea",
@@ -42,10 +44,19 @@ _FILLER_PHRASES = (
 )
 _DIRECT_OPENERS = (
     ("esto funciona asi", "El sistema funciona de la siguiente manera."),
-    ("esto funciona así", "El sistema funciona de la siguiente manera."),
-    ("te explico", "Procediendo con la explicación."),
+    ("te explico", "Procediendo con el analisis."),
     ("aqui esta", "Presentando el resultado."),
-    ("aquí está", "Presentando el resultado."),
+)
+_STANDARD_CONTEXT_PHRASES = (
+    ("puedo ayudarte con eso", "Entendido. Procediendo."),
+    ("ya hice lo que me pediste", "Operacion completada."),
+    ("ya termine", "Operacion completada."),
+    ("ya esta listo", "Operacion completada."),
+    ("hubo un error", "No pude completar la operacion."),
+    ("no pude completar", "No pude completar la operacion."),
+    ("espera un momento", "Procesando solicitud."),
+    ("un momento", "Procesando solicitud."),
+    ("de acuerdo", "Confirmado."),
 )
 _MATH_REPLACEMENTS = (
     (re.compile(r"\bx\s*\*\*\s*2\b", re.IGNORECASE), "equis al cuadrado"),
@@ -60,7 +71,7 @@ _SYMBOL_REPLACEMENTS = (
     ("=>", " produce "),
     ("*", " por "),
     ("/", " entre "),
-    ("+", " más "),
+    ("+", " mas "),
 )
 _NUMBER_WORDS = {
     "0": "cero",
@@ -75,86 +86,48 @@ _NUMBER_WORDS = {
     "9": "nueve",
     "10": "diez",
 }
+_TECHNICAL_PRONUNCIATIONS = {
+    "gpt oss": "g p t o s s",
+    "ocr": "o c r",
+    "ui": "interfaz",
+    "cpu": "c p u",
+    "gpu": "g p u",
+    "ram": "memoria ram",
+    "vscode": "Visual Studio Code",
+    "pyttsx3": "pi ti es equis tres",
+    "coqui xtts": "Coqui x t t s",
+}
 
 
-@dataclass(frozen=True, slots=True)
-class VoiceProfile:
-    name: str
-    language_style: str
-    style: str
-    rate: int
-    tone: str
-    cleanup_enabled: bool
-    style_enabled: bool
-    formality_level: int
-    speaker_name: str | None = None
-    speaker_wav: Path | None = None
-    speaking_rate: float | None = None
-    pause_ms: int = 180
+@dataclass(slots=True, frozen=True)
+class SpokenSegment:
+    text: str
+    pause_ms: int
+    pause_kind: str
 
 
 def build_voice_profiles(settings: Settings) -> dict[str, VoiceProfile]:
-    speaker_wav = settings.resolved_voice_coqui_speaker_wav
-    speaker_name = settings.voice_coqui_speaker_name
-    return {
-        "jarvis_serious": VoiceProfile(
-            name="jarvis_serious",
-            language_style="technical_formal",
-            style="serious_precise",
-            rate=settings.voice_tts_rate,
-            tone="deep_precise",
-            cleanup_enabled=settings.voice_cleanup_enabled,
-            style_enabled=settings.voice_style_enabled,
-            formality_level=max(settings.voice_formality_level, 4),
-            speaker_name=speaker_name,
-            speaker_wav=speaker_wav,
-            speaking_rate=0.92,
-            pause_ms=220,
-        ),
-        "assistant_neutral": VoiceProfile(
-            name="assistant_neutral",
-            language_style="neutral_formal",
-            style="neutral_balanced",
-            rate=min(settings.voice_tts_rate + 8, 210),
-            tone="balanced",
-            cleanup_enabled=settings.voice_cleanup_enabled,
-            style_enabled=settings.voice_style_enabled,
-            formality_level=max(settings.voice_formality_level, 3),
-            speaker_name=speaker_name,
-            speaker_wav=speaker_wav,
-            speaking_rate=0.98,
-            pause_ms=180,
-        ),
-        "fallback_basic": VoiceProfile(
-            name="fallback_basic",
-            language_style="fallback_clear",
-            style="fallback_clear",
-            rate=min(settings.voice_tts_rate + 12, 220),
-            tone="clear",
-            cleanup_enabled=True,
-            style_enabled=False,
-            formality_level=max(settings.voice_formality_level - 1, 2),
-            speaker_name=settings.voice_default_voice_name or speaker_name,
-            speaker_wav=None,
-            speaking_rate=1.0,
-            pause_ms=140,
-        ),
-    }
+    return build_default_voice_profiles(settings)
 
 
 def resolve_voice_profile(settings: Settings, profile_name: str | None = None) -> VoiceProfile:
     profiles = build_voice_profiles(settings)
-    selected = (profile_name or settings.voice_profile_default or "jarvis_serious").strip()
-    return profiles.get(selected, profiles["jarvis_serious"])
+    selected = (profile_name or settings.voice_clone_profile_default or settings.voice_profile_default or "jarvis_premium").strip()
+    return profiles.get(selected, profiles["jarvis_premium"])
 
 
 def spoken_response_normalization(text: str, *, profile: VoiceProfile | None = None, formality_level: int | None = None) -> str:
     normalized = _normalize_spacing(text)
     if not normalized:
         return ""
-    lowered = normalized.casefold()
+    normalized = _replace_windows_paths(normalized)
+    normalized = _expand_technical_pronunciations(normalized)
     normalized = _replace_slang(normalized)
     normalized = _remove_fillers(normalized)
+    lowered = normalized.casefold()
+    for source, target in _STANDARD_CONTEXT_PHRASES:
+        if source in lowered:
+            return target
     for source, target in _DIRECT_OPENERS:
         if source in lowered:
             normalized = target
@@ -171,12 +144,17 @@ def prepare_spoken_response(
     profile_name: str | None = None,
 ) -> tuple[str, VoiceProfile]:
     profile = resolve_voice_profile(settings, profile_name)
-    spoken_text = visual_text or ""
-    if profile.style_enabled:
-        spoken_text = spoken_response_normalization(spoken_text, profile=profile)
-    if profile.cleanup_enabled:
-        spoken_text = clean_tts_text(spoken_text)
+    spoken_text = prepare_spoken_text(visual_text or "", profile=profile)
     return spoken_text, profile
+
+
+def prepare_spoken_text(text: str, *, profile: VoiceProfile | None = None) -> str:
+    spoken_text = text or ""
+    if profile is not None and profile.style_enabled:
+        spoken_text = spoken_response_normalization(spoken_text, profile=profile)
+    if profile is None or profile.cleanup_enabled:
+        spoken_text = clean_tts_text(spoken_text)
+    return spoken_text
 
 
 def clean_tts_text(text: str) -> str:
@@ -189,7 +167,9 @@ def clean_tts_text(text: str) -> str:
     cleaned = _ORDERED_LIST_RE.sub("", cleaned)
     cleaned = cleaned.replace("|", ". ")
     cleaned = cleaned.replace("`", "")
+    cleaned = _replace_windows_paths(cleaned)
     cleaned = _convert_math_to_speech(cleaned)
+    cleaned = _expand_technical_pronunciations(cleaned)
     cleaned = _BOLD_ITALIC_RE.sub("", cleaned)
     cleaned = cleaned.replace(":", ". ")
     cleaned = cleaned.replace(";", ". ")
@@ -201,25 +181,44 @@ def clean_tts_text(text: str) -> str:
 
 
 def split_tts_text(text: str, *, max_chars: int = 320) -> list[str]:
+    return [segment.text for segment in build_tts_segments(text, max_chars=max_chars)]
+
+
+def build_tts_segments(text: str, *, max_chars: int = 320, profile: VoiceProfile | None = None) -> list[SpokenSegment]:
     cleaned = _normalize_spacing(text)
     if not cleaned:
         return []
     if len(cleaned) <= max_chars:
-        return [_ensure_terminal_punctuation(cleaned)]
+        single = _ensure_terminal_punctuation(cleaned)
+        return [SpokenSegment(text=single, pause_ms=_pause_for_segment(single, profile, final_segment=True), pause_kind="final_pause")]
     sentences = [segment.strip() for segment in _SENTENCE_SPLIT_RE.split(cleaned) if segment.strip()]
-    segments: list[str] = []
+    segments: list[SpokenSegment] = []
     current = ""
     for sentence in sentences:
         chunks = _split_sentence_to_chunks(sentence, max_chars=max_chars)
         for chunk in chunks:
             candidate = chunk if not current else f"{current} {chunk}"
             if current and len(candidate) > max_chars:
-                segments.append(_ensure_terminal_punctuation(current))
+                finalized = _ensure_terminal_punctuation(current)
+                segments.append(
+                    SpokenSegment(
+                        text=finalized,
+                        pause_ms=_pause_for_segment(finalized, profile),
+                        pause_kind=_pause_kind(finalized),
+                    )
+                )
                 current = chunk
                 continue
             current = candidate
     if current:
-        segments.append(_ensure_terminal_punctuation(current))
+        finalized = _ensure_terminal_punctuation(current)
+        segments.append(
+            SpokenSegment(
+                text=finalized,
+                pause_ms=_pause_for_segment(finalized, profile, final_segment=True),
+                pause_kind=_pause_kind(finalized, final_segment=True),
+            )
+        )
     return segments
 
 
@@ -231,10 +230,27 @@ def build_spoken_metadata(profile: VoiceProfile) -> dict[str, object]:
         "speaker_wav": str(profile.speaker_wav) if profile.speaker_wav is not None else None,
         "speaking_rate": profile.speaking_rate,
         "pause_ms": profile.pause_ms,
+        "short_pause_ms": profile.short_pause_ms,
+        "medium_pause_ms": profile.medium_pause_ms,
+        "final_pause_ms": profile.final_pause_ms,
+        "pause_style": profile.pause_style,
         "formality_level": profile.formality_level,
         "language_style": profile.language_style,
         "tone": profile.tone,
     }
+
+
+def standard_spoken_phrase(context: str) -> str:
+    normalized = (context or "").strip().casefold()
+    mapping = {
+        "task_start": "Entendido. Iniciando operacion.",
+        "analysis": "Analizando contexto.",
+        "success": "Operacion completada.",
+        "error": "No pude completar la operacion.",
+        "wait": "Procesando solicitud.",
+        "confirm": "Confirmado.",
+    }
+    return mapping.get(normalized, "Confirmado.")
 
 
 def _normalize_spacing(text: str) -> str:
@@ -259,18 +275,32 @@ def _formalize_sentence(text: str, *, level: int) -> str:
     updated = text.strip()
     if not updated:
         return ""
-    if level >= 4 and not re.match(r"^(entendido|procediendo|presentando|confirmado)\b", updated, flags=re.IGNORECASE):
+    if re.search(r"\b(no pude|error|fallo)\b", updated, flags=re.IGNORECASE):
+        return "No pude completar la operacion."
+    if re.search(r"\b(listo|completado|terminado|hecho)\b", updated, flags=re.IGNORECASE):
+        return "Operacion completada."
+    if re.search(r"\b(analizando|revisando|evaluando)\b", updated, flags=re.IGNORECASE):
+        return "Analizando contexto."
+    if level >= 4 and not re.match(
+        r"^(entendido|procediendo|presentando|confirmado|operacion|analizando|procesando|no pude)\b",
+        updated,
+        flags=re.IGNORECASE,
+    ):
         updated = f"Entendido. {updated[0].upper()}{updated[1:]}" if updated else "Entendido."
     elif updated:
         updated = updated[0].upper() + updated[1:]
-    updated = re.sub(r"\b(checa|ve|haz|pon)\b", lambda match: {
-        "checa": "revise",
-        "ve": "observe",
-        "haz": "ejecute",
-        "pon": "establezca",
-    }.get(match.group(0).casefold(), match.group(0)), updated, flags=re.IGNORECASE)
+    updated = re.sub(
+        r"\b(checa|ve|haz|pon)\b",
+        lambda match: {
+            "checa": "revise",
+            "ve": "observe",
+            "haz": "ejecute",
+            "pon": "establezca",
+        }.get(match.group(0).casefold(), match.group(0)),
+        updated,
+        flags=re.IGNORECASE,
+    )
     updated = updated.replace("funciona asi", "funciona de la siguiente manera")
-    updated = updated.replace("funciona así", "funciona de la siguiente manera")
     return _normalize_spacing(updated)
 
 
@@ -320,6 +350,60 @@ def _convert_math_to_speech(text: str) -> str:
     for source, target in _SYMBOL_REPLACEMENTS:
         updated = updated.replace(source, target)
     return updated
+
+
+def _expand_technical_pronunciations(text: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        value = re.sub(r"[\s-]+", " ", match.group(0)).strip().casefold()
+        return _TECHNICAL_PRONUNCIATIONS.get(value, match.group(0))
+
+    return _TECH_TOKEN_RE.sub(_replace, text)
+
+
+def _replace_windows_paths(text: str) -> str:
+    def _replace(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        parts = [part for part in raw.split("\\") if part]
+        if not parts:
+            return "ruta de Windows"
+        tail = parts[-2:] if len(parts) > 2 else parts[-1:]
+        spoken_tail = ", ".join(_speak_path_component(part) for part in tail if part)
+        drive = raw[:1].upper()
+        if spoken_tail:
+            return f"ruta de Windows {drive}, {spoken_tail}"
+        return f"ruta de Windows {drive}"
+
+    return _WINDOWS_PATH_RE.sub(_replace, text)
+
+
+def _speak_path_component(component: str) -> str:
+    name = component.replace("_", " ").replace("-", " ")
+    if "." in name:
+        segments = [segment for segment in name.split(".") if segment]
+        return " punto ".join(segments)
+    return name
+
+
+def _pause_for_segment(text: str, profile: VoiceProfile | None, final_segment: bool = False) -> int:
+    if profile is None:
+        if final_segment:
+            return 320
+        if "," in text or ";" in text or ":" in text:
+            return 220
+        return 120
+    if final_segment:
+        return profile.final_pause_ms
+    if "," in text or ";" in text or ":" in text:
+        return profile.medium_pause_ms
+    return profile.short_pause_ms
+
+
+def _pause_kind(text: str, final_segment: bool = False) -> str:
+    if final_segment:
+        return "final_pause"
+    if "," in text or ";" in text or ":" in text:
+        return "medium_pause"
+    return "short_pause"
 
 
 def _ensure_terminal_punctuation(text: str) -> str:

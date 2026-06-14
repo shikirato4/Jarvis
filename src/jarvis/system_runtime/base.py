@@ -134,6 +134,16 @@ class SystemOpenPolicy(JarvisBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SystemFileOperationRequest(JarvisBaseModel):
+    path: str | None = None
+    destination_path: str | None = None
+    new_name: str | None = None
+    overwrite: bool = False
+    recursive: bool = False
+    dry_run: bool = False
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class SystemSearchRequest(JarvisBaseModel):
     resource: ResourceQuery
     metadata: dict[str, Any] = Field(default_factory=dict)

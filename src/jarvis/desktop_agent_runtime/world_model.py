@@ -17,6 +17,8 @@ class DesktopWorldModelBuilder:
             mission_id=mission_id,
             goal_id=f"goal-{uuid4().hex[:8]}",
             current_goal=goal,
+            autonomy_mode=payload.autonomy_mode,
+            source_surface=payload.source_surface,
             phase=DesktopAgentPhase.PENDING,
             target_application=target_application,
             metadata={

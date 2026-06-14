@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from time import perf_counter
+
 from .views import HudAlertView, HudDashboardView, HudRuntimePanel, HudServiceCard
 
 
 class HudDashboardComposer:
+    _CACHE_TTL_SECONDS = 0.75
+
     def __init__(self, *, runtime_service, ops_runtime, mission_controller, timeline_composer, research_runtime, writing_runtime, indexing_runtime, unity_runtime, system_runtime, vision_runtime, voice_runtime) -> None:
         self._runtime = runtime_service
         self._ops = ops_runtime
@@ -16,22 +20,28 @@ class HudDashboardComposer:
         self._system = system_runtime
         self._vision = vision_runtime
         self._voice = voice_runtime
+        self._cached_view: HudDashboardView | None = None
+        self._cached_at = 0.0
 
     def build(self) -> HudDashboardView:
+        now = perf_counter()
+        if self._cached_view is not None and (now - self._cached_at) < self._CACHE_TTL_SECONDS:
+            return self._cached_view
         snapshot = self._runtime.snapshot(include_history=True)
         ops_snapshot = self._ops.snapshot()
         resources = self._ops.resources()
         operations = self._ops.operations()
         missions = self._missions.missions()
+        service_details = {service.name: service.details for service in snapshot.services}
         runtime_status = {
-            "voice": self._voice.status(),
-            "vision": self._vision.status(),
-            "system": self._system.status(),
-            "unity": self._unity.status(),
-            "research": self._research.status(),
-            "writing": self._writing.status(),
-            "indexing": self._indexing.status(),
-            "ops": self._ops.status(),
+            "voice": service_details.get("voice_runtime") or self._voice.status(),
+            "vision": service_details.get("vision_runtime") or self._vision.status(),
+            "system": service_details.get("system_runtime") or self._system.status(),
+            "unity": service_details.get("unity_runtime") or self._unity.status(),
+            "research": service_details.get("research_runtime") or self._research.status(),
+            "writing": service_details.get("writing_runtime") or self._writing.status(),
+            "indexing": service_details.get("indexing_runtime") or self._indexing.status(),
+            "ops": service_details.get("ops_runtime") or self._ops.status(),
         }
         alerts: list[HudAlertView] = []
         for service in snapshot.services:
@@ -45,7 +55,7 @@ class HudDashboardComposer:
             alerts.append(HudAlertView(level="warning", title="Resource pressure", message=warning, source="ops_runtime"))
         if operations.get("active_count", 0):
             alerts.append(HudAlertView(level="info", title="Active operations", message=f"{operations.get('active_count', 0)} operations in flight", source="ops_runtime"))
-        return HudDashboardView(
+        view = HudDashboardView(
             app_name=snapshot.app_name,
             environment=snapshot.environment,
             mode=snapshot.mode.model_dump(mode="json"),
@@ -63,6 +73,9 @@ class HudDashboardComposer:
             runtimes=self._runtime_panels(snapshot, runtime_status=runtime_status, operations=operations, resources=resources),
             timeline_preview=self._timeline.build(limit=12),
         )
+        self._cached_view = view
+        self._cached_at = perf_counter()
+        return view
 
     def _runtime_panels(self, snapshot, *, runtime_status: dict[str, dict[str, object]], operations: dict[str, object], resources: dict[str, object]) -> list[HudRuntimePanel]:
         recent_tools = [item.model_dump(mode="json") for item in snapshot.recent_tool_invocations[:5]]

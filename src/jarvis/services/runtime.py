@@ -49,7 +49,7 @@ from jarvis.unity_runtime.base import (
 from jarvis.unity_runtime.service import UnityRuntimeService
 from jarvis.ui_automation.base import CancellationRequest, ClickRequest, ClickVisualTargetRequest, CloseWindowRequest, FocusWindowRequest, MoveMouseRequest, ShortcutRequest, WriteTextRequest
 from jarvis.ui_automation.service import UIAutomationService
-from jarvis.system_runtime.base import SystemOpenRequest, SystemResolveRequest, SystemSearchRequest
+from jarvis.system_runtime.base import SystemFileOperationRequest, SystemOpenRequest, SystemResolveRequest, SystemSearchRequest
 from jarvis.desktop_agent_runtime import DesktopAgentMissionRequest
 from jarvis.system_runtime.service import SystemRuntimeService
 from jarvis.vision_runtime.base import ElementLocationRequest, OCRRequest, ScreenCaptureRequest, TextLocationRequest, UIAwarenessRequest, VisionAnalysisRequest
@@ -183,6 +183,10 @@ class JarvisRuntimeService(RuntimeServiceContract):
         self._ensure_started()
         return self._model_service.infer(ModelRequest.model_validate(request))
 
+    def stream_model(self, request: ModelRequest | dict[str, Any], *, cancel_check=None):
+        self._ensure_started()
+        yield from self._model_service.stream(ModelRequest.model_validate(request), cancel_check=cancel_check)
+
     def model_health(self):
         self._ensure_started()
         return self._model_service.health()
@@ -306,6 +310,30 @@ class JarvisRuntimeService(RuntimeServiceContract):
     def system_reveal(self, path: str, *, dry_run: bool = False, metadata: dict[str, Any] | None = None):
         self._ensure_started()
         return self._system_runtime_service.reveal(path, dry_run=dry_run, metadata=metadata)
+
+    def system_create_file(self, request: SystemFileOperationRequest | dict[str, Any]):
+        self._ensure_started()
+        return self._system_runtime_service.create_file(SystemFileOperationRequest.model_validate(request))
+
+    def system_create_folder(self, request: SystemFileOperationRequest | dict[str, Any]):
+        self._ensure_started()
+        return self._system_runtime_service.create_folder(SystemFileOperationRequest.model_validate(request))
+
+    def system_copy_file(self, request: SystemFileOperationRequest | dict[str, Any]):
+        self._ensure_started()
+        return self._system_runtime_service.copy_file(SystemFileOperationRequest.model_validate(request))
+
+    def system_move_file(self, request: SystemFileOperationRequest | dict[str, Any]):
+        self._ensure_started()
+        return self._system_runtime_service.move_file(SystemFileOperationRequest.model_validate(request))
+
+    def system_rename_file(self, request: SystemFileOperationRequest | dict[str, Any]):
+        self._ensure_started()
+        return self._system_runtime_service.rename_file(SystemFileOperationRequest.model_validate(request))
+
+    def system_resolve_location(self, label: str):
+        self._ensure_started()
+        return self._system_runtime_service.resolve_location(label)
 
     def unity_status(self) -> dict[str, Any]:
         self._ensure_started()

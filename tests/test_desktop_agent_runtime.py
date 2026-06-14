@@ -12,10 +12,12 @@ from jarvis.config import Settings
 from jarvis.desktop import build_desktop_runtime
 from jarvis.desktop_agent_runtime.memory import DesktopAgentMemoryManager
 from jarvis.desktop_agent_runtime.models import (
+    DesktopAgentAutonomyMode,
     DesktopAgentModelDecision,
     DesktopAgentModelSuggestion,
     DesktopAgentPhase,
     DesktopAgentRiskLevel,
+    DesktopAgentSourceSurface,
     DesktopAgentStep,
     DesktopAgentVerificationResult,
     DesktopStepActionType,
@@ -39,6 +41,11 @@ def _settings(tmp_path: Path) -> Settings:
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
         system_search_roots=(tmp_path,),
+        system_known_locations={
+            "documents": str(tmp_path / "Documents"),
+            "downloads": str(tmp_path / "Downloads"),
+            "desktop": str(tmp_path / "Desktop"),
+        },
     )
 
 
@@ -61,6 +68,48 @@ def test_desktop_agent_planner_generates_multistep_browser_plan(tmp_path: Path) 
         "type-query",
         "submit-query",
     ]
+
+
+def test_desktop_agent_planner_generates_screen_read_plan(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    world = DesktopWorldModelBuilder().create({"goal": "que hay en mi pantalla"})
+    plan = DesktopAgentPlanner(settings).plan(world)
+    assert plan.strategy == "grounded_screen_read"
+    assert [step.action_type for step in plan.steps] == [DesktopStepActionType.OBSERVE_SCREEN]
+
+
+def test_desktop_agent_planner_generates_visual_click_plan(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    world = DesktopWorldModelBuilder().create({"goal": "haz click en el boton que diga Enviar en word"})
+    plan = DesktopAgentPlanner(settings).plan(world)
+    assert [step.action_type for step in plan.steps] == [DesktopStepActionType.FOCUS_WINDOW, DesktopStepActionType.CLICK_TARGET]
+    assert plan.strategy == "grounded_visual_click"
+
+
+def test_desktop_agent_planner_generates_form_fill_plan(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    world = DesktopWorldModelBuilder().create({"goal": "llena este formulario en word: nombre=Ana, correo=ana@test.com, enviar"})
+    plan = DesktopAgentPlanner(settings).plan(world)
+    assert plan.strategy == "grounded_form_fill"
+    assert any(step.step_id == "focus-field-1" for step in plan.steps)
+    assert any(step.step_id == "write-field-2" for step in plan.steps)
+    assert any(step.action_type == DesktopStepActionType.CLICK_TARGET for step in plan.steps)
+
+
+def test_desktop_agent_planner_generates_create_folder_plan(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    world = DesktopWorldModelBuilder().create({"goal": "crea una carpeta llamada Fisica en Documentos"})
+    plan = DesktopAgentPlanner(settings).plan(world)
+    assert plan.strategy == "grounded_create_folder"
+    assert [step.action_type for step in plan.steps] == [DesktopStepActionType.CREATE_FOLDER]
+
+
+def test_desktop_agent_planner_generates_open_explorer_plan(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    world = DesktopWorldModelBuilder().create({"goal": "abre explorador"})
+    plan = DesktopAgentPlanner(settings).plan(world)
+    assert plan.strategy == "grounded_open_explorer"
+    assert [step.action_type for step in plan.steps] == [DesktopStepActionType.OPEN_APPLICATION, DesktopStepActionType.FOCUS_WINDOW]
 
 
 def test_desktop_agent_recovery_retries_write_step(tmp_path: Path) -> None:
@@ -236,6 +285,55 @@ def test_desktop_agent_run_executes_and_verifies_browser_search(tmp_path: Path) 
         app.stop()
 
 
+def test_desktop_agent_run_executes_visual_click(tmp_path: Path) -> None:
+    app = build_application(_settings(tmp_path))
+    app.start()
+    try:
+        backend = app.ui_automation_service._backend  # noqa: SLF001
+        receipt = app.runtime_service.desktop_agent_run({"goal": "haz click en el boton guardar en word"})
+        assert receipt.success is True
+        assert receipt.status == DesktopAgentPhase.COMPLETED
+        assert backend.clicks[-1] == ("left", False)
+        assert any(item.action_type == DesktopStepActionType.CLICK_TARGET for item in receipt.plan.steps)
+    finally:
+        app.stop()
+
+
+def test_desktop_agent_run_reads_screen_with_real_vision_runtime(tmp_path: Path) -> None:
+    app = build_application(_settings(tmp_path))
+    app.start()
+    try:
+        receipt = app.runtime_service.desktop_agent_run({"goal": "que hay en mi pantalla"})
+        assert receipt.success is True
+        assert receipt.status == DesktopAgentPhase.COMPLETED
+        assert receipt.plan is not None
+        assert receipt.plan.strategy == "grounded_screen_read"
+        assert receipt.step_receipts[0].action_type == DesktopStepActionType.OBSERVE_SCREEN
+        assert receipt.world_state.visible_text
+    finally:
+        app.stop()
+
+
+def test_desktop_agent_run_tracks_agent_loop_metadata(tmp_path: Path) -> None:
+    app = build_application(_settings(tmp_path))
+    app.start()
+    try:
+        receipt = app.runtime_service.desktop_agent_run(
+            {
+                "goal": "abre chrome y busca youtube",
+                "autonomy_mode": DesktopAgentAutonomyMode.ACTIVE,
+                "source_surface": DesktopAgentSourceSurface.API,
+            }
+        )
+        assert receipt.world_state.loop_iteration >= 1
+        assert receipt.world_state.observe_count >= 2
+        assert receipt.world_state.verify_count >= 1
+        assert receipt.mission_snapshot["autonomy_mode"] == "active"
+        assert receipt.mission_snapshot["source_surface"] == "api"
+    finally:
+        app.stop()
+
+
 def test_desktop_agent_run_uses_model_replan_after_failure(tmp_path: Path) -> None:
     app = build_application(_settings(tmp_path))
     app.start()
@@ -318,6 +416,60 @@ def test_desktop_agent_run_handles_file_search_and_open(tmp_path: Path) -> None:
         app.stop()
 
 
+def test_desktop_agent_run_creates_folder_and_file(tmp_path: Path) -> None:
+    app = build_application(_settings(tmp_path))
+    app.start()
+    try:
+        folder_receipt = app.runtime_service.desktop_agent_run({"goal": "crea una carpeta llamada Fisica en Documentos"})
+        file_receipt = app.runtime_service.desktop_agent_run({"goal": "crea un archivo llamado notas.txt en Documentos"})
+        assert folder_receipt.success is True
+        assert folder_receipt.world_state.active_path and Path(folder_receipt.world_state.active_path).exists()
+        assert file_receipt.success is True
+        assert file_receipt.world_state.active_path and Path(file_receipt.world_state.active_path).exists()
+    finally:
+        app.stop()
+
+
+def test_desktop_agent_run_copies_moves_and_renames_file(tmp_path: Path) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("jarvis", encoding="utf-8")
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+        system_backend_kind="in_memory",
+        system_search_roots=(tmp_path, tmp_path / "Downloads", tmp_path / "Documents"),
+        system_known_locations={
+            "documents": str(tmp_path / "Documents"),
+            "downloads": str(tmp_path / "Downloads"),
+            "desktop": str(tmp_path / "Desktop"),
+        },
+    )
+    app = build_application(settings)
+    app.start()
+    try:
+        copy_receipt = app.runtime_service.desktop_agent_run({"goal": "copia archivo notes.txt a Descargas"})
+        assert copy_receipt.success is True
+        copied_path = Path(copy_receipt.world_state.active_path or "")
+        assert copied_path.exists()
+
+        move_receipt = app.runtime_service.desktop_agent_run({"goal": f"mueve archivo {copied_path.name} a Documentos"})
+        assert move_receipt.success is True
+        moved_path = Path(move_receipt.world_state.active_path or "")
+        assert moved_path.exists()
+
+        rename_receipt = app.runtime_service.desktop_agent_run({"goal": f"renombra archivo {moved_path.name} a archive.txt"})
+        assert rename_receipt.success is True
+        renamed_path = Path(rename_receipt.world_state.active_path or "")
+        assert renamed_path.exists()
+        assert renamed_path.name == "archive.txt"
+    finally:
+        app.stop()
+
+
 def test_desktop_agent_observer_collects_grounded_context(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     app = build_application(settings)
@@ -334,6 +486,43 @@ def test_desktop_agent_observer_collects_grounded_context(tmp_path: Path) -> Non
         assert observed.last_observation_summary
         assert any(signal.startswith("window_title:") for signal in observed.context_signals)
         assert "selection_available" not in observed.context_signals or observed.selection_text is not None
+    finally:
+        app.stop()
+
+
+def test_desktop_agent_observer_reports_visual_failure_reason(tmp_path: Path) -> None:
+    app = build_application(_settings(tmp_path))
+    app.start()
+    try:
+        observer = DesktopAgentObserver(
+            runtime=app.runtime_service,
+            ui_backend=app.ui_automation_service._backend,  # noqa: SLF001
+            memory=DesktopAgentMemoryManager(),
+        )
+        world = DesktopWorldModelBuilder().create({"goal": "que hay en mi pantalla"})
+        original_describe = app.runtime_service.vision_describe_active_window
+        original_awareness = app.runtime_service.vision_ui_awareness
+
+        def _fail_describe():
+            raise RuntimeError("active window capture unavailable")
+
+        def _fail_awareness(_request):
+            raise RuntimeError("screen capture unavailable")
+
+        app.runtime_service.vision_describe_active_window = _fail_describe  # type: ignore[method-assign]
+        app.runtime_service.vision_ui_awareness = _fail_awareness  # type: ignore[method-assign]
+        try:
+            try:
+                observer.observe(world, phase=DesktopAgentPhase.OBSERVING)
+            except RuntimeError as exc:
+                assert "desktop observation failed" in str(exc)
+                assert "active window capture unavailable" in str(exc)
+                assert "screen capture unavailable" in str(exc)
+            else:
+                raise AssertionError("observer.observe should have failed")
+        finally:
+            app.runtime_service.vision_describe_active_window = original_describe  # type: ignore[method-assign]
+            app.runtime_service.vision_ui_awareness = original_awareness  # type: ignore[method-assign]
     finally:
         app.stop()
 
@@ -370,6 +559,7 @@ def test_desktop_agent_runtime_status_exposes_latest_goal_and_observation(tmp_pa
         assert status["latest_goal"] == "abre chrome y busca youtube"
         assert status["latest_observation"]
         assert status["latest_step"]
+        assert "metrics" in status
     finally:
         app.stop()
 
@@ -382,6 +572,16 @@ def test_desktop_chat_routes_goal_to_desktop_agent(tmp_path: Path) -> None:
         assert response.raw_result.get("status") == "completed"
         assert response.panel_snapshot is not None
         assert response.panel_snapshot.missions
+    finally:
+        app.stop()
+
+
+def test_desktop_chat_routes_visual_click_to_desktop_agent(tmp_path: Path) -> None:
+    app, desktop = build_desktop_runtime(_settings(tmp_path))
+    try:
+        response = desktop.send_chat("haz click en el boton guardar en word")
+        assert response.raw_result.get("status") == "completed"
+        assert response.raw_result.get("mission_snapshot", {}).get("source_surface") == "desktop_chat"
     finally:
         app.stop()
 
@@ -436,6 +636,14 @@ def test_desktop_agent_pause_resume_abort_and_list(tmp_path: Path) -> None:
         aborted = app.runtime_service.desktop_agent_abort(mission_id)
         assert aborted.status == DesktopAgentPhase.ABORTED
         assert aborted.abort_reason
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            latest = app.runtime_service.desktop_agent_get(mission_id)
+            if latest.status == DesktopAgentPhase.ABORTED:
+                break
+            time.sleep(0.05)
+        latest = app.runtime_service.desktop_agent_get(mission_id)
+        assert latest.status == DesktopAgentPhase.ABORTED
     finally:
         app.stop()
 

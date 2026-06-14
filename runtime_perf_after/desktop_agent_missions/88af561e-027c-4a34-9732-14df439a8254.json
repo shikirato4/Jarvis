@@ -1,0 +1,4498 @@
+{
+  "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+  "goal": "abre chrome y busca youtube",
+  "status": "completed",
+  "success": true,
+  "summary": "Abriendo chrome. Navegando a youtube. Observacion final: ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube.",
+  "current_phase": "completed",
+  "current_subtask": "submit-query",
+  "current_subtask_label": "Enviar busqueda",
+  "plan": {
+    "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+    "strategy": "grounded_browser_search",
+    "steps": [
+      {
+        "step_id": "open-browser",
+        "title": "Abrir navegador",
+        "action_type": "open_application",
+        "precondition": "desktop runtime available and observation refreshed",
+        "action": "Abrir chrome.",
+        "verification": {
+          "active_window_contains": "chrome",
+          "process_name_contains": "chrome",
+          "visible_text_contains": [],
+          "visible_text_not_contains": [],
+          "required_context_signals": [],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "subgoal": "abrir chrome",
+        "success_label": "chrome abierto",
+        "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+        "alternatives": [
+          "focus existing browser",
+          "search same process window"
+        ],
+        "payload": {
+          "application": "chrome"
+        },
+        "risk_level": "low",
+        "retries": 0,
+        "max_retries": 1,
+        "verification_status": "passed"
+      },
+      {
+        "step_id": "focus-browser",
+        "title": "Enfocar navegador",
+        "action_type": "focus_window",
+        "precondition": "desktop runtime available and observation refreshed",
+        "action": "Enfocar chrome.",
+        "verification": {
+          "active_window_contains": "chrome",
+          "process_name_contains": "chrome",
+          "visible_text_contains": [],
+          "visible_text_not_contains": [],
+          "required_context_signals": [
+            "browser_active"
+          ],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "subgoal": "asegurar que el navegador correcto esta activo",
+        "success_label": "navegador en foco",
+        "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+        "alternatives": [
+          "search another browser window"
+        ],
+        "payload": {
+          "target_window": "chrome"
+        },
+        "risk_level": "low",
+        "retries": 0,
+        "max_retries": 1,
+        "verification_status": "passed"
+      },
+      {
+        "step_id": "focus-address-bar",
+        "title": "Enfocar barra",
+        "action_type": "hotkey",
+        "precondition": "desktop runtime available and observation refreshed",
+        "action": "Llevar el foco a la barra de direcciones o busqueda.",
+        "verification": {
+          "active_window_contains": "chrome",
+          "process_name_contains": null,
+          "visible_text_contains": [],
+          "visible_text_not_contains": [],
+          "required_context_signals": [
+            "browser_active"
+          ],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "subgoal": "llevar el foco al campo de busqueda",
+        "success_label": "foco de busqueda preparado",
+        "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+        "alternatives": [
+          "retry with explicit browser refocus"
+        ],
+        "payload": {
+          "keys": [
+            "ctrl",
+            "l"
+          ],
+          "target_window": "chrome"
+        },
+        "risk_level": "low",
+        "retries": 0,
+        "max_retries": 1,
+        "verification_status": "passed"
+      },
+      {
+        "step_id": "type-query",
+        "title": "Escribir busqueda",
+        "action_type": "write_text",
+        "precondition": "desktop runtime available and observation refreshed",
+        "action": "Escribir 'youtube'.",
+        "verification": {
+          "active_window_contains": "chrome",
+          "process_name_contains": null,
+          "visible_text_contains": [
+            "youtube"
+          ],
+          "visible_text_not_contains": [],
+          "required_context_signals": [],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "subgoal": "colocar la consulta en el campo visible",
+        "success_label": "consulta visible",
+        "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+        "alternatives": [
+          "reobserve and retry",
+          "refocus before write"
+        ],
+        "payload": {
+          "text": "youtube",
+          "target_window": "chrome"
+        },
+        "risk_level": "low",
+        "retries": 0,
+        "max_retries": 1,
+        "verification_status": "passed"
+      },
+      {
+        "step_id": "submit-query",
+        "title": "Enviar busqueda",
+        "action_type": "hotkey",
+        "precondition": "desktop runtime available and observation refreshed",
+        "action": "Enviar la busqueda.",
+        "verification": {
+          "active_window_contains": "chrome",
+          "process_name_contains": null,
+          "visible_text_contains": [
+            "youtube"
+          ],
+          "visible_text_not_contains": [],
+          "required_context_signals": [
+            "browser_active"
+          ],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "subgoal": "ejecutar la busqueda y mantener evidencia de contexto",
+        "success_label": "busqueda enviada",
+        "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+        "alternatives": [
+          "retry after fresh observation",
+          "replan if UI changed"
+        ],
+        "payload": {
+          "keys": [
+            "enter"
+          ],
+          "target_window": "chrome"
+        },
+        "risk_level": "low",
+        "retries": 0,
+        "max_retries": 1,
+        "verification_status": "passed"
+      }
+    ],
+    "created_at": "2026-04-26T18:58:50.560480Z",
+    "metadata": {
+      "goal": "abre chrome y busca youtube",
+      "active_window": "Editor",
+      "target_application": "chrome",
+      "source": "heuristic"
+    }
+  },
+  "world_state": {
+    "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+    "goal_id": "goal-2be38d75",
+    "current_goal": "abre chrome y busca youtube",
+    "autonomy_mode": "assistive",
+    "source_surface": "unknown",
+    "current_subgoal": "ejecutar la busqueda y mantener evidencia de contexto",
+    "phase": "completed",
+    "current_step_id": "submit-query",
+    "known_windows": [
+      {
+        "handle": "0x5",
+        "title": "Chrome",
+        "class_name": "FakeChrome",
+        "process_id": 5,
+        "process_name": "chrome.exe",
+        "rect": {}
+      },
+      {
+        "handle": "0x1",
+        "title": "Editor",
+        "class_name": "FakeEditor",
+        "process_id": 1,
+        "process_name": "editor.exe",
+        "rect": {}
+      },
+      {
+        "handle": "0x2",
+        "title": "Word",
+        "class_name": "FakeWord",
+        "process_id": 2,
+        "process_name": "WINWORD.EXE",
+        "rect": {}
+      },
+      {
+        "handle": "0x3",
+        "title": "Notepad",
+        "class_name": "FakeNotepad",
+        "process_id": 3,
+        "process_name": "notepad.exe",
+        "rect": {}
+      },
+      {
+        "handle": "0x4",
+        "title": "VSCode",
+        "class_name": "FakeVSCode",
+        "process_id": 4,
+        "process_name": "Code.exe",
+        "rect": {}
+      },
+      {
+        "handle": "0x6",
+        "title": "Opera GX",
+        "class_name": "FakeOpera",
+        "process_id": 6,
+        "process_name": "launcher.exe",
+        "rect": {}
+      },
+      {
+        "handle": "0x7",
+        "title": "Calculadora",
+        "class_name": "FakeCalc",
+        "process_id": 7,
+        "process_name": "calc.exe",
+        "rect": {}
+      },
+      {
+        "handle": "0x8",
+        "title": "Explorador de archivos",
+        "class_name": "FakeExplorer",
+        "process_id": 8,
+        "process_name": "explorer.exe",
+        "rect": {}
+      }
+    ],
+    "active_window": {
+      "handle": "0x5",
+      "title": "Chrome",
+      "class_name": "FakeChrome",
+      "process_id": 5,
+      "process_name": "chrome.exe",
+      "rect": {}
+    },
+    "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar\nyoutube",
+    "selection_text": "youtube",
+    "clipboard_text": "youtube",
+    "context_signals": [
+      "browser_active",
+      "button_count:1",
+      "content:buscar",
+      "content:youtube",
+      "editable_input_visible",
+      "goal_evidence:chrome",
+      "goal_evidence:youtube",
+      "input_count:1",
+      "known_window:calculadora",
+      "known_window:chrome",
+      "known_window:editor",
+      "known_window:explorador de archivos",
+      "known_window:notepad",
+      "known_window:opera gx",
+      "known_window:vscode",
+      "known_window:word",
+      "process:chrome.exe",
+      "search_field_visible",
+      "selection_available",
+      "target:boton guardar",
+      "target:campo buscar",
+      "target:chrome",
+      "target:chrome editor",
+      "target_count:4",
+      "target_kind:button",
+      "target_kind:input",
+      "target_kind:text",
+      "target_kind:window",
+      "window_title:chrome"
+    ],
+    "detected_targets": [
+      {
+        "label": "Chrome editor",
+        "kind": "text",
+        "confidence": 0.95,
+        "metadata": {}
+      },
+      {
+        "label": "Boton Guardar",
+        "kind": "button",
+        "confidence": 0.95,
+        "metadata": {}
+      },
+      {
+        "label": "Campo Buscar",
+        "kind": "input",
+        "confidence": 0.95,
+        "metadata": {}
+      },
+      {
+        "label": "Chrome",
+        "kind": "window",
+        "confidence": 0.95,
+        "metadata": {
+          "class_name": "FakeChrome",
+          "process_id": 5
+        }
+      }
+    ],
+    "recent_actions": [
+      {
+        "step_id": "open-browser",
+        "action_type": "open_application",
+        "status": "executed",
+        "detail": "Abrir chrome.",
+        "receipt": {
+          "correlation_id": "09517a2b-9fa2-4a54-9edc-e0fc6ce8287a",
+          "operation_name": "system.open",
+          "success": true,
+          "status": "launched",
+          "message": "system target opened",
+          "resolved_target": {
+            "target_id": "chrome",
+            "kind": "application",
+            "display_name": "Google Chrome",
+            "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "uri": null,
+            "command": [],
+            "arguments": [],
+            "association": {
+              "target_kind": "application",
+              "handler_kind": "executable",
+              "handler_name": "Google Chrome",
+              "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "supports_open": true,
+              "supports_reveal": false,
+              "warnings": [],
+              "metadata": {}
+            },
+            "sensitivity": "high",
+            "resolution_status": "resolved",
+            "ambiguity_candidates": [],
+            "resolution_confidence": 0.0,
+            "warnings": [],
+            "metadata": {
+              "canonical_app_id": "chrome",
+              "aliases": [
+                "chrome",
+                "google chrome"
+              ]
+            }
+          },
+          "association": {
+            "target_kind": "application",
+            "handler_kind": "executable",
+            "handler_name": "Google Chrome",
+            "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "supports_open": true,
+            "supports_reveal": false,
+            "warnings": [],
+            "metadata": {}
+          },
+          "confirmation_required": false,
+          "sensitivity": "high",
+          "warnings": [],
+          "data": {
+            "target": {
+              "target_id": "chrome",
+              "kind": "application",
+              "display_name": "Google Chrome",
+              "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "uri": null,
+              "command": [],
+              "arguments": [],
+              "association": {
+                "target_kind": "application",
+                "handler_kind": "executable",
+                "handler_name": "Google Chrome",
+                "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "supports_open": true,
+                "supports_reveal": false,
+                "warnings": [],
+                "metadata": {}
+              },
+              "sensitivity": "high",
+              "resolution_status": "resolved",
+              "ambiguity_candidates": [],
+              "resolution_confidence": 0.0,
+              "warnings": [],
+              "metadata": {
+                "canonical_app_id": "chrome",
+                "aliases": [
+                  "chrome",
+                  "google chrome"
+                ]
+              }
+            },
+            "mode": "launch_application",
+            "dry_run": false
+          },
+          "metadata": {
+            "approved": true,
+            "source": "desktop_agent",
+            "policy_tags": [
+              "kind:application",
+              "executable",
+              "launch_mode"
+            ]
+          },
+          "started_at": "2026-04-26T18:58:50.565574Z",
+          "finished_at": "2026-04-26T18:58:50.575759Z",
+          "focus": {
+            "correlation_id": "runtime-ui-focus",
+            "operation_name": "focus_window",
+            "risk_level": "medium",
+            "success": true,
+            "status": "executed",
+            "message": "window focused",
+            "active_window": {
+              "handle": "0x5",
+              "title": "Chrome",
+              "class_name": "FakeChrome",
+              "process_id": 5,
+              "process_name": "chrome.exe",
+              "rect": {}
+            },
+            "confirmation_required": false,
+            "security_decision": "allowed",
+            "data": {
+              "target": "chrome",
+              "trusted_mode_bypass": false,
+              "verified_focus": true
+            },
+            "started_at": "2026-04-26T18:58:50.576002Z",
+            "finished_at": "2026-04-26T18:58:50.576305Z"
+          },
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "request_payload": {
+            "application": "chrome"
+          }
+        },
+        "created_at": "2026-04-26T18:58:50.576677Z"
+      },
+      {
+        "step_id": "focus-browser",
+        "action_type": "focus_window",
+        "status": "executed",
+        "detail": "Enfocar chrome.",
+        "receipt": {
+          "correlation_id": "runtime-ui-focus",
+          "operation_name": "focus_window",
+          "risk_level": "medium",
+          "success": true,
+          "status": "executed",
+          "message": "window focused",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "target": "chrome",
+            "trusted_mode_bypass": false,
+            "verified_focus": true
+          },
+          "started_at": "2026-04-26T18:58:50.591902Z",
+          "finished_at": "2026-04-26T18:58:50.592182Z",
+          "request_payload": {
+            "target_window": "chrome"
+          }
+        },
+        "created_at": "2026-04-26T18:58:50.592471Z"
+      },
+      {
+        "step_id": "focus-address-bar",
+        "action_type": "hotkey",
+        "status": "executed",
+        "detail": "Llevar el foco a la barra de direcciones o busqueda.",
+        "receipt": {
+          "correlation_id": "runtime-ui-hotkey",
+          "operation_name": "keyboard_shortcut",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "keyboard shortcut executed",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "trusted_mode_bypass": false
+          },
+          "started_at": "2026-04-26T18:58:50.600299Z",
+          "finished_at": "2026-04-26T18:58:50.600617Z",
+          "request_payload": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "target_window": "chrome"
+          }
+        },
+        "created_at": "2026-04-26T18:58:50.601074Z"
+      },
+      {
+        "step_id": "type-query",
+        "action_type": "write_text",
+        "status": "executed",
+        "detail": "Escribir 'youtube'.",
+        "receipt": {
+          "correlation_id": "desktop-agent-88af561e-027c-4a34-9732-14df439a8254-type-query",
+          "operation_name": "write_text",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "text inserted into the active window",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "mode": "copilot",
+            "block_count": 1,
+            "text_length": 7,
+            "trusted_mode_bypass": false,
+            "verified_focus": "Chrome"
+          },
+          "started_at": "2026-04-26T18:58:50.610127Z",
+          "finished_at": "2026-04-26T18:58:50.610482Z",
+          "request_payload": {
+            "text": "youtube",
+            "target_window": "chrome"
+          }
+        },
+        "created_at": "2026-04-26T18:58:50.610904Z"
+      },
+      {
+        "step_id": "submit-query",
+        "action_type": "hotkey",
+        "status": "executed",
+        "detail": "Enviar la busqueda.",
+        "receipt": {
+          "correlation_id": "runtime-ui-hotkey",
+          "operation_name": "keyboard_shortcut",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "keyboard shortcut executed",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "keys": [
+              "enter"
+            ],
+            "trusted_mode_bypass": false
+          },
+          "started_at": "2026-04-26T18:58:50.628385Z",
+          "finished_at": "2026-04-26T18:58:50.628641Z",
+          "request_payload": {
+            "keys": [
+              "enter"
+            ],
+            "target_window": "chrome"
+          }
+        },
+        "created_at": "2026-04-26T18:58:50.628877Z"
+      }
+    ],
+    "recent_observations": [
+      {
+        "phase": "observing",
+        "active_window": {
+          "handle": "0x1",
+          "title": "Editor",
+          "class_name": "FakeEditor",
+          "process_id": 1,
+          "process_name": "editor.exe",
+          "rect": {}
+        },
+        "visible_text": "Editor editor\nBoton Guardar\nCampo Buscar",
+        "selection_text": "",
+        "clipboard_text": "",
+        "detected_targets": [
+          {
+            "label": "Editor editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Editor",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeEditor",
+              "process_id": 1
+            }
+          }
+        ],
+        "context_signals": [
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:editor.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:editor",
+          "target:editor editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:editor"
+        ],
+        "summary": "ventana=Editor | texto='Editor editor Boton Guardar Campo Buscar' | objetivos=Editor editor, Boton Guardar, Campo Buscar | senales=button_count:1, content:buscar, editable_input_visible, input_count:1",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.558485+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Editor. Visible text: Editor editor; Boton Guardar; Campo Buscar; UI metadata reports active window Editor."
+        },
+        "created_at": "2026-04-26T18:58:50.558505Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+        "selection_text": "",
+        "clipboard_text": "",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.586360+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.586377Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+        "selection_text": "",
+        "clipboard_text": "",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.586360+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.586377Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+        "selection_text": "",
+        "clipboard_text": "",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.586360+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.586377Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+        "selection_text": "",
+        "clipboard_text": "",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.586360+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.586377Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+        "selection_text": "",
+        "clipboard_text": "",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.586360+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.586377Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+        "selection_text": "",
+        "clipboard_text": "",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.586360+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.586377Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar\nyoutube",
+        "selection_text": "youtube",
+        "clipboard_text": "youtube",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "content:youtube",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "goal_evidence:youtube",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "selection_available",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.620666+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.620684Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar\nyoutube",
+        "selection_text": "youtube",
+        "clipboard_text": "youtube",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "content:youtube",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "goal_evidence:youtube",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "selection_available",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.620666+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.620684Z"
+      },
+      {
+        "phase": "verifying",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar\nyoutube",
+        "selection_text": "youtube",
+        "clipboard_text": "youtube",
+        "detected_targets": [
+          {
+            "label": "Chrome editor",
+            "kind": "text",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Boton Guardar",
+            "kind": "button",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Campo Buscar",
+            "kind": "input",
+            "confidence": 0.95,
+            "metadata": {}
+          },
+          {
+            "label": "Chrome",
+            "kind": "window",
+            "confidence": 0.95,
+            "metadata": {
+              "class_name": "FakeChrome",
+              "process_id": 5
+            }
+          }
+        ],
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "content:youtube",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "goal_evidence:youtube",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "selection_available",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:chrome"
+        ],
+        "summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+        "metadata": {
+          "known_window_count": 8,
+          "observed_at": "2026-04-26T18:58:50.620666+00:00",
+          "awareness_mode": "active_window",
+          "awareness_errors": [],
+          "awareness_summary": "Active window: Chrome. Visible text: Chrome editor; Boton Guardar; Campo Buscar; UI metadata reports active window Chrome."
+        },
+        "created_at": "2026-04-26T18:58:50.620684Z"
+      }
+    ],
+    "completed_steps": [
+      "open-browser",
+      "focus-browser",
+      "focus-address-bar",
+      "type-query",
+      "submit-query"
+    ],
+    "failed_steps": [],
+    "expected_next_state": {
+      "active_window_contains": "chrome",
+      "process_name_contains": null,
+      "visible_text_contains": [
+        "youtube"
+      ],
+      "visible_text_not_contains": [],
+      "required_context_signals": [
+        "browser_active"
+      ],
+      "forbidden_context_signals": [],
+      "expected_targets": [],
+      "selection_contains": [],
+      "clipboard_contains": [],
+      "search_results_min": null,
+      "file_exists": null,
+      "folder_exists": null,
+      "path_exists": null,
+      "path_kind": null,
+      "path_contains": null,
+      "action_data_contains": {},
+      "action_success_required": true
+    },
+    "verification_status": "passed",
+    "risk_level": "low",
+    "policy_decision": "allow",
+    "current_plan": {
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "strategy": "grounded_browser_search",
+      "steps": [
+        {
+          "step_id": "open-browser",
+          "title": "Abrir navegador",
+          "action_type": "open_application",
+          "precondition": "desktop runtime available and observation refreshed",
+          "action": "Abrir chrome.",
+          "verification": {
+            "active_window_contains": "chrome",
+            "process_name_contains": "chrome",
+            "visible_text_contains": [],
+            "visible_text_not_contains": [],
+            "required_context_signals": [],
+            "forbidden_context_signals": [],
+            "expected_targets": [],
+            "selection_contains": [],
+            "clipboard_contains": [],
+            "search_results_min": null,
+            "file_exists": null,
+            "folder_exists": null,
+            "path_exists": null,
+            "path_kind": null,
+            "path_contains": null,
+            "action_data_contains": {},
+            "action_success_required": true
+          },
+          "subgoal": "abrir chrome",
+          "success_label": "chrome abierto",
+          "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+          "alternatives": [
+            "focus existing browser",
+            "search same process window"
+          ],
+          "payload": {
+            "application": "chrome"
+          },
+          "risk_level": "low",
+          "retries": 0,
+          "max_retries": 1,
+          "verification_status": "passed"
+        },
+        {
+          "step_id": "focus-browser",
+          "title": "Enfocar navegador",
+          "action_type": "focus_window",
+          "precondition": "desktop runtime available and observation refreshed",
+          "action": "Enfocar chrome.",
+          "verification": {
+            "active_window_contains": "chrome",
+            "process_name_contains": "chrome",
+            "visible_text_contains": [],
+            "visible_text_not_contains": [],
+            "required_context_signals": [
+              "browser_active"
+            ],
+            "forbidden_context_signals": [],
+            "expected_targets": [],
+            "selection_contains": [],
+            "clipboard_contains": [],
+            "search_results_min": null,
+            "file_exists": null,
+            "folder_exists": null,
+            "path_exists": null,
+            "path_kind": null,
+            "path_contains": null,
+            "action_data_contains": {},
+            "action_success_required": true
+          },
+          "subgoal": "asegurar que el navegador correcto esta activo",
+          "success_label": "navegador en foco",
+          "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+          "alternatives": [
+            "search another browser window"
+          ],
+          "payload": {
+            "target_window": "chrome"
+          },
+          "risk_level": "low",
+          "retries": 0,
+          "max_retries": 1,
+          "verification_status": "passed"
+        },
+        {
+          "step_id": "focus-address-bar",
+          "title": "Enfocar barra",
+          "action_type": "hotkey",
+          "precondition": "desktop runtime available and observation refreshed",
+          "action": "Llevar el foco a la barra de direcciones o busqueda.",
+          "verification": {
+            "active_window_contains": "chrome",
+            "process_name_contains": null,
+            "visible_text_contains": [],
+            "visible_text_not_contains": [],
+            "required_context_signals": [
+              "browser_active"
+            ],
+            "forbidden_context_signals": [],
+            "expected_targets": [],
+            "selection_contains": [],
+            "clipboard_contains": [],
+            "search_results_min": null,
+            "file_exists": null,
+            "folder_exists": null,
+            "path_exists": null,
+            "path_kind": null,
+            "path_contains": null,
+            "action_data_contains": {},
+            "action_success_required": true
+          },
+          "subgoal": "llevar el foco al campo de busqueda",
+          "success_label": "foco de busqueda preparado",
+          "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+          "alternatives": [
+            "retry with explicit browser refocus"
+          ],
+          "payload": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "target_window": "chrome"
+          },
+          "risk_level": "low",
+          "retries": 0,
+          "max_retries": 1,
+          "verification_status": "passed"
+        },
+        {
+          "step_id": "type-query",
+          "title": "Escribir busqueda",
+          "action_type": "write_text",
+          "precondition": "desktop runtime available and observation refreshed",
+          "action": "Escribir 'youtube'.",
+          "verification": {
+            "active_window_contains": "chrome",
+            "process_name_contains": null,
+            "visible_text_contains": [
+              "youtube"
+            ],
+            "visible_text_not_contains": [],
+            "required_context_signals": [],
+            "forbidden_context_signals": [],
+            "expected_targets": [],
+            "selection_contains": [],
+            "clipboard_contains": [],
+            "search_results_min": null,
+            "file_exists": null,
+            "folder_exists": null,
+            "path_exists": null,
+            "path_kind": null,
+            "path_contains": null,
+            "action_data_contains": {},
+            "action_success_required": true
+          },
+          "subgoal": "colocar la consulta en el campo visible",
+          "success_label": "consulta visible",
+          "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+          "alternatives": [
+            "reobserve and retry",
+            "refocus before write"
+          ],
+          "payload": {
+            "text": "youtube",
+            "target_window": "chrome"
+          },
+          "risk_level": "low",
+          "retries": 0,
+          "max_retries": 1,
+          "verification_status": "passed"
+        },
+        {
+          "step_id": "submit-query",
+          "title": "Enviar busqueda",
+          "action_type": "hotkey",
+          "precondition": "desktop runtime available and observation refreshed",
+          "action": "Enviar la busqueda.",
+          "verification": {
+            "active_window_contains": "chrome",
+            "process_name_contains": null,
+            "visible_text_contains": [
+              "youtube"
+            ],
+            "visible_text_not_contains": [],
+            "required_context_signals": [
+              "browser_active"
+            ],
+            "forbidden_context_signals": [],
+            "expected_targets": [],
+            "selection_contains": [],
+            "clipboard_contains": [],
+            "search_results_min": null,
+            "file_exists": null,
+            "folder_exists": null,
+            "path_exists": null,
+            "path_kind": null,
+            "path_contains": null,
+            "action_data_contains": {},
+            "action_success_required": true
+          },
+          "subgoal": "ejecutar la busqueda y mantener evidencia de contexto",
+          "success_label": "busqueda enviada",
+          "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+          "alternatives": [
+            "retry after fresh observation",
+            "replan if UI changed"
+          ],
+          "payload": {
+            "keys": [
+              "enter"
+            ],
+            "target_window": "chrome"
+          },
+          "risk_level": "low",
+          "retries": 0,
+          "max_retries": 1,
+          "verification_status": "passed"
+        }
+      ],
+      "created_at": "2026-04-26T18:58:50.560480Z",
+      "metadata": {
+        "goal": "abre chrome y busca youtube",
+        "active_window": "Editor",
+        "target_application": "chrome",
+        "source": "heuristic"
+      }
+    },
+    "current_step": {
+      "step_id": "submit-query",
+      "title": "Enviar busqueda",
+      "action_type": "hotkey",
+      "precondition": "desktop runtime available and observation refreshed",
+      "action": "Enviar la busqueda.",
+      "verification": {
+        "active_window_contains": "chrome",
+        "process_name_contains": null,
+        "visible_text_contains": [
+          "youtube"
+        ],
+        "visible_text_not_contains": [],
+        "required_context_signals": [
+          "browser_active"
+        ],
+        "forbidden_context_signals": [],
+        "expected_targets": [],
+        "selection_contains": [],
+        "clipboard_contains": [],
+        "search_results_min": null,
+        "file_exists": null,
+        "folder_exists": null,
+        "path_exists": null,
+        "path_kind": null,
+        "path_contains": null,
+        "action_data_contains": {},
+        "action_success_required": true
+      },
+      "subgoal": "ejecutar la busqueda y mantener evidencia de contexto",
+      "success_label": "busqueda enviada",
+      "fallback": "re-observe, verify focus, and retry only with a safe alternative",
+      "alternatives": [
+        "retry after fresh observation",
+        "replan if UI changed"
+      ],
+      "payload": {
+        "keys": [
+          "enter"
+        ],
+        "target_window": "chrome"
+      },
+      "risk_level": "low",
+      "retries": 0,
+      "max_retries": 1,
+      "verification_status": "passed"
+    },
+    "last_result": {
+      "correlation_id": "runtime-ui-hotkey",
+      "operation_name": "keyboard_shortcut",
+      "risk_level": "high",
+      "success": true,
+      "status": "executed",
+      "message": "keyboard shortcut executed",
+      "active_window": {
+        "handle": "0x5",
+        "title": "Chrome",
+        "class_name": "FakeChrome",
+        "process_id": 5,
+        "process_name": "chrome.exe",
+        "rect": {}
+      },
+      "confirmation_required": false,
+      "security_decision": "allowed",
+      "data": {
+        "keys": [
+          "enter"
+        ],
+        "trusted_mode_bypass": false
+      },
+      "started_at": "2026-04-26T18:58:50.628385Z",
+      "finished_at": "2026-04-26T18:58:50.628641Z",
+      "request_payload": {
+        "keys": [
+          "enter"
+        ],
+        "target_window": "chrome"
+      }
+    },
+    "last_error": null,
+    "last_observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+    "target_application": "chrome",
+    "target_window_title": "chrome",
+    "target_path": null,
+    "active_path": null,
+    "last_recovery_strategy": null,
+    "loop_iteration": 5,
+    "observe_count": 11,
+    "verify_count": 5,
+    "recovery_count": 0,
+    "memory": {
+      "opened_applications": [
+        "chrome"
+      ],
+      "attempted_steps": [
+        "open-browser",
+        "focus-browser",
+        "focus-address-bar",
+        "type-query",
+        "submit-query"
+      ],
+      "completed_steps": [
+        "open-browser",
+        "focus-browser",
+        "focus-address-bar",
+        "type-query",
+        "submit-query"
+      ],
+      "attempted_fallbacks": [],
+      "recovery_attempts_by_step": {},
+      "successful_strategies": [
+        "grounded_browser_search"
+      ],
+      "notes": [],
+      "last_error": null,
+      "last_completed_step": "submit-query",
+      "last_expected_observation": {
+        "active_window_contains": "chrome",
+        "process_name_contains": null,
+        "visible_text_contains": [
+          "youtube"
+        ],
+        "visible_text_not_contains": [],
+        "required_context_signals": [
+          "browser_active"
+        ],
+        "forbidden_context_signals": [],
+        "expected_targets": [],
+        "selection_contains": [],
+        "clipboard_contains": [],
+        "search_results_min": null,
+        "file_exists": null,
+        "folder_exists": null,
+        "path_exists": null,
+        "path_kind": null,
+        "path_contains": null,
+        "action_data_contains": {},
+        "action_success_required": true
+      },
+      "last_observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "last_strategy": "grounded_browser_search",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "mission_position": "completed:submit-query",
+      "failed_verifications": []
+    },
+    "metadata": {
+      "request": {
+        "goal": "abre chrome y busca youtube",
+        "metadata": {},
+        "max_steps": null,
+        "max_retries_per_step": null,
+        "autonomy_mode": "assistive",
+        "source_surface": "unknown",
+        "dry_run": false,
+        "verbose_trace": false,
+        "wait_for_completion": true
+      },
+      "created_at": "2026-04-26T18:58:50.454190+00:00",
+      "initial_strategy": "grounded_desktop_agent"
+    },
+    "created_at": "2026-04-26T18:58:50.454373Z",
+    "updated_at": "2026-04-26T18:58:50.632666Z"
+  },
+  "subtasks": [
+    {
+      "subtask_id": "open-browser",
+      "label": "Abrir navegador",
+      "status": "completed",
+      "parent_id": null,
+      "steps": [
+        "open-browser"
+      ],
+      "expected_outcome": "chrome abierto",
+      "recovery_hints": [
+        "re-observe, verify focus, and retry only with a safe alternative",
+        "focus existing browser",
+        "search same process window"
+      ],
+      "completion_criteria": [
+        "active_window_contains=chrome",
+        "process_name_contains=chrome",
+        "action_success_required=True"
+      ],
+      "notes": [
+        "subtask_1",
+        "strategy:grounded_browser_search",
+        "Verification passed."
+      ],
+      "started_at": "2026-04-26T18:58:50.562355Z",
+      "completed_at": "2026-04-26T18:58:50.586851Z"
+    },
+    {
+      "subtask_id": "focus-browser",
+      "label": "Enfocar navegador",
+      "status": "completed",
+      "parent_id": null,
+      "steps": [
+        "focus-browser"
+      ],
+      "expected_outcome": "navegador en foco",
+      "recovery_hints": [
+        "re-observe, verify focus, and retry only with a safe alternative",
+        "search another browser window"
+      ],
+      "completion_criteria": [
+        "active_window_contains=chrome",
+        "process_name_contains=chrome",
+        "required_context_signals=['browser_active']",
+        "action_success_required=True"
+      ],
+      "notes": [
+        "subtask_2",
+        "strategy:grounded_browser_search",
+        "Verification passed."
+      ],
+      "started_at": "2026-04-26T18:58:50.588907Z",
+      "completed_at": "2026-04-26T18:58:50.594826Z"
+    },
+    {
+      "subtask_id": "focus-address-bar",
+      "label": "Enfocar barra",
+      "status": "completed",
+      "parent_id": null,
+      "steps": [
+        "focus-address-bar"
+      ],
+      "expected_outcome": "foco de busqueda preparado",
+      "recovery_hints": [
+        "re-observe, verify focus, and retry only with a safe alternative",
+        "retry with explicit browser refocus"
+      ],
+      "completion_criteria": [
+        "active_window_contains=chrome",
+        "required_context_signals=['browser_active']",
+        "action_success_required=True"
+      ],
+      "notes": [
+        "subtask_3",
+        "strategy:grounded_browser_search",
+        "Verification passed."
+      ],
+      "started_at": "2026-04-26T18:58:50.596845Z",
+      "completed_at": "2026-04-26T18:58:50.603814Z"
+    },
+    {
+      "subtask_id": "type-query",
+      "label": "Escribir busqueda",
+      "status": "completed",
+      "parent_id": null,
+      "steps": [
+        "type-query"
+      ],
+      "expected_outcome": "consulta visible",
+      "recovery_hints": [
+        "re-observe, verify focus, and retry only with a safe alternative",
+        "reobserve and retry",
+        "refocus before write"
+      ],
+      "completion_criteria": [
+        "active_window_contains=chrome",
+        "visible_text_contains=['youtube']",
+        "action_success_required=True"
+      ],
+      "notes": [
+        "subtask_4",
+        "strategy:grounded_browser_search",
+        "Verification passed."
+      ],
+      "started_at": "2026-04-26T18:58:50.606438Z",
+      "completed_at": "2026-04-26T18:58:50.620888Z"
+    },
+    {
+      "subtask_id": "submit-query",
+      "label": "Enviar busqueda",
+      "status": "completed",
+      "parent_id": null,
+      "steps": [
+        "submit-query"
+      ],
+      "expected_outcome": "busqueda enviada",
+      "recovery_hints": [
+        "re-observe, verify focus, and retry only with a safe alternative",
+        "retry after fresh observation",
+        "replan if UI changed"
+      ],
+      "completion_criteria": [
+        "active_window_contains=chrome",
+        "visible_text_contains=['youtube']",
+        "required_context_signals=['browser_active']",
+        "action_success_required=True"
+      ],
+      "notes": [
+        "subtask_5",
+        "strategy:grounded_browser_search",
+        "Verification passed."
+      ],
+      "started_at": "2026-04-26T18:58:50.624763Z",
+      "completed_at": "2026-04-26T18:58:50.632807Z"
+    }
+  ],
+  "completed_steps": [
+    "open-browser",
+    "focus-browser",
+    "focus-address-bar",
+    "type-query",
+    "submit-query"
+  ],
+  "failed_steps": [],
+  "step_receipts": [
+    {
+      "step_id": "open-browser",
+      "title": "Abrir navegador",
+      "status": "passed",
+      "action_type": "open_application",
+      "action_result": {
+        "correlation_id": "09517a2b-9fa2-4a54-9edc-e0fc6ce8287a",
+        "operation_name": "system.open",
+        "success": true,
+        "status": "launched",
+        "message": "system target opened",
+        "resolved_target": {
+          "target_id": "chrome",
+          "kind": "application",
+          "display_name": "Google Chrome",
+          "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "uri": null,
+          "command": [],
+          "arguments": [],
+          "association": {
+            "target_kind": "application",
+            "handler_kind": "executable",
+            "handler_name": "Google Chrome",
+            "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "supports_open": true,
+            "supports_reveal": false,
+            "warnings": [],
+            "metadata": {}
+          },
+          "sensitivity": "high",
+          "resolution_status": "resolved",
+          "ambiguity_candidates": [],
+          "resolution_confidence": 0.0,
+          "warnings": [],
+          "metadata": {
+            "canonical_app_id": "chrome",
+            "aliases": [
+              "chrome",
+              "google chrome"
+            ]
+          }
+        },
+        "association": {
+          "target_kind": "application",
+          "handler_kind": "executable",
+          "handler_name": "Google Chrome",
+          "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "supports_open": true,
+          "supports_reveal": false,
+          "warnings": [],
+          "metadata": {}
+        },
+        "confirmation_required": false,
+        "sensitivity": "high",
+        "warnings": [],
+        "data": {
+          "target": {
+            "target_id": "chrome",
+            "kind": "application",
+            "display_name": "Google Chrome",
+            "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "uri": null,
+            "command": [],
+            "arguments": [],
+            "association": {
+              "target_kind": "application",
+              "handler_kind": "executable",
+              "handler_name": "Google Chrome",
+              "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "supports_open": true,
+              "supports_reveal": false,
+              "warnings": [],
+              "metadata": {}
+            },
+            "sensitivity": "high",
+            "resolution_status": "resolved",
+            "ambiguity_candidates": [],
+            "resolution_confidence": 0.0,
+            "warnings": [],
+            "metadata": {
+              "canonical_app_id": "chrome",
+              "aliases": [
+                "chrome",
+                "google chrome"
+              ]
+            }
+          },
+          "mode": "launch_application",
+          "dry_run": false
+        },
+        "metadata": {
+          "approved": true,
+          "source": "desktop_agent",
+          "policy_tags": [
+            "kind:application",
+            "executable",
+            "launch_mode"
+          ]
+        },
+        "started_at": "2026-04-26T18:58:50.565574Z",
+        "finished_at": "2026-04-26T18:58:50.575759Z",
+        "focus": {
+          "correlation_id": "runtime-ui-focus",
+          "operation_name": "focus_window",
+          "risk_level": "medium",
+          "success": true,
+          "status": "executed",
+          "message": "window focused",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "target": "chrome",
+            "trusted_mode_bypass": false,
+            "verified_focus": true
+          },
+          "started_at": "2026-04-26T18:58:50.576002Z",
+          "finished_at": "2026-04-26T18:58:50.576305Z"
+        },
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "request_payload": {
+          "application": "chrome"
+        }
+      },
+      "verification": {
+        "status": "passed",
+        "note": "Verification passed.",
+        "observed": {
+          "active_window_title": "Chrome",
+          "active_process_name": "chrome.exe",
+          "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+          "selection_text": "",
+          "clipboard_text": "",
+          "context_signals": [
+            "browser_active",
+            "button_count:1",
+            "content:buscar",
+            "editable_input_visible",
+            "goal_evidence:chrome",
+            "input_count:1",
+            "known_window:calculadora",
+            "known_window:chrome",
+            "known_window:editor",
+            "known_window:explorador de archivos",
+            "known_window:notepad",
+            "known_window:opera gx",
+            "known_window:vscode",
+            "known_window:word",
+            "process:chrome.exe",
+            "search_field_visible",
+            "target:boton guardar",
+            "target:campo buscar",
+            "target:chrome",
+            "target:chrome editor",
+            "target_count:4",
+            "target_kind:button",
+            "target_kind:input",
+            "target_kind:text",
+            "target_kind:window",
+            "window_changed",
+            "window_title:chrome"
+          ],
+          "detected_targets": [
+            "Chrome editor",
+            "Boton Guardar",
+            "Campo Buscar",
+            "Chrome"
+          ],
+          "active_path": null,
+          "action_result": {
+            "correlation_id": "09517a2b-9fa2-4a54-9edc-e0fc6ce8287a",
+            "operation_name": "system.open",
+            "success": true,
+            "status": "launched",
+            "message": "system target opened",
+            "resolved_target": {
+              "target_id": "chrome",
+              "kind": "application",
+              "display_name": "Google Chrome",
+              "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "uri": null,
+              "command": [],
+              "arguments": [],
+              "association": {
+                "target_kind": "application",
+                "handler_kind": "executable",
+                "handler_name": "Google Chrome",
+                "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "supports_open": true,
+                "supports_reveal": false,
+                "warnings": [],
+                "metadata": {}
+              },
+              "sensitivity": "high",
+              "resolution_status": "resolved",
+              "ambiguity_candidates": [],
+              "resolution_confidence": 0.0,
+              "warnings": [],
+              "metadata": {
+                "canonical_app_id": "chrome",
+                "aliases": [
+                  "chrome",
+                  "google chrome"
+                ]
+              }
+            },
+            "association": {
+              "target_kind": "application",
+              "handler_kind": "executable",
+              "handler_name": "Google Chrome",
+              "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "supports_open": true,
+              "supports_reveal": false,
+              "warnings": [],
+              "metadata": {}
+            },
+            "confirmation_required": false,
+            "sensitivity": "high",
+            "warnings": [],
+            "data": {
+              "target": {
+                "target_id": "chrome",
+                "kind": "application",
+                "display_name": "Google Chrome",
+                "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "uri": null,
+                "command": [],
+                "arguments": [],
+                "association": {
+                  "target_kind": "application",
+                  "handler_kind": "executable",
+                  "handler_name": "Google Chrome",
+                  "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                  "supports_open": true,
+                  "supports_reveal": false,
+                  "warnings": [],
+                  "metadata": {}
+                },
+                "sensitivity": "high",
+                "resolution_status": "resolved",
+                "ambiguity_candidates": [],
+                "resolution_confidence": 0.0,
+                "warnings": [],
+                "metadata": {
+                  "canonical_app_id": "chrome",
+                  "aliases": [
+                    "chrome",
+                    "google chrome"
+                  ]
+                }
+              },
+              "mode": "launch_application",
+              "dry_run": false
+            },
+            "metadata": {
+              "approved": true,
+              "source": "desktop_agent",
+              "policy_tags": [
+                "kind:application",
+                "executable",
+                "launch_mode"
+              ]
+            },
+            "started_at": "2026-04-26T18:58:50.565574Z",
+            "finished_at": "2026-04-26T18:58:50.575759Z",
+            "focus": {
+              "correlation_id": "runtime-ui-focus",
+              "operation_name": "focus_window",
+              "risk_level": "medium",
+              "success": true,
+              "status": "executed",
+              "message": "window focused",
+              "active_window": {
+                "handle": "0x5",
+                "title": "Chrome",
+                "class_name": "FakeChrome",
+                "process_id": 5,
+                "process_name": "chrome.exe",
+                "rect": {}
+              },
+              "confirmation_required": false,
+              "security_decision": "allowed",
+              "data": {
+                "target": "chrome",
+                "trusted_mode_bypass": false,
+                "verified_focus": true
+              },
+              "started_at": "2026-04-26T18:58:50.576002Z",
+              "finished_at": "2026-04-26T18:58:50.576305Z"
+            },
+            "active_window": {
+              "handle": "0x5",
+              "title": "Chrome",
+              "class_name": "FakeChrome",
+              "process_id": 5,
+              "process_name": "chrome.exe",
+              "rect": {}
+            },
+            "request_payload": {
+              "application": "chrome"
+            }
+          }
+        },
+        "expected": {
+          "active_window_contains": "chrome",
+          "process_name_contains": "chrome",
+          "visible_text_contains": [],
+          "visible_text_not_contains": [],
+          "required_context_signals": [],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "missing": [],
+        "matched": [
+          "active_window_contains:chrome",
+          "process_name_contains:chrome"
+        ]
+      },
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "recovery_note": null,
+      "recovery_strategy": null,
+      "created_at": "2026-04-26T18:58:50.586817Z"
+    },
+    {
+      "step_id": "focus-browser",
+      "title": "Enfocar navegador",
+      "status": "passed",
+      "action_type": "focus_window",
+      "action_result": {
+        "correlation_id": "runtime-ui-focus",
+        "operation_name": "focus_window",
+        "risk_level": "medium",
+        "success": true,
+        "status": "executed",
+        "message": "window focused",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "confirmation_required": false,
+        "security_decision": "allowed",
+        "data": {
+          "target": "chrome",
+          "trusted_mode_bypass": false,
+          "verified_focus": true
+        },
+        "started_at": "2026-04-26T18:58:50.591902Z",
+        "finished_at": "2026-04-26T18:58:50.592182Z",
+        "request_payload": {
+          "target_window": "chrome"
+        }
+      },
+      "verification": {
+        "status": "passed",
+        "note": "Verification passed.",
+        "observed": {
+          "active_window_title": "Chrome",
+          "active_process_name": "chrome.exe",
+          "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+          "selection_text": "",
+          "clipboard_text": "",
+          "context_signals": [
+            "browser_active",
+            "button_count:1",
+            "content:buscar",
+            "editable_input_visible",
+            "goal_evidence:chrome",
+            "input_count:1",
+            "known_window:calculadora",
+            "known_window:chrome",
+            "known_window:editor",
+            "known_window:explorador de archivos",
+            "known_window:notepad",
+            "known_window:opera gx",
+            "known_window:vscode",
+            "known_window:word",
+            "process:chrome.exe",
+            "search_field_visible",
+            "target:boton guardar",
+            "target:campo buscar",
+            "target:chrome",
+            "target:chrome editor",
+            "target_count:4",
+            "target_kind:button",
+            "target_kind:input",
+            "target_kind:text",
+            "target_kind:window",
+            "window_changed",
+            "window_title:chrome"
+          ],
+          "detected_targets": [
+            "Chrome editor",
+            "Boton Guardar",
+            "Campo Buscar",
+            "Chrome"
+          ],
+          "active_path": null,
+          "action_result": {
+            "correlation_id": "runtime-ui-focus",
+            "operation_name": "focus_window",
+            "risk_level": "medium",
+            "success": true,
+            "status": "executed",
+            "message": "window focused",
+            "active_window": {
+              "handle": "0x5",
+              "title": "Chrome",
+              "class_name": "FakeChrome",
+              "process_id": 5,
+              "process_name": "chrome.exe",
+              "rect": {}
+            },
+            "confirmation_required": false,
+            "security_decision": "allowed",
+            "data": {
+              "target": "chrome",
+              "trusted_mode_bypass": false,
+              "verified_focus": true
+            },
+            "started_at": "2026-04-26T18:58:50.591902Z",
+            "finished_at": "2026-04-26T18:58:50.592182Z",
+            "request_payload": {
+              "target_window": "chrome"
+            }
+          }
+        },
+        "expected": {
+          "active_window_contains": "chrome",
+          "process_name_contains": "chrome",
+          "visible_text_contains": [],
+          "visible_text_not_contains": [],
+          "required_context_signals": [
+            "browser_active"
+          ],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "missing": [],
+        "matched": [
+          "active_window_contains:chrome",
+          "process_name_contains:chrome",
+          "context_signal:browser_active"
+        ]
+      },
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "recovery_note": null,
+      "recovery_strategy": null,
+      "created_at": "2026-04-26T18:58:50.594790Z"
+    },
+    {
+      "step_id": "focus-address-bar",
+      "title": "Enfocar barra",
+      "status": "passed",
+      "action_type": "hotkey",
+      "action_result": {
+        "correlation_id": "runtime-ui-hotkey",
+        "operation_name": "keyboard_shortcut",
+        "risk_level": "high",
+        "success": true,
+        "status": "executed",
+        "message": "keyboard shortcut executed",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "confirmation_required": false,
+        "security_decision": "allowed",
+        "data": {
+          "keys": [
+            "ctrl",
+            "l"
+          ],
+          "trusted_mode_bypass": false
+        },
+        "started_at": "2026-04-26T18:58:50.600299Z",
+        "finished_at": "2026-04-26T18:58:50.600617Z",
+        "request_payload": {
+          "keys": [
+            "ctrl",
+            "l"
+          ],
+          "target_window": "chrome"
+        }
+      },
+      "verification": {
+        "status": "passed",
+        "note": "Verification passed.",
+        "observed": {
+          "active_window_title": "Chrome",
+          "active_process_name": "chrome.exe",
+          "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar",
+          "selection_text": "",
+          "clipboard_text": "",
+          "context_signals": [
+            "browser_active",
+            "button_count:1",
+            "content:buscar",
+            "editable_input_visible",
+            "goal_evidence:chrome",
+            "input_count:1",
+            "known_window:calculadora",
+            "known_window:chrome",
+            "known_window:editor",
+            "known_window:explorador de archivos",
+            "known_window:notepad",
+            "known_window:opera gx",
+            "known_window:vscode",
+            "known_window:word",
+            "process:chrome.exe",
+            "search_field_visible",
+            "target:boton guardar",
+            "target:campo buscar",
+            "target:chrome",
+            "target:chrome editor",
+            "target_count:4",
+            "target_kind:button",
+            "target_kind:input",
+            "target_kind:text",
+            "target_kind:window",
+            "window_changed",
+            "window_title:chrome"
+          ],
+          "detected_targets": [
+            "Chrome editor",
+            "Boton Guardar",
+            "Campo Buscar",
+            "Chrome"
+          ],
+          "active_path": null,
+          "action_result": {
+            "correlation_id": "runtime-ui-hotkey",
+            "operation_name": "keyboard_shortcut",
+            "risk_level": "high",
+            "success": true,
+            "status": "executed",
+            "message": "keyboard shortcut executed",
+            "active_window": {
+              "handle": "0x5",
+              "title": "Chrome",
+              "class_name": "FakeChrome",
+              "process_id": 5,
+              "process_name": "chrome.exe",
+              "rect": {}
+            },
+            "confirmation_required": false,
+            "security_decision": "allowed",
+            "data": {
+              "keys": [
+                "ctrl",
+                "l"
+              ],
+              "trusted_mode_bypass": false
+            },
+            "started_at": "2026-04-26T18:58:50.600299Z",
+            "finished_at": "2026-04-26T18:58:50.600617Z",
+            "request_payload": {
+              "keys": [
+                "ctrl",
+                "l"
+              ],
+              "target_window": "chrome"
+            }
+          }
+        },
+        "expected": {
+          "active_window_contains": "chrome",
+          "process_name_contains": null,
+          "visible_text_contains": [],
+          "visible_text_not_contains": [],
+          "required_context_signals": [
+            "browser_active"
+          ],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "missing": [],
+        "matched": [
+          "active_window_contains:chrome",
+          "context_signal:browser_active"
+        ]
+      },
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "recovery_note": null,
+      "recovery_strategy": null,
+      "created_at": "2026-04-26T18:58:50.603786Z"
+    },
+    {
+      "step_id": "type-query",
+      "title": "Escribir busqueda",
+      "status": "passed",
+      "action_type": "write_text",
+      "action_result": {
+        "correlation_id": "desktop-agent-88af561e-027c-4a34-9732-14df439a8254-type-query",
+        "operation_name": "write_text",
+        "risk_level": "high",
+        "success": true,
+        "status": "executed",
+        "message": "text inserted into the active window",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "confirmation_required": false,
+        "security_decision": "allowed",
+        "data": {
+          "mode": "copilot",
+          "block_count": 1,
+          "text_length": 7,
+          "trusted_mode_bypass": false,
+          "verified_focus": "Chrome"
+        },
+        "started_at": "2026-04-26T18:58:50.610127Z",
+        "finished_at": "2026-04-26T18:58:50.610482Z",
+        "request_payload": {
+          "text": "youtube",
+          "target_window": "chrome"
+        }
+      },
+      "verification": {
+        "status": "passed",
+        "note": "Verification passed.",
+        "observed": {
+          "active_window_title": "Chrome",
+          "active_process_name": "chrome.exe",
+          "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar\nyoutube",
+          "selection_text": "youtube",
+          "clipboard_text": "youtube",
+          "context_signals": [
+            "browser_active",
+            "button_count:1",
+            "content:buscar",
+            "content:youtube",
+            "editable_input_visible",
+            "goal_evidence:chrome",
+            "goal_evidence:youtube",
+            "input_count:1",
+            "known_window:calculadora",
+            "known_window:chrome",
+            "known_window:editor",
+            "known_window:explorador de archivos",
+            "known_window:notepad",
+            "known_window:opera gx",
+            "known_window:vscode",
+            "known_window:word",
+            "process:chrome.exe",
+            "search_field_visible",
+            "selection_available",
+            "target:boton guardar",
+            "target:campo buscar",
+            "target:chrome",
+            "target:chrome editor",
+            "target_count:4",
+            "target_kind:button",
+            "target_kind:input",
+            "target_kind:text",
+            "target_kind:window",
+            "window_title:chrome"
+          ],
+          "detected_targets": [
+            "Chrome editor",
+            "Boton Guardar",
+            "Campo Buscar",
+            "Chrome"
+          ],
+          "active_path": null,
+          "action_result": {
+            "correlation_id": "desktop-agent-88af561e-027c-4a34-9732-14df439a8254-type-query",
+            "operation_name": "write_text",
+            "risk_level": "high",
+            "success": true,
+            "status": "executed",
+            "message": "text inserted into the active window",
+            "active_window": {
+              "handle": "0x5",
+              "title": "Chrome",
+              "class_name": "FakeChrome",
+              "process_id": 5,
+              "process_name": "chrome.exe",
+              "rect": {}
+            },
+            "confirmation_required": false,
+            "security_decision": "allowed",
+            "data": {
+              "mode": "copilot",
+              "block_count": 1,
+              "text_length": 7,
+              "trusted_mode_bypass": false,
+              "verified_focus": "Chrome"
+            },
+            "started_at": "2026-04-26T18:58:50.610127Z",
+            "finished_at": "2026-04-26T18:58:50.610482Z",
+            "request_payload": {
+              "text": "youtube",
+              "target_window": "chrome"
+            }
+          }
+        },
+        "expected": {
+          "active_window_contains": "chrome",
+          "process_name_contains": null,
+          "visible_text_contains": [
+            "youtube"
+          ],
+          "visible_text_not_contains": [],
+          "required_context_signals": [],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "missing": [],
+        "matched": [
+          "active_window_contains:chrome",
+          "visible_text_contains:youtube"
+        ]
+      },
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "recovery_note": null,
+      "recovery_strategy": null,
+      "created_at": "2026-04-26T18:58:50.620865Z"
+    },
+    {
+      "step_id": "submit-query",
+      "title": "Enviar busqueda",
+      "status": "passed",
+      "action_type": "hotkey",
+      "action_result": {
+        "correlation_id": "runtime-ui-hotkey",
+        "operation_name": "keyboard_shortcut",
+        "risk_level": "high",
+        "success": true,
+        "status": "executed",
+        "message": "keyboard shortcut executed",
+        "active_window": {
+          "handle": "0x5",
+          "title": "Chrome",
+          "class_name": "FakeChrome",
+          "process_id": 5,
+          "process_name": "chrome.exe",
+          "rect": {}
+        },
+        "confirmation_required": false,
+        "security_decision": "allowed",
+        "data": {
+          "keys": [
+            "enter"
+          ],
+          "trusted_mode_bypass": false
+        },
+        "started_at": "2026-04-26T18:58:50.628385Z",
+        "finished_at": "2026-04-26T18:58:50.628641Z",
+        "request_payload": {
+          "keys": [
+            "enter"
+          ],
+          "target_window": "chrome"
+        }
+      },
+      "verification": {
+        "status": "passed",
+        "note": "Verification passed.",
+        "observed": {
+          "active_window_title": "Chrome",
+          "active_process_name": "chrome.exe",
+          "visible_text": "Chrome editor\nBoton Guardar\nCampo Buscar\nyoutube",
+          "selection_text": "youtube",
+          "clipboard_text": "youtube",
+          "context_signals": [
+            "browser_active",
+            "button_count:1",
+            "content:buscar",
+            "content:youtube",
+            "editable_input_visible",
+            "goal_evidence:chrome",
+            "goal_evidence:youtube",
+            "input_count:1",
+            "known_window:calculadora",
+            "known_window:chrome",
+            "known_window:editor",
+            "known_window:explorador de archivos",
+            "known_window:notepad",
+            "known_window:opera gx",
+            "known_window:vscode",
+            "known_window:word",
+            "process:chrome.exe",
+            "search_field_visible",
+            "selection_available",
+            "target:boton guardar",
+            "target:campo buscar",
+            "target:chrome",
+            "target:chrome editor",
+            "target_count:4",
+            "target_kind:button",
+            "target_kind:input",
+            "target_kind:text",
+            "target_kind:window",
+            "window_title:chrome"
+          ],
+          "detected_targets": [
+            "Chrome editor",
+            "Boton Guardar",
+            "Campo Buscar",
+            "Chrome"
+          ],
+          "active_path": null,
+          "action_result": {
+            "correlation_id": "runtime-ui-hotkey",
+            "operation_name": "keyboard_shortcut",
+            "risk_level": "high",
+            "success": true,
+            "status": "executed",
+            "message": "keyboard shortcut executed",
+            "active_window": {
+              "handle": "0x5",
+              "title": "Chrome",
+              "class_name": "FakeChrome",
+              "process_id": 5,
+              "process_name": "chrome.exe",
+              "rect": {}
+            },
+            "confirmation_required": false,
+            "security_decision": "allowed",
+            "data": {
+              "keys": [
+                "enter"
+              ],
+              "trusted_mode_bypass": false
+            },
+            "started_at": "2026-04-26T18:58:50.628385Z",
+            "finished_at": "2026-04-26T18:58:50.628641Z",
+            "request_payload": {
+              "keys": [
+                "enter"
+              ],
+              "target_window": "chrome"
+            }
+          }
+        },
+        "expected": {
+          "active_window_contains": "chrome",
+          "process_name_contains": null,
+          "visible_text_contains": [
+            "youtube"
+          ],
+          "visible_text_not_contains": [],
+          "required_context_signals": [
+            "browser_active"
+          ],
+          "forbidden_context_signals": [],
+          "expected_targets": [],
+          "selection_contains": [],
+          "clipboard_contains": [],
+          "search_results_min": null,
+          "file_exists": null,
+          "folder_exists": null,
+          "path_exists": null,
+          "path_kind": null,
+          "path_contains": null,
+          "action_data_contains": {},
+          "action_success_required": true
+        },
+        "missing": [],
+        "matched": [
+          "active_window_contains:chrome",
+          "visible_text_contains:youtube",
+          "context_signal:browser_active"
+        ]
+      },
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "recovery_note": null,
+      "recovery_strategy": null,
+      "created_at": "2026-04-26T18:58:50.632785Z"
+    }
+  ],
+  "checkpoints": [
+    {
+      "checkpoint_id": "chk-8178b4741b",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "current_subtask": "focus-browser",
+      "current_step": "focus-browser",
+      "next_step_index": 1,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "09517a2b-9fa2-4a54-9edc-e0fc6ce8287a",
+          "operation_name": "system.open",
+          "success": true,
+          "status": "launched",
+          "message": "system target opened",
+          "resolved_target": {
+            "target_id": "chrome",
+            "kind": "application",
+            "display_name": "Google Chrome",
+            "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "uri": null,
+            "command": [],
+            "arguments": [],
+            "association": {
+              "target_kind": "application",
+              "handler_kind": "executable",
+              "handler_name": "Google Chrome",
+              "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "supports_open": true,
+              "supports_reveal": false,
+              "warnings": [],
+              "metadata": {}
+            },
+            "sensitivity": "high",
+            "resolution_status": "resolved",
+            "ambiguity_candidates": [],
+            "resolution_confidence": 0.0,
+            "warnings": [],
+            "metadata": {
+              "canonical_app_id": "chrome",
+              "aliases": [
+                "chrome",
+                "google chrome"
+              ]
+            }
+          },
+          "association": {
+            "target_kind": "application",
+            "handler_kind": "executable",
+            "handler_name": "Google Chrome",
+            "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            "supports_open": true,
+            "supports_reveal": false,
+            "warnings": [],
+            "metadata": {}
+          },
+          "confirmation_required": false,
+          "sensitivity": "high",
+          "warnings": [],
+          "data": {
+            "target": {
+              "target_id": "chrome",
+              "kind": "application",
+              "display_name": "Google Chrome",
+              "path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+              "uri": null,
+              "command": [],
+              "arguments": [],
+              "association": {
+                "target_kind": "application",
+                "handler_kind": "executable",
+                "handler_name": "Google Chrome",
+                "handler_path": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "supports_open": true,
+                "supports_reveal": false,
+                "warnings": [],
+                "metadata": {}
+              },
+              "sensitivity": "high",
+              "resolution_status": "resolved",
+              "ambiguity_candidates": [],
+              "resolution_confidence": 0.0,
+              "warnings": [],
+              "metadata": {
+                "canonical_app_id": "chrome",
+                "aliases": [
+                  "chrome",
+                  "google chrome"
+                ]
+              }
+            },
+            "mode": "launch_application",
+            "dry_run": false
+          },
+          "metadata": {
+            "approved": true,
+            "source": "desktop_agent",
+            "policy_tags": [
+              "kind:application",
+              "executable",
+              "launch_mode"
+            ]
+          },
+          "started_at": "2026-04-26T18:58:50.565574Z",
+          "finished_at": "2026-04-26T18:58:50.575759Z",
+          "focus": {
+            "correlation_id": "runtime-ui-focus",
+            "operation_name": "focus_window",
+            "risk_level": "medium",
+            "success": true,
+            "status": "executed",
+            "message": "window focused",
+            "active_window": {
+              "handle": "0x5",
+              "title": "Chrome",
+              "class_name": "FakeChrome",
+              "process_id": 5,
+              "process_name": "chrome.exe",
+              "rect": {}
+            },
+            "confirmation_required": false,
+            "security_decision": "allowed",
+            "data": {
+              "target": "chrome",
+              "trusted_mode_bypass": false,
+              "verified_focus": true
+            },
+            "started_at": "2026-04-26T18:58:50.576002Z",
+            "finished_at": "2026-04-26T18:58:50.576305Z"
+          },
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "request_payload": {
+            "application": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.589537Z"
+    },
+    {
+      "checkpoint_id": "chk-04003279ae",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "current_subtask": "focus-browser",
+      "current_step": "focus-browser",
+      "next_step_index": 1,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-focus",
+          "operation_name": "focus_window",
+          "risk_level": "medium",
+          "success": true,
+          "status": "executed",
+          "message": "window focused",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "target": "chrome",
+            "trusted_mode_bypass": false,
+            "verified_focus": true
+          },
+          "started_at": "2026-04-26T18:58:50.591902Z",
+          "finished_at": "2026-04-26T18:58:50.592182Z",
+          "request_payload": {
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.592621Z"
+    },
+    {
+      "checkpoint_id": "chk-d22eb3d929",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "current_subtask": "focus-browser",
+      "current_step": "focus-browser",
+      "next_step_index": 2,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-focus",
+          "operation_name": "focus_window",
+          "risk_level": "medium",
+          "success": true,
+          "status": "executed",
+          "message": "window focused",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "target": "chrome",
+            "trusted_mode_bypass": false,
+            "verified_focus": true
+          },
+          "started_at": "2026-04-26T18:58:50.591902Z",
+          "finished_at": "2026-04-26T18:58:50.592182Z",
+          "request_payload": {
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.594973Z"
+    },
+    {
+      "checkpoint_id": "chk-53a969e2e4",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "current_subtask": "focus-address-bar",
+      "current_step": "focus-address-bar",
+      "next_step_index": 2,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-focus",
+          "operation_name": "focus_window",
+          "risk_level": "medium",
+          "success": true,
+          "status": "executed",
+          "message": "window focused",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "target": "chrome",
+            "trusted_mode_bypass": false,
+            "verified_focus": true
+          },
+          "started_at": "2026-04-26T18:58:50.591902Z",
+          "finished_at": "2026-04-26T18:58:50.592182Z",
+          "request_payload": {
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.597406Z"
+    },
+    {
+      "checkpoint_id": "chk-2e20f9b1af",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "current_subtask": "focus-address-bar",
+      "current_step": "focus-address-bar",
+      "next_step_index": 2,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-hotkey",
+          "operation_name": "keyboard_shortcut",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "keyboard shortcut executed",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "trusted_mode_bypass": false
+          },
+          "started_at": "2026-04-26T18:58:50.600299Z",
+          "finished_at": "2026-04-26T18:58:50.600617Z",
+          "request_payload": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.601229Z"
+    },
+    {
+      "checkpoint_id": "chk-fa79041618",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "current_subtask": "focus-address-bar",
+      "current_step": "focus-address-bar",
+      "next_step_index": 3,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser",
+          "focus-address-bar"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-hotkey",
+          "operation_name": "keyboard_shortcut",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "keyboard shortcut executed",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "trusted_mode_bypass": false
+          },
+          "started_at": "2026-04-26T18:58:50.600299Z",
+          "finished_at": "2026-04-26T18:58:50.600617Z",
+          "request_payload": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.603930Z"
+    },
+    {
+      "checkpoint_id": "chk-8bc4269841",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "current_subtask": "type-query",
+      "current_step": "type-query",
+      "next_step_index": 3,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser",
+          "focus-address-bar"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-hotkey",
+          "operation_name": "keyboard_shortcut",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "keyboard shortcut executed",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "trusted_mode_bypass": false
+          },
+          "started_at": "2026-04-26T18:58:50.600299Z",
+          "finished_at": "2026-04-26T18:58:50.600617Z",
+          "request_payload": {
+            "keys": [
+              "ctrl",
+              "l"
+            ],
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.607021Z"
+    },
+    {
+      "checkpoint_id": "chk-d0502f3876",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "current_subtask": "type-query",
+      "current_step": "type-query",
+      "next_step_index": 3,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, editable_input_visible",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_changed",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser",
+          "focus-address-bar"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "desktop-agent-88af561e-027c-4a34-9732-14df439a8254-type-query",
+          "operation_name": "write_text",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "text inserted into the active window",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "mode": "copilot",
+            "block_count": 1,
+            "text_length": 7,
+            "trusted_mode_bypass": false,
+            "verified_focus": "Chrome"
+          },
+          "started_at": "2026-04-26T18:58:50.610127Z",
+          "finished_at": "2026-04-26T18:58:50.610482Z",
+          "request_payload": {
+            "text": "youtube",
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.611016Z"
+    },
+    {
+      "checkpoint_id": "chk-511d8a671b",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "current_subtask": "type-query",
+      "current_step": "type-query",
+      "next_step_index": 4,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "content:youtube",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "goal_evidence:youtube",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "selection_available",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser",
+          "focus-address-bar",
+          "type-query"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "desktop-agent-88af561e-027c-4a34-9732-14df439a8254-type-query",
+          "operation_name": "write_text",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "text inserted into the active window",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "mode": "copilot",
+            "block_count": 1,
+            "text_length": 7,
+            "trusted_mode_bypass": false,
+            "verified_focus": "Chrome"
+          },
+          "started_at": "2026-04-26T18:58:50.610127Z",
+          "finished_at": "2026-04-26T18:58:50.610482Z",
+          "request_payload": {
+            "text": "youtube",
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.621060Z"
+    },
+    {
+      "checkpoint_id": "chk-4abc112afe",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "current_subtask": "submit-query",
+      "current_step": "submit-query",
+      "next_step_index": 4,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "content:youtube",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "goal_evidence:youtube",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "selection_available",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser",
+          "focus-address-bar",
+          "type-query"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "desktop-agent-88af561e-027c-4a34-9732-14df439a8254-type-query",
+          "operation_name": "write_text",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "text inserted into the active window",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "mode": "copilot",
+            "block_count": 1,
+            "text_length": 7,
+            "trusted_mode_bypass": false,
+            "verified_focus": "Chrome"
+          },
+          "started_at": "2026-04-26T18:58:50.610127Z",
+          "finished_at": "2026-04-26T18:58:50.610482Z",
+          "request_payload": {
+            "text": "youtube",
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.625538Z"
+    },
+    {
+      "checkpoint_id": "chk-bc4bb7761b",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "current_subtask": "submit-query",
+      "current_step": "submit-query",
+      "next_step_index": 4,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "content:youtube",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "goal_evidence:youtube",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "selection_available",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser",
+          "focus-address-bar",
+          "type-query"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-hotkey",
+          "operation_name": "keyboard_shortcut",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "keyboard shortcut executed",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "keys": [
+              "enter"
+            ],
+            "trusted_mode_bypass": false
+          },
+          "started_at": "2026-04-26T18:58:50.628385Z",
+          "finished_at": "2026-04-26T18:58:50.628641Z",
+          "request_payload": {
+            "keys": [
+              "enter"
+            ],
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.629029Z"
+    },
+    {
+      "checkpoint_id": "chk-6fd8e996d0",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "current_subtask": "submit-query",
+      "current_step": "submit-query",
+      "next_step_index": 5,
+      "observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "active_window_title": "Chrome",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "strategy": "grounded_browser_search",
+      "attempts": {},
+      "data": {
+        "last_error": null,
+        "context_signals": [
+          "browser_active",
+          "button_count:1",
+          "content:buscar",
+          "content:youtube",
+          "editable_input_visible",
+          "goal_evidence:chrome",
+          "goal_evidence:youtube",
+          "input_count:1",
+          "known_window:calculadora",
+          "known_window:chrome",
+          "known_window:editor",
+          "known_window:explorador de archivos",
+          "known_window:notepad",
+          "known_window:opera gx",
+          "known_window:vscode",
+          "known_window:word",
+          "process:chrome.exe",
+          "search_field_visible",
+          "selection_available",
+          "target:boton guardar",
+          "target:campo buscar",
+          "target:chrome",
+          "target:chrome editor",
+          "target_count:4",
+          "target_kind:button",
+          "target_kind:input",
+          "target_kind:text",
+          "target_kind:window",
+          "window_title:chrome"
+        ],
+        "completed_steps": [
+          "open-browser",
+          "focus-browser",
+          "focus-address-bar",
+          "type-query",
+          "submit-query"
+        ],
+        "failed_steps": [],
+        "last_result": {
+          "correlation_id": "runtime-ui-hotkey",
+          "operation_name": "keyboard_shortcut",
+          "risk_level": "high",
+          "success": true,
+          "status": "executed",
+          "message": "keyboard shortcut executed",
+          "active_window": {
+            "handle": "0x5",
+            "title": "Chrome",
+            "class_name": "FakeChrome",
+            "process_id": 5,
+            "process_name": "chrome.exe",
+            "rect": {}
+          },
+          "confirmation_required": false,
+          "security_decision": "allowed",
+          "data": {
+            "keys": [
+              "enter"
+            ],
+            "trusted_mode_bypass": false
+          },
+          "started_at": "2026-04-26T18:58:50.628385Z",
+          "finished_at": "2026-04-26T18:58:50.628641Z",
+          "request_payload": {
+            "keys": [
+              "enter"
+            ],
+            "target_window": "chrome"
+          }
+        }
+      },
+      "created_at": "2026-04-26T18:58:50.632998Z"
+    }
+  ],
+  "recovery_history": [],
+  "timeline": [
+    {
+      "entry_id": "evt-9729040765",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "pending",
+      "title": "mission_created",
+      "detail": "Mision creada y pendiente de observacion inicial.",
+      "step_id": null,
+      "subtask_id": null,
+      "created_at": "2026-04-26T18:58:50.454942Z"
+    },
+    {
+      "entry_id": "evt-ec1296038a",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "title": "observe",
+      "detail": "Observando el estado actual del escritorio.",
+      "step_id": null,
+      "subtask_id": null,
+      "created_at": "2026-04-26T18:58:50.558719Z"
+    },
+    {
+      "entry_id": "evt-fc440ca3cc",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "planning",
+      "title": "plan_built",
+      "detail": "Plan de mision construido con estrategia 'grounded_browser_search'.",
+      "step_id": null,
+      "subtask_id": null,
+      "created_at": "2026-04-26T18:58:50.560692Z"
+    },
+    {
+      "entry_id": "evt-d91ef6fe2c",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "title": "observe_step",
+      "detail": "Observando antes de ejecutar 'Abrir navegador'.",
+      "step_id": "open-browser",
+      "subtask_id": "open-browser",
+      "created_at": "2026-04-26T18:58:50.562953Z"
+    },
+    {
+      "entry_id": "evt-183eaab5a3",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "title": "step_execute",
+      "detail": "Ejecutando 'Abrir navegador'.",
+      "step_id": "open-browser",
+      "subtask_id": "open-browser",
+      "created_at": "2026-04-26T18:58:50.565500Z"
+    },
+    {
+      "entry_id": "evt-28e9e5bdd8",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "title": "step_verified",
+      "detail": "Paso verificado: 'Abrir navegador'.",
+      "step_id": "open-browser",
+      "subtask_id": "open-browser",
+      "created_at": "2026-04-26T18:58:50.586893Z"
+    },
+    {
+      "entry_id": "evt-ede646a67d",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "title": "observe_step",
+      "detail": "Observando antes de ejecutar 'Enfocar navegador'.",
+      "step_id": "focus-browser",
+      "subtask_id": "focus-browser",
+      "created_at": "2026-04-26T18:58:50.589400Z"
+    },
+    {
+      "entry_id": "evt-9bc840524a",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "title": "step_execute",
+      "detail": "Ejecutando 'Enfocar navegador'.",
+      "step_id": "focus-browser",
+      "subtask_id": "focus-browser",
+      "created_at": "2026-04-26T18:58:50.591838Z"
+    },
+    {
+      "entry_id": "evt-7ed7da4ea8",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "title": "step_verified",
+      "detail": "Paso verificado: 'Enfocar navegador'.",
+      "step_id": "focus-browser",
+      "subtask_id": "focus-browser",
+      "created_at": "2026-04-26T18:58:50.594866Z"
+    },
+    {
+      "entry_id": "evt-14762162ba",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "title": "observe_step",
+      "detail": "Observando antes de ejecutar 'Enfocar barra'.",
+      "step_id": "focus-address-bar",
+      "subtask_id": "focus-address-bar",
+      "created_at": "2026-04-26T18:58:50.597275Z"
+    },
+    {
+      "entry_id": "evt-304ca98c51",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "title": "step_execute",
+      "detail": "Ejecutando 'Enfocar barra'.",
+      "step_id": "focus-address-bar",
+      "subtask_id": "focus-address-bar",
+      "created_at": "2026-04-26T18:58:50.600212Z"
+    },
+    {
+      "entry_id": "evt-ad9c2dea9b",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "title": "step_verified",
+      "detail": "Paso verificado: 'Enfocar barra'.",
+      "step_id": "focus-address-bar",
+      "subtask_id": "focus-address-bar",
+      "created_at": "2026-04-26T18:58:50.603842Z"
+    },
+    {
+      "entry_id": "evt-342e9a5492",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "title": "observe_step",
+      "detail": "Observando antes de ejecutar 'Escribir busqueda'.",
+      "step_id": "type-query",
+      "subtask_id": "type-query",
+      "created_at": "2026-04-26T18:58:50.606876Z"
+    },
+    {
+      "entry_id": "evt-46a0f4602e",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "title": "step_execute",
+      "detail": "Ejecutando 'Escribir busqueda'.",
+      "step_id": "type-query",
+      "subtask_id": "type-query",
+      "created_at": "2026-04-26T18:58:50.609820Z"
+    },
+    {
+      "entry_id": "evt-ba406981d0",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "title": "step_verified",
+      "detail": "Paso verificado: 'Escribir busqueda'.",
+      "step_id": "type-query",
+      "subtask_id": "type-query",
+      "created_at": "2026-04-26T18:58:50.620922Z"
+    },
+    {
+      "entry_id": "evt-91db587ade",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "observing",
+      "title": "observe_step",
+      "detail": "Observando antes de ejecutar 'Enviar busqueda'.",
+      "step_id": "submit-query",
+      "subtask_id": "submit-query",
+      "created_at": "2026-04-26T18:58:50.625338Z"
+    },
+    {
+      "entry_id": "evt-e9b3e6bb6b",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "executing",
+      "title": "step_execute",
+      "detail": "Ejecutando 'Enviar busqueda'.",
+      "step_id": "submit-query",
+      "subtask_id": "submit-query",
+      "created_at": "2026-04-26T18:58:50.628335Z"
+    },
+    {
+      "entry_id": "evt-8775f2b240",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "verifying",
+      "title": "step_verified",
+      "detail": "Paso verificado: 'Enviar busqueda'.",
+      "step_id": "submit-query",
+      "subtask_id": "submit-query",
+      "created_at": "2026-04-26T18:58:50.632848Z"
+    },
+    {
+      "entry_id": "evt-63de8211fc",
+      "mission_id": "88af561e-027c-4a34-9732-14df439a8254",
+      "phase": "completed",
+      "title": "mission_finished",
+      "detail": "Abriendo chrome. Navegando a youtube. Observacion final: ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube.",
+      "step_id": null,
+      "subtask_id": "submit-query",
+      "created_at": "2026-04-26T18:58:50.635758Z"
+    }
+  ],
+  "progress": {
+    "total_subtasks": 5,
+    "completed_subtasks": 5,
+    "total_steps": 5,
+    "completed_steps": 5,
+    "failed_steps": 0,
+    "percent_complete": 100.0
+  },
+  "mission_snapshot": {
+    "goal": "abre chrome y busca youtube",
+    "current_step": "submit-query",
+    "current_subgoal": "ejecutar la busqueda y mantener evidencia de contexto",
+    "current_subtask": "submit-query",
+    "current_subtask_label": "Enviar busqueda",
+    "completed_steps": [
+      "open-browser",
+      "focus-browser",
+      "focus-address-bar",
+      "type-query",
+      "submit-query"
+    ],
+    "failed_steps": [],
+    "active_window": {
+      "handle": "0x5",
+      "title": "Chrome",
+      "class_name": "FakeChrome",
+      "process_id": 5,
+      "process_name": "chrome.exe",
+      "rect": {}
+    },
+    "target_application": "chrome",
+    "target_window_title": "chrome",
+    "target_path": null,
+    "active_path": null,
+    "autonomy_mode": "assistive",
+    "source_surface": "unknown",
+    "last_observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+    "last_error": null,
+    "context_signals": [
+      "browser_active",
+      "button_count:1",
+      "content:buscar",
+      "content:youtube",
+      "editable_input_visible",
+      "goal_evidence:chrome",
+      "goal_evidence:youtube",
+      "input_count:1",
+      "known_window:calculadora",
+      "known_window:chrome",
+      "known_window:editor",
+      "known_window:explorador de archivos",
+      "known_window:notepad",
+      "known_window:opera gx",
+      "known_window:vscode",
+      "known_window:word",
+      "process:chrome.exe",
+      "search_field_visible",
+      "selection_available",
+      "target:boton guardar",
+      "target:campo buscar",
+      "target:chrome",
+      "target:chrome editor",
+      "target_count:4",
+      "target_kind:button",
+      "target_kind:input",
+      "target_kind:text",
+      "target_kind:window",
+      "window_title:chrome"
+    ],
+    "memory": {
+      "opened_applications": [
+        "chrome"
+      ],
+      "attempted_steps": [
+        "open-browser",
+        "focus-browser",
+        "focus-address-bar",
+        "type-query",
+        "submit-query"
+      ],
+      "completed_steps": [
+        "open-browser",
+        "focus-browser",
+        "focus-address-bar",
+        "type-query",
+        "submit-query"
+      ],
+      "attempted_fallbacks": [],
+      "recovery_attempts_by_step": {},
+      "successful_strategies": [
+        "grounded_browser_search"
+      ],
+      "notes": [],
+      "last_error": null,
+      "last_completed_step": "submit-query",
+      "last_expected_observation": {
+        "active_window_contains": "chrome",
+        "process_name_contains": null,
+        "visible_text_contains": [
+          "youtube"
+        ],
+        "visible_text_not_contains": [],
+        "required_context_signals": [
+          "browser_active"
+        ],
+        "forbidden_context_signals": [],
+        "expected_targets": [],
+        "selection_contains": [],
+        "clipboard_contains": [],
+        "search_results_min": null,
+        "file_exists": null,
+        "folder_exists": null,
+        "path_exists": null,
+        "path_kind": null,
+        "path_contains": null,
+        "action_data_contains": {},
+        "action_success_required": true
+      },
+      "last_observation_summary": "ventana=Chrome | texto='Chrome editor Boton Guardar Campo Buscar youtube' | objetivos=Chrome editor, Boton Guardar, Campo Buscar | senales=browser_active, button_count:1, content:buscar, content:youtube",
+      "last_strategy": "grounded_browser_search",
+      "target_application": "chrome",
+      "target_window_title": "chrome",
+      "mission_position": "completed:submit-query",
+      "failed_verifications": []
+    },
+    "verbose_trace": false,
+    "step_receipt_count": 5,
+    "progress": {
+      "total_subtasks": 5,
+      "completed_subtasks": 5,
+      "total_steps": 5,
+      "completed_steps": 5,
+      "failed_steps": 0,
+      "percent_complete": 100.0
+    },
+    "status": "completed",
+    "next_step_index": 5,
+    "resume_count": 0,
+    "replan_count": 0,
+    "loop_iteration": 5,
+    "observe_count": 11,
+    "verify_count": 5,
+    "recovery_count": 0,
+    "abort_reason": null,
+    "metrics": {
+      "mission_start_latency": 0.09731660000034026,
+      "observe_latency": 0.0003949000001739478,
+      "checkpoint_latency": 4.9199999921256676e-05,
+      "step_latency": 0.0005471999993460486,
+      "verification_latency": 0.00045990000035089906,
+      "total_mission_latency": 0.178355
+    }
+  },
+  "failed_step_id": null,
+  "final_result": {
+    "status": "completed",
+    "success": true,
+    "completed_steps": 5,
+    "failed_step_id": null,
+    "abort_reason": null
+  },
+  "abort_reason": null,
+  "error": null,
+  "next_step_index": 5,
+  "loop_guard": 5,
+  "resume_count": 0,
+  "replan_count": 0,
+  "last_verification_note": "Verification passed.",
+  "last_recovery_note": null,
+  "metrics": {
+    "mission_start_latency": 0.09731660000034026,
+    "observe_latency": 0.0003949000001739478,
+    "checkpoint_latency": 4.9199999921256676e-05,
+    "step_latency": 0.0005471999993460486,
+    "verification_latency": 0.00045990000035089906,
+    "total_mission_latency": 0.178355
+  },
+  "created_at": "2026-04-26T18:58:50.454661Z",
+  "updated_at": "2026-04-26T18:58:50.635999Z"
+}

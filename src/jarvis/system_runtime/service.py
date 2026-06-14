@@ -11,6 +11,7 @@ from jarvis.core.services import RuntimeServiceContract
 
 from .base import (
     ResolvedSystemTarget,
+    SystemFileOperationRequest,
     SystemLaunchStatus,
     SystemOpenMode,
     SystemOpenRequest,
@@ -21,6 +22,7 @@ from .base import (
     SystemSearchRequest,
     SystemTargetKind,
 )
+from .file_ops import SystemFileOperations
 from .safeguards import build_system_open_policy, build_system_safety_policy, control_advice_for_target, validate_allowed_target
 
 
@@ -50,6 +52,7 @@ class SystemRuntimeService(RuntimeServiceContract):
         self._started = False
         self._open_policy = build_system_open_policy(settings)
         self._safety_policy = build_system_safety_policy(settings)
+        self._file_ops = SystemFileOperations(settings, topology, logger=self._logger)
 
     def start(self) -> None:
         self._started = True
@@ -206,6 +209,30 @@ class SystemRuntimeService(RuntimeServiceContract):
         return self.open(
             SystemOpenRequest(path=path, mode=SystemOpenMode.REVEAL_IN_FOLDER, reveal_in_folder=True, dry_run=dry_run, metadata=metadata or {})
         )
+
+    def create_file(self, request: SystemFileOperationRequest | dict):
+        self._ensure_started()
+        return self._file_ops.create_file(SystemFileOperationRequest.model_validate(request))
+
+    def create_folder(self, request: SystemFileOperationRequest | dict):
+        self._ensure_started()
+        return self._file_ops.create_folder(SystemFileOperationRequest.model_validate(request))
+
+    def copy_file(self, request: SystemFileOperationRequest | dict):
+        self._ensure_started()
+        return self._file_ops.copy_file(SystemFileOperationRequest.model_validate(request))
+
+    def move_file(self, request: SystemFileOperationRequest | dict):
+        self._ensure_started()
+        return self._file_ops.move_file(SystemFileOperationRequest.model_validate(request))
+
+    def rename_file(self, request: SystemFileOperationRequest | dict):
+        self._ensure_started()
+        return self._file_ops.rename_file(SystemFileOperationRequest.model_validate(request))
+
+    def resolve_location(self, label: str) -> Path:
+        self._ensure_started()
+        return self._file_ops.resolve_location(label)
 
     def _resolve_open_target(self, request: SystemOpenRequest) -> ResolvedSystemTarget:
         if request.path:

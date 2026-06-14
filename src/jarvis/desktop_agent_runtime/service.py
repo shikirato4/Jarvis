@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -18,6 +19,7 @@ from .models import (
     DesktopAgentStep,
     DesktopAgentStepReceipt,
     DesktopAgentTimelineEntry,
+    DesktopStepActionType,
     DesktopMissionStepStatus,
     DesktopPolicyDecision,
     DesktopVerificationStatus,
@@ -36,6 +38,17 @@ from .world_model import DesktopWorldModelBuilder
 
 class DesktopAgentRuntimeService:
     service_name = "desktop_agent_runtime"
+    _POST_ACTION_OBSERVE_OPTIONAL = {
+        DesktopStepActionType.SEARCH_FILE,
+        DesktopStepActionType.OPEN_FILE,
+        DesktopStepActionType.OPEN_FOLDER,
+        DesktopStepActionType.OPEN_PATH,
+        DesktopStepActionType.CREATE_FILE,
+        DesktopStepActionType.CREATE_FOLDER,
+        DesktopStepActionType.COPY_FILE,
+        DesktopStepActionType.MOVE_FILE,
+        DesktopStepActionType.RENAME_FILE,
+    }
     _ACTIVE_PHASES = {
         DesktopAgentPhase.PENDING,
         DesktopAgentPhase.OBSERVING,
@@ -86,6 +99,8 @@ class DesktopAgentRuntimeService:
             "latest_step": latest.world_state.current_step_id if latest else None,
             "latest_goal": latest.goal if latest else None,
             "latest_subtask": latest.current_subtask_label if latest else None,
+            "latest_path": latest.world_state.active_path if latest else None,
+            "metrics": latest.metrics if latest else {},
         }
 
     def list_missions(self) -> list[DesktopAgentMissionReceipt]:
@@ -152,6 +167,8 @@ class DesktopAgentRuntimeService:
         mission.abort_reason = reason or "abort requested"
         mission.success = False
         mission.error = mission.abort_reason
+        mission.world_state.phase = DesktopAgentPhase.ABORTED
+        mission.world_state.last_error = mission.abort_reason
         mission.summary = f"Mision abortada. Motivo: {mission.abort_reason}."
         mission.updated_at = datetime.now(timezone.utc)
         if mission.world_state.current_step_id:
@@ -217,17 +234,34 @@ class DesktopAgentRuntimeService:
         retries_per_step = payload.max_retries_per_step
         control = self._coordinator.control(mission_id)
 
+        if self._should_stop(mission, control):
+            return self._save_mission(mission)
+
         if mission.plan is None:
+            mission.metrics.setdefault("mission_start_latency", 0.0)
+            mission_started = time.perf_counter()
+            if self._should_stop(mission, control):
+                return self._save_mission(mission)
             world.phase = DesktopAgentPhase.OBSERVING
+            started = time.perf_counter()
             world = self._observer.observe(world, phase=DesktopAgentPhase.OBSERVING)
+            mission.metrics["observe_latency"] = time.perf_counter() - started
+            if self._should_stop(mission, control):
+                return self._save_mission(mission)
             mission.status = DesktopAgentPhase.OBSERVING
             mission.current_phase = DesktopAgentPhase.OBSERVING
             mission.summary = "Observando el estado actual del escritorio."
             self._append_timeline(mission, DesktopAgentPhase.OBSERVING, "observe", mission.summary)
             self._checkpoint_and_save(mission, world)
+            if self._should_stop(mission, control):
+                return self._save_mission(mission)
 
+            if self._should_stop(mission, control):
+                return self._save_mission(mission)
             world.phase = DesktopAgentPhase.PLANNING
             plan = self._planner.plan(world)
+            if self._should_stop(mission, control):
+                return self._save_mission(mission)
             world.current_plan = plan
             world = self._memory.note_strategy(world, plan.strategy)
             mission.plan = plan
@@ -237,14 +271,17 @@ class DesktopAgentRuntimeService:
             mission.summary = f"Plan de mision construido con estrategia '{plan.strategy}'."
             self._append_timeline(mission, DesktopAgentPhase.PLANNING, "plan_built", mission.summary)
             self._checkpoint_and_save(mission, world)
+            if self._should_stop(mission, control):
+                return self._save_mission(mission)
+            mission.metrics["mission_start_latency"] = time.perf_counter() - mission_started
 
         active_steps = list((mission.plan or DesktopAgentPlan(mission_id=mission_id, strategy="empty")).steps)
         index = mission.next_step_index
         loop_guard = mission.loop_guard
 
         while index < len(active_steps):
-            if control.abort_requested.is_set():
-                return self.abort_mission(mission_id, reason="abort requested while executing")
+            if self._should_stop(mission, control):
+                break
             if control.pause_requested.is_set():
                 mission.status = DesktopAgentPhase.PAUSED
                 mission.current_phase = DesktopAgentPhase.PAUSED
@@ -255,6 +292,7 @@ class DesktopAgentRuntimeService:
 
             loop_guard += 1
             mission.loop_guard = loop_guard
+            world.loop_iteration = loop_guard
             step = active_steps[index]
             if loop_guard > max_steps:
                 failed_step_id = step.step_id
@@ -271,8 +309,14 @@ class DesktopAgentRuntimeService:
             mission.current_subtask = current_subtask.subtask_id if current_subtask else None
             mission.current_subtask_label = current_subtask.label if current_subtask else None
 
+            if self._should_stop(mission, control):
+                break
             world.phase = DesktopAgentPhase.OBSERVING
+            started = time.perf_counter()
             world = self._observer.observe(world, phase=DesktopAgentPhase.OBSERVING)
+            mission.metrics["observe_latency"] = time.perf_counter() - started
+            if self._should_stop(mission, control):
+                break
             world.current_step = step
             world.current_step_id = step.step_id
             world.current_subgoal = step.subgoal
@@ -284,6 +328,8 @@ class DesktopAgentRuntimeService:
             mission.next_step_index = index
             self._append_timeline(mission, DesktopAgentPhase.OBSERVING, "observe_step", mission.summary, step_id=step.step_id, subtask_id=mission.current_subtask)
             self._checkpoint_and_save(mission, world)
+            if self._should_stop(mission, control):
+                break
 
             policy_result = self._policy.assess_step(step)
             world.risk_level = policy_result.risk_level
@@ -312,17 +358,30 @@ class DesktopAgentRuntimeService:
                 self._append_timeline(mission, DesktopAgentPhase.BLOCKED, "policy_blocked", mission.summary, step_id=step.step_id, subtask_id=mission.current_subtask)
                 break
 
+            if self._should_stop(mission, control):
+                break
             world.phase = DesktopAgentPhase.EXECUTING
             mission.status = DesktopAgentPhase.EXECUTING
             mission.current_phase = DesktopAgentPhase.EXECUTING
             mission.summary = f"Ejecutando '{step.title}'."
             self._append_timeline(mission, DesktopAgentPhase.EXECUTING, "step_execute", mission.summary, step_id=step.step_id, subtask_id=mission.current_subtask)
+            started = time.perf_counter()
             world, action_result = self._executor.execute(world, step)
+            mission.metrics["step_latency"] = time.perf_counter() - started
+            if self._should_stop(mission, control):
+                break
             self._checkpoint_and_save(mission, world)
 
+            if self._should_stop(mission, control):
+                break
             world.phase = DesktopAgentPhase.VERIFYING
-            world = self._observer.observe(world, phase=DesktopAgentPhase.VERIFYING)
+            started = time.perf_counter()
+            if self._requires_post_action_observation(step):
+                world = self._observer.observe(world, phase=DesktopAgentPhase.VERIFYING)
             verification = self._verifier.verify(world, step, action_result)
+            mission.metrics["verification_latency"] = time.perf_counter() - started
+            if self._should_stop(mission, control):
+                break
             mission.status = DesktopAgentPhase.VERIFYING
             mission.current_phase = DesktopAgentPhase.VERIFYING
             mission.last_verification_note = verification.note
@@ -347,13 +406,24 @@ class DesktopAgentRuntimeService:
                 mission.summary = f"Paso verificado: '{step.title}'."
                 self._append_timeline(mission, DesktopAgentPhase.VERIFYING, "step_verified", mission.summary, step_id=step.step_id, subtask_id=mission.current_subtask)
                 self._checkpoint_and_save(mission, world)
+                if self._should_stop(mission, control):
+                    break
                 continue
 
+            if self._should_stop(mission, control):
+                break
             model_suggestion = self._planner.propose_replan(world, reason=verification.note, failed_step=step, verification=verification)
+            if self._should_stop(mission, control):
+                break
             world.phase = DesktopAgentPhase.RECOVERING
             mission.status = DesktopAgentPhase.RECOVERING
             mission.current_phase = DesktopAgentPhase.RECOVERING
+            world.recovery_count += 1
+            started = time.perf_counter()
             world, recovery = self._recovery.recover(world, step, verification, model_suggestion=model_suggestion)
+            mission.metrics["recovery_latency"] = time.perf_counter() - started
+            if self._should_stop(mission, control):
+                break
             mission.last_recovery_note = recovery.note
             receipt.recovery_note = recovery.note
             receipt.recovery_strategy = recovery.strategy
@@ -378,15 +448,32 @@ class DesktopAgentRuntimeService:
 
             if recovery.step_update:
                 step.payload = recovery.step_update.get("payload", step.payload)
+                if recovery.step_update.get("action_type"):
+                    step.action_type = DesktopStepActionType(str(recovery.step_update["action_type"]))
 
             if recovery.should_retry:
+                if self._should_stop(mission, control):
+                    break
                 world.phase = DesktopAgentPhase.OBSERVING
+                started = time.perf_counter()
                 world = self._observer.observe(world, phase=DesktopAgentPhase.OBSERVING)
+                mission.metrics["observe_latency"] = time.perf_counter() - started
+                if self._should_stop(mission, control):
+                    break
                 world.phase = DesktopAgentPhase.EXECUTING
+                started = time.perf_counter()
                 world, action_result = self._executor.execute(world, step)
+                mission.metrics["step_latency"] = time.perf_counter() - started
+                if self._should_stop(mission, control):
+                    break
                 world.phase = DesktopAgentPhase.VERIFYING
-                world = self._observer.observe(world, phase=DesktopAgentPhase.VERIFYING)
+                started = time.perf_counter()
+                if self._requires_post_action_observation(step):
+                    world = self._observer.observe(world, phase=DesktopAgentPhase.VERIFYING)
                 verification = self._verifier.verify(world, step, action_result)
+                mission.metrics["verification_latency"] = time.perf_counter() - started
+                if self._should_stop(mission, control):
+                    break
                 retry_receipt = DesktopAgentStepReceipt(
                     step_id=step.step_id,
                     title=f"{step.title} (retry)",
@@ -401,6 +488,8 @@ class DesktopAgentRuntimeService:
                 step_receipts.append(retry_receipt)
                 mission.step_receipts = step_receipts
                 mission.last_verification_note = verification.note
+                if self._should_stop(mission, control):
+                    break
                 if verification.status == DesktopVerificationStatus.PASSED:
                     completed_steps.append(step.step_id)
                     world = self._memory.note_step_completed(world, step.step_id, strategy=recovery.strategy or world.memory.last_strategy)
@@ -409,10 +498,14 @@ class DesktopAgentRuntimeService:
                     index += 1
                     mission.next_step_index = index
                     self._checkpoint_and_save(mission, world)
+                    if self._should_stop(mission, control):
+                        break
                     continue
                 world.last_error = verification.note
 
             if recovery.should_replan:
+                if self._should_stop(mission, control):
+                    break
                 world.phase = DesktopAgentPhase.PLANNING
                 replanned = self._planner.replan(world, reason=recovery.note, failed_step=step, verification=verification)
                 world.current_plan = replanned
@@ -427,6 +520,8 @@ class DesktopAgentRuntimeService:
                 mission.next_step_index = 0
                 self._append_timeline(mission, DesktopAgentPhase.PLANNING, "replan", f"Replan local aplicado: {replanned.strategy}.", step_id=step.step_id, subtask_id=mission.current_subtask)
                 self._checkpoint_and_save(mission, world)
+                if self._should_stop(mission, control):
+                    break
                 continue
 
             failed_step_id = step.step_id
@@ -460,6 +555,7 @@ class DesktopAgentRuntimeService:
             "failed_step_id": mission.failed_step_id,
             "abort_reason": mission.abort_reason,
         }
+        mission.metrics["total_mission_latency"] = max((mission.updated_at - mission.created_at).total_seconds(), 0.0)
         if mission.status in {DesktopAgentPhase.FAILED, DesktopAgentPhase.BLOCKED}:
             mission.error = world.last_error
         self._append_timeline(mission, mission.status, "mission_finished", mission.summary, step_id=mission.failed_step_id, subtask_id=mission.current_subtask)
@@ -475,6 +571,46 @@ class DesktopAgentRuntimeService:
             },
         )
         return self._save_mission(mission)
+
+    def _should_stop(self, mission: DesktopAgentMissionReceipt, control) -> bool:
+        latest = self._state.get(mission.mission_id)
+        if latest is not None and latest is not mission and latest.status in {
+            DesktopAgentPhase.ABORTED,
+            DesktopAgentPhase.FAILED,
+            DesktopAgentPhase.COMPLETED,
+        }:
+            self._apply_terminal_state(mission, latest)
+            return True
+        if control.abort_requested.is_set():
+            mission.status = DesktopAgentPhase.ABORTED
+            mission.current_phase = DesktopAgentPhase.ABORTED
+            mission.abort_reason = mission.abort_reason or "abort requested"
+            mission.success = False
+            mission.error = mission.abort_reason
+            mission.world_state.phase = DesktopAgentPhase.ABORTED
+            mission.world_state.last_error = mission.abort_reason
+            return True
+        return mission.status in {
+            DesktopAgentPhase.ABORTED,
+            DesktopAgentPhase.FAILED,
+            DesktopAgentPhase.COMPLETED,
+        }
+
+    @staticmethod
+    def _apply_terminal_state(mission: DesktopAgentMissionReceipt, latest: DesktopAgentMissionReceipt) -> None:
+        mission.status = latest.status
+        mission.current_phase = latest.current_phase
+        mission.abort_reason = latest.abort_reason
+        mission.success = latest.success
+        mission.error = latest.error
+        mission.summary = latest.summary
+        mission.failed_step_id = latest.failed_step_id
+        mission.failed_steps = list(latest.failed_steps)
+        mission.completed_steps = list(latest.completed_steps)
+        mission.step_receipts = list(latest.step_receipts)
+        mission.current_subtask = latest.current_subtask
+        mission.current_subtask_label = latest.current_subtask_label
+        mission.world_state = latest.world_state
 
     def _normalize_hydrated_mission(self, mission: DesktopAgentMissionReceipt) -> DesktopAgentMissionReceipt:
         if mission.status in self._ACTIVE_PHASES:
@@ -500,8 +636,13 @@ class DesktopAgentRuntimeService:
             DesktopAgentMissionRequest.model_validate(mission.mission_snapshot.get("request") or {"goal": mission.goal}),
             mission,
         )
-        mission.checkpoints.append(build_checkpoint(mission, world))
-        mission.checkpoints = mission.checkpoints[-12:]
+        started = time.perf_counter()
+        signature = self._checkpoint_signature(mission, world)
+        if signature != mission.mission_snapshot.get("_last_checkpoint_signature"):
+            mission.checkpoints.append(build_checkpoint(mission, world))
+            mission.checkpoints = mission.checkpoints[-12:]
+            mission.mission_snapshot["_last_checkpoint_signature"] = signature
+        mission.metrics["checkpoint_latency"] = time.perf_counter() - started
         return self._save_mission(mission)
 
     def _save_mission(self, mission: DesktopAgentMissionReceipt) -> DesktopAgentMissionReceipt:
@@ -535,10 +676,16 @@ class DesktopAgentRuntimeService:
                 subtask_id=subtask_id,
             )
         )
+        if len(mission.timeline) >= 2:
+            previous = mission.timeline[-2]
+            latest = mission.timeline[-1]
+            if previous.phase == latest.phase and previous.title == latest.title and previous.step_id == latest.step_id and previous.detail == latest.detail:
+                mission.timeline.pop()
         mission.timeline = mission.timeline[-60:]
 
     @staticmethod
     def _build_summary(world: DesktopWorldState, completed_steps: list[str], failed_step_id: str | None, status: DesktopAgentPhase) -> str:
+        goal = world.current_goal.casefold()
         if status == DesktopAgentPhase.PAUSED:
             return (
                 f"Mision en pausa. "
@@ -548,6 +695,10 @@ class DesktopAgentRuntimeService:
         if status == DesktopAgentPhase.ABORTED:
             return f"Mision abortada. Motivo: {world.last_error or 'solicitud de abortar'}."
         if failed_step_id:
+            if failed_step_id in {"open-app", "open-browser", "open-word", "open-editor", "open-explorer"} and (
+                "not_found" in (world.last_error or "") or goal.startswith("abre ")
+            ):
+                return "No pude encontrar esa aplicacion."
             return (
                 f"Mision detenida en '{failed_step_id}'. "
                 f"Observacion: {world.last_observation_summary or 'sin observacion reciente'}. "
@@ -555,7 +706,27 @@ class DesktopAgentRuntimeService:
             )
         if world.current_plan is None:
             return "Mision completada sin plan visible."
-        goal = world.current_goal.casefold()
+        if world.current_plan.strategy == "grounded_screen_read":
+            return f"Veo {world.last_observation_summary or 'el escritorio actual, pero sin suficiente contexto visual'}."
+        if world.current_plan.strategy == "grounded_open_application" and world.target_application:
+            return f"He abierto {world.target_application}. Observacion final: {world.last_observation_summary or 'sin observacion'}."
+        if world.current_plan.strategy in {
+            "grounded_file_search",
+            "grounded_file_search_only",
+            "grounded_open_file",
+            "grounded_open_folder",
+            "grounded_create_folder",
+            "grounded_create_named_file",
+            "grounded_copy_file",
+            "grounded_move_file",
+            "grounded_rename_file",
+            "grounded_open_explorer",
+        }:
+            return (
+                f"Mision de archivos completada. "
+                f"Path objetivo: {world.active_path or world.target_path or 'sin path resuelto'}. "
+                f"Observacion final: {world.last_observation_summary or 'sin observacion'}."
+            )
         if "abre " in goal and " busca " in goal:
             parts = world.current_goal.split()
             app = parts[1] if len(parts) > 1 else "la aplicacion"
@@ -597,6 +768,10 @@ class DesktopAgentRuntimeService:
             "active_window": world.active_window.model_dump(mode="json") if world.active_window else None,
             "target_application": world.target_application,
             "target_window_title": world.target_window_title,
+            "target_path": world.target_path,
+            "active_path": world.active_path,
+            "autonomy_mode": world.autonomy_mode.value,
+            "source_surface": world.source_surface.value,
             "last_observation_summary": world.last_observation_summary,
             "last_error": world.last_error,
             "context_signals": world.context_signals,
@@ -608,9 +783,35 @@ class DesktopAgentRuntimeService:
             "next_step_index": mission.next_step_index,
             "resume_count": mission.resume_count,
             "replan_count": mission.replan_count,
+            "loop_iteration": world.loop_iteration,
+            "observe_count": world.observe_count,
+            "verify_count": world.verify_count,
+            "recovery_count": world.recovery_count,
             "abort_reason": mission.abort_reason,
+            "metrics": mission.metrics,
         }
 
     def _ensure_started(self) -> None:
         if not self._started:
             raise RuntimeError("desktop agent runtime is not started")
+
+    @classmethod
+    def _requires_post_action_observation(cls, step: DesktopAgentStep) -> bool:
+        return step.action_type not in cls._POST_ACTION_OBSERVE_OPTIONAL
+
+    @staticmethod
+    def _checkpoint_signature(mission: DesktopAgentMissionReceipt, world: DesktopWorldState) -> tuple[object, ...]:
+        return (
+            mission.status.value,
+            mission.current_subtask,
+            world.current_step_id,
+            mission.next_step_index,
+            tuple(mission.completed_steps),
+            tuple(mission.failed_steps),
+            world.last_observation_summary,
+            world.active_window.title if world.active_window else None,
+            world.active_path,
+            world.target_path,
+            tuple(world.context_signals),
+            tuple(sorted(world.last_result.keys())),
+        )

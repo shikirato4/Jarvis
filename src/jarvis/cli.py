@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import json
+import logging
 from pathlib import Path
 import re
 from typing import Any
@@ -10,15 +13,20 @@ import typer
 import uvicorn
 
 from jarvis.automation.service import AutomationDefinition
+from jarvis.benchmark import format_benchmark, format_real_benchmark, format_streaming_benchmark, run_benchmark, run_real_benchmark, run_streaming_benchmark
 from jarvis.bootstrap import build_application
+from jarvis.code_agent_runtime import CodeAgentRuntimeService
 from jarvis.cognition.models import OrchestrationRequest
 from jarvis.core.modes import ExecutionMode
 from jarvis.desktop_agent_runtime import DesktopAgentMissionRequest
+from jarvis.desktop_agent_runtime.models import DesktopAgentAutonomyMode, DesktopAgentSourceSurface
+from jarvis.identity import jarvis_identity_prompt
 from jarvis.autonomy.base import MissionApprovalRequest, MissionControlActionRequest, MissionPlanRequest, MissionRequest
 from jarvis.indexing_runtime.models import IndexRunRequest, IndexSourceCreateRequest, IndexSourceKind, IndexingTrigger
 from jarvis.memory_semantic.base import SemanticSearchQuery
 from jarvis.memory_semantic.documents import DocumentIngestionRequest
 from jarvis.models_runtime.base import ModelRequest
+from jarvis.ollama_diagnostics import diagnose_ollama, warmup_ollama
 from jarvis.research_runtime.models import ResearchBudget, ResearchRunRequest, SimulatedResearchSource
 from jarvis.routing.models import TaskRequest
 from jarvis.science_runtime import ScienceSimulationRequest, ScienceSolveRequest
@@ -40,6 +48,7 @@ from jarvis.unity_runtime.base import (
 )
 from jarvis.ui_automation.base import ClickRequest, FocusWindowRequest, MoveMouseRequest, ShortcutRequest, UIAutomationMode, WriteTextRequest
 from jarvis.voice_runtime.base import VoiceSessionRequest
+from jarvis.web_search import build_web_search_provider
 from jarvis.writing_runtime.models import WritingContinuationRequest, WritingMode
 
 app = typer.Typer(help="Jarvis cognitive operating system CLI.")
@@ -56,6 +65,19 @@ science_app = typer.Typer(help="Science runtime for symbolic solving and simulat
 security_app = typer.Typer(help="Security runtime for password checks and local analysis.")
 index_app = typer.Typer(help="Indexing runtime for workspace and document synchronization.")
 desktop_agent_app = typer.Typer(help="Persistent desktop agent runtime with observe-plan-act-verify-recover loop.")
+code_agent_app = typer.Typer(help="Local code-agent runtime for safe project file and command work.")
+code_memory_app = typer.Typer(help="Project memory operations for the local code agent.")
+code_git_app = typer.Typer(help="Safe local Git operations for the local code agent.")
+code_skills_app = typer.Typer(help="Internal Codex-style skills for the local code agent.")
+code_repos_app = typer.Typer(help="Read-only local reference repository library.")
+code_learn_app = typer.Typer(help="GitHub repository learning library for the local code agent.")
+code_search_app = typer.Typer(help="Improved local search over repository library and learned patterns.")
+code_plan_agent_app = typer.Typer(help="Planner/executor agent loop for safe coding tasks.")
+code_patch_app = typer.Typer(help="Reviewable patch proposals and safe patch application.")
+code_change_app = typer.Typer(help="Controlled natural-language change generation for reviewable patches.")
+code_llm_app = typer.Typer(help="Safe optional LLM provider status and configuration.")
+web_app = typer.Typer(help="Safe web search status and Brave Search queries.")
+ollama_app = typer.Typer(help="Local Ollama diagnostics for Jarvis.")
 app.add_typer(semantic_app, name="semantic")
 app.add_typer(ui_app, name="ui")
 app.add_typer(voice_app, name="voice")
@@ -69,6 +91,19 @@ app.add_typer(science_app, name="science")
 app.add_typer(security_app, name="security")
 app.add_typer(index_app, name="index")
 app.add_typer(desktop_agent_app, name="desktop-agent")
+app.add_typer(code_agent_app, name="code")
+app.add_typer(web_app, name="web")
+app.add_typer(ollama_app, name="ollama")
+code_agent_app.add_typer(code_memory_app, name="memory")
+code_agent_app.add_typer(code_git_app, name="git")
+code_agent_app.add_typer(code_skills_app, name="skills")
+code_agent_app.add_typer(code_repos_app, name="repos")
+code_agent_app.add_typer(code_learn_app, name="learn")
+code_agent_app.add_typer(code_search_app, name="search")
+code_agent_app.add_typer(code_plan_agent_app, name="agent")
+code_agent_app.add_typer(code_patch_app, name="patch")
+code_agent_app.add_typer(code_change_app, name="change")
+code_agent_app.add_typer(code_llm_app, name="llm")
 
 
 def _parse_json(raw: str | None) -> dict[str, Any]:
@@ -86,6 +121,237 @@ def _parse_json(raw: str | None) -> dict[str, Any]:
             if not isinstance(parsed, dict):
                 raise ValueError("payload must resolve to a dictionary")
             return parsed
+
+
+@app.command("doctor")
+def doctor() -> None:
+    from jarvis.environment import detect_environment
+    from jarvis.persistent_config import load_persistent_config
+    p_config = load_persistent_config()
+    env = detect_environment(ollama_base_url=p_config.local_base_url, prefer_model=p_config.local_model)
+    web_status = build_web_search_provider().status()
+    typer.echo(json.dumps({
+        "internet_available": env.internet_available,
+        "ollama_available": env.ollama.available,
+        "ollama_models": env.ollama.models,
+        "ollama_error": env.ollama.error,
+        "ollama_status": env.ollama.status,
+        "ollama_reachable": env.ollama.reachable,
+        "ollama_base_url": env.ollama.base_url,
+        "ollama_openai_base_url": env.ollama.openai_base_url,
+        "ollama_model": env.ollama.model,
+        "ollama_model_found": env.ollama.model_found,
+        "ollama_response_time_ms": env.ollama.response_time_ms,
+        "ollama_suggestions": env.ollama.suggestions,
+        "recommended_local_provider": env.recommended_local_provider,
+        "recommended_local_model": env.recommended_local_model,
+        "recommended_mode": env.recommended_mode,
+        "web_search": {
+            "provider": web_status.provider,
+            "enabled": web_status.enabled,
+            "available": web_status.available,
+            "brave_key_configured": web_status.configured,
+            "sends_private_context": web_status.sends_private_context,
+            "message": web_status.message,
+        },
+        "policy": {
+            "openai": "blocked",
+            "gemini": "blocked",
+            "online_llm": "disabled",
+            "online_search": "Brave + local Ollama",
+        },
+        "warnings": env.warnings
+    }, indent=2, default=str))
+
+
+@ollama_app.command("status")
+def ollama_status(json_output: bool = typer.Option(False, "--json")) -> None:
+    from jarvis.persistent_config import load_persistent_config
+
+    p_config = load_persistent_config()
+    diagnostic = diagnose_ollama(base_url=p_config.local_base_url, model=p_config.local_model, timeout_seconds=2.0)
+    payload = {
+        "reachable": diagnostic.reachable,
+        "available": diagnostic.available,
+        "status": diagnostic.status,
+        "base_url": diagnostic.base_url,
+        "openai_base_url": diagnostic.openai_base_url,
+        "model": diagnostic.model,
+        "model_found": diagnostic.model_found,
+        "response_time_ms": diagnostic.response_time_ms,
+        "message": diagnostic.message,
+        "suggestions": diagnostic.suggestions,
+        "openai": "blocked",
+        "gemini": "blocked",
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+    lines = [
+        "Jarvis Ollama Status",
+        f"Reachable: {str(diagnostic.reachable).lower()}",
+        f"Available: {str(diagnostic.available).lower()}",
+        f"Status: {diagnostic.status}",
+        f"Base URL: {diagnostic.base_url}",
+        f"OpenAI-compatible URL: {diagnostic.openai_base_url}",
+        f"Model: {diagnostic.model}",
+        f"Model found: {'unknown' if diagnostic.model_found is None else str(diagnostic.model_found).lower()}",
+        f"Response time: {diagnostic.response_time_ms} ms",
+        f"Message: {diagnostic.message}",
+        "OpenAI: blocked",
+        "Gemini: blocked",
+    ]
+    if diagnostic.suggestions:
+        lines.append("Suggestions:")
+        lines.extend(f"- {item}" for item in diagnostic.suggestions)
+    typer.echo("\n".join(lines))
+
+
+@ollama_app.command("warmup")
+def ollama_warmup(
+    prompt: str | None = typer.Option(None, "--prompt"),
+    timeout_seconds: float = typer.Option(20.0, "--timeout"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    from jarvis.persistent_config import load_persistent_config
+
+    p_config = load_persistent_config()
+    warm_prompt = prompt or "ping"
+    diagnostic = warmup_ollama(base_url=p_config.local_base_url, model=p_config.local_model, prompt=warm_prompt, timeout_seconds=timeout_seconds)
+    payload = {
+        "status": diagnostic.status,
+        "available": diagnostic.available,
+        "base_url": diagnostic.base_url,
+        "model": diagnostic.model,
+        "response_time_ms": diagnostic.response_time_ms,
+        "message": diagnostic.message,
+        "openai": "blocked",
+        "gemini": "blocked",
+    }
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+    typer.echo(
+        "\n".join(
+            [
+                "Jarvis Ollama Warmup",
+                f"Status: {diagnostic.status}",
+                f"Available: {str(diagnostic.available).lower()}",
+                f"Model: {diagnostic.model}",
+                f"Response time: {diagnostic.response_time_ms} ms",
+                f"Message: {diagnostic.message}",
+                "OpenAI: blocked",
+                "Gemini: blocked",
+            ]
+        )
+    )
+
+
+@app.command("benchmark")
+def benchmark(
+    json_output: bool = typer.Option(False, "--json"),
+    include_search: bool = typer.Option(False, "--include-search"),
+    real: bool = typer.Option(False, "--real"),
+    stream: bool = typer.Option(False, "--stream"),
+    debug_stream: bool = typer.Option(False, "--debug-stream"),
+    breakdown: bool = typer.Option(False, "--breakdown"),
+    prompt: str = typer.Option("hola jarvis", "--prompt"),
+    mode: str | None = typer.Option(None, "--mode"),
+) -> None:
+    if real:
+        if stream:
+            result = run_streaming_benchmark(prompt=prompt, mode=mode, debug_stream=debug_stream)
+            typer.echo(json.dumps(result, indent=2, default=str) if json_output else format_streaming_benchmark(result))
+            return
+        result = run_real_benchmark(prompt=prompt, mode=mode, breakdown=breakdown)
+        typer.echo(json.dumps(result, indent=2, default=str) if json_output else format_real_benchmark(result))
+        return
+    result = run_benchmark(include_search=include_search)
+    typer.echo(json.dumps(result, indent=2, default=str) if json_output else format_benchmark(result))
+
+
+@app.command("chat")
+def chat(prompt: str, stream: bool = typer.Option(False, "--stream")) -> None:
+    jarvis = build_application()
+    log_buffer = io.StringIO()
+    previous_disable_level = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    try:
+        with contextlib.redirect_stderr(log_buffer):
+            jarvis.start()
+            request = ModelRequest(
+                prompt=prompt,
+                messages=[
+                    {"role": "system", "content": jarvis_identity_prompt("Superficie: CLI local streaming.")},
+                    {"role": "user", "content": prompt},
+                ],
+                logical_model="general_assistant",
+                task_type="assistant",
+                required_capabilities=("chat",),
+                max_tokens=160,
+                stream=stream,
+                metadata={"source": "cli_chat"},
+            )
+            if stream:
+                wrote = False
+                for chunk in jarvis.runtime_service.stream_model(request):
+                    if chunk.error:
+                        typer.echo(f"\nError local: {chunk.error}")
+                        return
+                    if chunk.text:
+                        typer.echo(chunk.text, nl=False)
+                        wrote = True
+                    if chunk.done:
+                        break
+                if wrote:
+                    typer.echo("")
+                return
+            response = jarvis.runtime_service.infer_model(request)
+            typer.echo(response.content)
+    finally:
+        with contextlib.redirect_stderr(log_buffer):
+            jarvis.stop()
+        logging.disable(previous_disable_level)
+
+
+@web_app.command("status")
+def web_status(json_output: bool = typer.Option(False, "--json")) -> None:
+    status = build_web_search_provider().status()
+    payload = status.model_dump(mode="json")
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+    typer.echo(
+        "\n".join(
+            [
+                "Jarvis Web Search",
+                f"Provider: {status.provider}",
+                f"Enabled: {str(status.enabled).lower()}",
+                f"Available: {str(status.available).lower()}",
+                f"API key: configured {str(status.configured).lower()}",
+                "Sends private context: no",
+                "OpenAI: blocked",
+                "Gemini: blocked",
+                f"Message: {status.message}",
+            ]
+        )
+    )
+
+
+@web_app.command("search")
+def web_search(query: str, max_results: int = typer.Option(5, "--max-results"), json_output: bool = typer.Option(False, "--json")) -> None:
+    result = build_web_search_provider().search(query, max_results=max_results)
+    if json_output:
+        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, default=str))
+        return
+    lines = [f"Web Search: {result.provider} · {len(result.hits)} fuentes · respuesta local", f"Status: {result.status}", result.message]
+    if result.hits:
+        lines.append("")
+        lines.append("Fuentes:")
+        for hit in result.hits:
+            lines.append(f"{hit.rank}. {hit.title} — {hit.source}")
+            lines.append(f"   {hit.url}")
+    typer.echo("\n".join(lines))
 
 
 @app.command("serve")
@@ -174,7 +440,10 @@ def infer(
         response = jarvis.runtime_service.infer_model(
             ModelRequest(
                 prompt=prompt,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": jarvis_identity_prompt("Superficie: CLI local.")},
+                    {"role": "user", "content": prompt},
+                ],
                 logical_model=logical_model,
                 task_type=task_type,
                 temperature=temperature,
@@ -251,6 +520,602 @@ def state() -> None:
         jarvis.stop()
 
 
+def _code_agent(root: str | None = None) -> CodeAgentRuntimeService:
+    return CodeAgentRuntimeService(project_root=Path(root).resolve(strict=False) if root else Path.cwd())
+
+
+@code_agent_app.command("doctor")
+def code_doctor() -> None:
+    doctor()
+
+
+@code_agent_app.command("benchmark")
+def code_benchmark(
+    root: str | None = typer.Option(None, "--root"),
+    json_output: bool = typer.Option(False, "--json"),
+    real: bool = typer.Option(False, "--real"),
+    stream: bool = typer.Option(False, "--stream"),
+    debug_stream: bool = typer.Option(False, "--debug-stream"),
+    breakdown: bool = typer.Option(False, "--breakdown"),
+    prompt: str = typer.Option("hola jarvis", "--prompt"),
+    mode: str | None = typer.Option(None, "--mode"),
+) -> None:
+    if real:
+        if stream:
+            result = run_streaming_benchmark(root=root, prompt=prompt, mode=mode, debug_stream=debug_stream)
+            typer.echo(json.dumps(result, indent=2, default=str) if json_output else format_streaming_benchmark(result))
+            return
+        result = run_real_benchmark(root=root, prompt=prompt, mode=mode, breakdown=breakdown)
+        typer.echo(json.dumps(result, indent=2, default=str) if json_output else format_real_benchmark(result))
+        return
+    result = run_benchmark(root=root)
+    typer.echo(json.dumps(result, indent=2, default=str) if json_output else format_benchmark(result))
+
+
+@code_agent_app.command("scan")
+def code_scan(root: str | None = typer.Option(None, "--root")) -> None:
+    receipt = _code_agent(root).scan_project()
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_agent_app.command("read")
+def code_read(path: str, root: str | None = typer.Option(None, "--root")) -> None:
+    receipt = _code_agent(root).read_file(path)
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_search_app.command("project")
+def code_search_project(
+    query: str,
+    mode: str = typer.Option("content", "--mode", help="content or name"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    service = _code_agent(root)
+    receipt = service.search_name(query) if mode == "name" else service.search_content(query)
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_agent_app.command("write")
+def code_write(
+    path: str,
+    content: str = typer.Option(..., "--content"),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    confirm: bool = typer.Option(False, "--confirm"),
+    pin: str | None = typer.Option(None, "--pin"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    receipt = _code_agent(root).write_file(path, content, overwrite=overwrite, confirm=confirm, pin=pin, dry_run=dry_run)
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_agent_app.command("run")
+def code_run(
+    command: str,
+    confirm: bool = typer.Option(False, "--confirm"),
+    pin: str | None = typer.Option(None, "--pin"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    receipt = _code_agent(root).run_command(command, confirm=confirm, pin=pin, dry_run=dry_run)
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_agent_app.command("set-pin")
+def code_set_pin(
+    pin: str = typer.Option(..., "--pin", prompt=True, hide_input=True, confirmation_prompt=True),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    receipt = _code_agent(root).configure_pin(pin)
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_agent_app.command("change-pin")
+def code_change_pin(
+    current_pin: str = typer.Option(..., "--current-pin", prompt=True, hide_input=True),
+    new_pin: str = typer.Option(..., "--new-pin", prompt=True, hide_input=True, confirmation_prompt=True),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    receipt = _code_agent(root).change_pin(current_pin, new_pin)
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_agent_app.command("mode")
+def code_mode(
+    target: str | None = typer.Argument(None),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    service = _code_agent(root)
+    if target is None:
+        typer.echo(json.dumps({"mode": service.current_mode().value}, indent=2, default=str))
+        return
+    receipt = service.set_mode(target)
+    typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
+
+
+@code_agent_app.command("log")
+def code_log(limit: int = typer.Option(20, "--limit"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).action_log(limit), indent=2, default=str))
+
+
+@code_memory_app.command("show")
+def code_memory_show(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).memory_show(), indent=2, default=str))
+
+
+@code_memory_app.command("summary")
+def code_memory_summary(max_chars: int = typer.Option(4000, "--max-chars"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(_code_agent(root).memory_summary(max_chars=max_chars))
+
+
+@code_memory_app.command("add-note")
+def code_memory_add_note(text: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).memory_add_note(text), indent=2, default=str))
+
+
+@code_memory_app.command("add-task")
+def code_memory_add_task(
+    title: str,
+    description: str = typer.Option("", "--description"),
+    priority: str = typer.Option("normal", "--priority"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).memory_add_task(title, description=description, priority=priority), indent=2, default=str))
+
+
+@code_memory_app.command("complete-task")
+def code_memory_complete_task(task_id: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).memory_complete_task(task_id), indent=2, default=str))
+
+
+@code_memory_app.command("scan-project")
+def code_memory_scan_project(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).memory_scan_project(), indent=2, default=str))
+
+
+@code_memory_app.command("add-phase")
+def code_memory_add_phase(name: str, notes: str = typer.Option("", "--notes"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).memory_add_phase(name, notes=notes), indent=2, default=str))
+
+
+@code_git_app.command("status")
+def code_git_status(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_status().model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("branch")
+def code_git_branch(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_current_branch().model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("diff")
+def code_git_diff(path: str | None = typer.Option(None, "--path"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_diff(path=path).model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("diff-stat")
+def code_git_diff_stat(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_diff_stat().model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("changed-files")
+def code_git_changed_files(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_changed_files().model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("summary")
+def code_git_summary(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_summary().model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("create-branch")
+def code_git_create_branch(
+    name: str,
+    confirm: bool = typer.Option(False, "--confirm"),
+    pin: str | None = typer.Option(None, "--pin"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_create_branch(name, confirm=confirm, pin=pin).model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("checkpoint")
+def code_git_checkpoint(
+    message: str | None = typer.Option(None, "--message"),
+    confirm: bool = typer.Option(False, "--confirm"),
+    pin: str | None = typer.Option(None, "--pin"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_checkpoint(message=message, confirm=confirm, pin=pin).model_dump(mode="json"), indent=2, default=str))
+
+
+@code_git_app.command("revert-file")
+def code_git_revert_file(
+    path: str,
+    confirm: bool = typer.Option(False, "--confirm"),
+    pin: str | None = typer.Option(None, "--pin"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).git_revert_file(path, confirm=confirm, pin=pin).model_dump(mode="json"), indent=2, default=str))
+
+
+@code_skills_app.command("list")
+def code_skills_list(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).skills_list(), indent=2, default=str))
+
+
+@code_skills_app.command("show")
+def code_skills_show(skill_id: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).skills_show(skill_id), indent=2, default=str))
+
+
+@code_skills_app.command("by-tag")
+def code_skills_by_tag(tag: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).skills_by_tag(tag), indent=2, default=str))
+
+
+@code_skills_app.command("suggest")
+def code_skills_suggest(
+    task: str,
+    limit: int = typer.Option(5, "--limit"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).skills_suggest(task, limit=limit), indent=2, default=str))
+
+
+@code_skills_app.command("context")
+def code_skills_context(
+    task: str,
+    limit: int = typer.Option(5, "--limit"),
+    max_memory_chars: int = typer.Option(2000, "--max-memory-chars"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).skills_context(task, limit=limit, max_memory_chars=max_memory_chars), indent=2, default=str))
+
+
+@code_repos_app.command("index")
+def code_repos_index(
+    library_root: str = typer.Option(..., "--library-root"),
+    max_repos: int | None = typer.Option(None, "--max-repos"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).repos_index(library_root, max_repos=max_repos), indent=2, default=str))
+
+
+@code_repos_app.command("list")
+def code_repos_list(limit: int = typer.Option(100, "--limit"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).repos_list(limit=limit), indent=2, default=str))
+
+
+@code_repos_app.command("search")
+def code_repos_search(
+    query: str,
+    limit: int = typer.Option(10, "--limit"),
+    skills: str | None = typer.Option(None, "--skills", help="Comma-separated skill ids."),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    skill_ids = [item.strip() for item in skills.split(",") if item.strip()] if skills else None
+    typer.echo(json.dumps(_code_agent(root).repos_search(query, limit=limit, skill_ids=skill_ids), indent=2, default=str))
+
+
+@code_repos_app.command("search-task")
+def code_repos_search_task(
+    task: str,
+    limit: int = typer.Option(10, "--limit"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).repos_search_task(task, limit=limit), indent=2, default=str))
+
+
+@code_repos_app.command("show")
+def code_repos_show(repo_id: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).repos_show(repo_id), indent=2, default=str))
+
+
+@code_repos_app.command("stats")
+def code_repos_stats(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).repos_stats(), indent=2, default=str))
+
+
+@code_learn_app.command("search-github")
+def code_learn_search_github(
+    query: str,
+    max_results: int = typer.Option(20, "--max-results"),
+    language: str | None = typer.Option(None, "--language"),
+    topic: str | None = typer.Option(None, "--topic"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_search_github(query, max_results=max_results, language=language, topic=topic), indent=2, default=str))
+
+
+@code_learn_app.command("shortlist")
+def code_learn_shortlist(
+    task: str,
+    max_results: int = typer.Option(10, "--max-results"),
+    language: str | None = typer.Option(None, "--language"),
+    topic: str | None = typer.Option(None, "--topic"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_shortlist(task, max_results=max_results, language=language, topic=topic), indent=2, default=str))
+
+
+@code_learn_app.command("clone")
+def code_learn_clone(
+    repo_id: str,
+    library_root: str = typer.Option(..., "--library-root"),
+    confirm: bool = typer.Option(False, "--confirm"),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_clone(repo_id, library_root=library_root, confirm=confirm, overwrite=overwrite), indent=2, default=str))
+
+
+@code_learn_app.command("clone-and-index")
+def code_learn_clone_and_index(
+    repo_id: str,
+    library_root: str = typer.Option(..., "--library-root"),
+    confirm: bool = typer.Option(False, "--confirm"),
+    overwrite: bool = typer.Option(False, "--overwrite"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_clone_and_index(repo_id, library_root=library_root, confirm=confirm, overwrite=overwrite), indent=2, default=str))
+
+
+@code_learn_app.command("extract")
+def code_learn_extract(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_extract(), indent=2, default=str))
+
+
+@code_learn_app.command("list")
+def code_learn_list(limit: int = typer.Option(100, "--limit"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_list(limit=limit), indent=2, default=str))
+
+
+@code_learn_app.command("search")
+def code_learn_search(
+    query: str,
+    limit: int = typer.Option(10, "--limit"),
+    skills: str | None = typer.Option(None, "--skills", help="Comma-separated skill ids."),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    skill_ids = [item.strip() for item in skills.split(",") if item.strip()] if skills else None
+    typer.echo(json.dumps(_code_agent(root).learn_search(query, limit=limit, skill_ids=skill_ids), indent=2, default=str))
+
+
+@code_learn_app.command("for-task")
+def code_learn_for_task(task: str, limit: int = typer.Option(8, "--limit"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_for_task(task, limit=limit), indent=2, default=str))
+
+
+@code_learn_app.command("stats")
+def code_learn_stats(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_stats(), indent=2, default=str))
+
+
+@code_learn_app.command("summary")
+def code_learn_summary(limit: int = typer.Option(8, "--limit"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).learn_summary(limit=limit), indent=2, default=str))
+
+
+@code_search_app.command("rebuild")
+def code_search_rebuild(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).local_search_rebuild(), indent=2, default=str))
+
+
+@code_search_app.command("query")
+def code_search_query(
+    query: str,
+    limit: int = typer.Option(10, "--limit"),
+    skills: str | None = typer.Option(None, "--skills", help="Comma-separated skill ids."),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    skill_ids = [item.strip() for item in skills.split(",") if item.strip()] if skills else None
+    typer.echo(json.dumps(_code_agent(root).local_search_query(query, limit=limit, skill_ids=skill_ids), indent=2, default=str))
+
+
+@code_search_app.command("task")
+def code_search_task(
+    task: str,
+    limit: int = typer.Option(10, "--limit"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).local_search_task(task, limit=limit), indent=2, default=str))
+
+
+@code_search_app.command("context")
+def code_search_context(
+    task: str,
+    max_results: int = typer.Option(10, "--max-results"),
+    max_chars: int = typer.Option(4000, "--max-chars"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).local_search_context_for_task(task, max_results=max_results, max_chars=max_chars), indent=2, default=str))
+
+
+@code_search_app.command("stats")
+def code_search_stats(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).local_search_stats(), indent=2, default=str))
+
+
+@code_search_app.command("clear")
+def code_search_clear(confirm: bool = typer.Option(False, "--confirm"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).local_search_clear(confirm=confirm), indent=2, default=str))
+
+
+@code_plan_agent_app.command("context")
+def code_agent_context(task: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).agent_context(task), indent=2, default=str))
+
+
+@code_plan_agent_app.command("plan")
+def code_agent_plan(
+    task: str,
+    max_steps: int = typer.Option(12, "--max-steps"),
+    max_commands: int = typer.Option(3, "--max-commands"),
+    max_files_edited: int = typer.Option(3, "--max-files-edited"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).agent_plan(task, max_steps=max_steps, max_commands=max_commands, max_files_edited=max_files_edited), indent=2, default=str))
+
+
+@code_plan_agent_app.command("run")
+def code_agent_run(
+    task: str,
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    assisted: bool = typer.Option(False, "--assisted"),
+    apply: bool = typer.Option(False, "--apply"),
+    confirm: bool = typer.Option(False, "--confirm"),
+    pin: str | None = typer.Option(None, "--pin"),
+    patch_id: str | None = typer.Option(None, "--patch-id"),
+    generate_patch: bool = typer.Option(False, "--generate-patch"),
+    llm_assisted: bool = typer.Option(False, "--llm-assisted"),
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    allow_online: bool = typer.Option(False, "--allow-online"),
+    max_steps: int = typer.Option(12, "--max-steps"),
+    max_commands: int = typer.Option(3, "--max-commands"),
+    max_files_edited: int = typer.Option(3, "--max-files-edited"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    mode = "apply" if apply else "assisted" if assisted else "dry-run"
+    if dry_run:
+        mode = "dry-run"
+    typer.echo(json.dumps(_code_agent(root).agent_run(task, mode=mode, confirm=confirm, pin=pin, patch_id=patch_id, generate_patch=generate_patch, llm_assisted=llm_assisted, llm_mode=llm_mode, allow_online=allow_online, max_steps=max_steps, max_commands=max_commands, max_files_edited=max_files_edited), indent=2, default=str))
+
+
+@code_plan_agent_app.command("verify")
+def code_agent_verify(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).agent_verify(), indent=2, default=str))
+
+
+@code_change_app.command("targets")
+def code_change_targets(
+    task: str,
+    max_targets: int = typer.Option(3, "--max-targets"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).change_targets(task, max_targets=max_targets), indent=2, default=str))
+
+
+@code_change_app.command("plan")
+def code_change_plan(
+    task: str,
+    max_targets: int = typer.Option(3, "--max-targets"),
+    llm_assisted: bool = typer.Option(False, "--llm-assisted"),
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    allow_online: bool = typer.Option(False, "--allow-online"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).change_plan(task, max_targets=max_targets, llm_assisted=llm_assisted, llm_mode=llm_mode, allow_online=allow_online), indent=2, default=str))
+
+
+@code_change_app.command("propose")
+def code_change_propose(
+    task: str,
+    max_targets: int = typer.Option(3, "--max-targets"),
+    llm_assisted: bool = typer.Option(False, "--llm-assisted"),
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    allow_online: bool = typer.Option(False, "--allow-online"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).change_propose(task, max_targets=max_targets, llm_assisted=llm_assisted, llm_mode=llm_mode, allow_online=allow_online), indent=2, default=str))
+
+
+@code_llm_app.command("status")
+def code_llm_status(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).llm_status(), indent=2, default=str))
+
+
+@code_llm_app.command("config")
+def code_llm_config(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).llm_config(), indent=2, default=str))
+
+
+@code_llm_app.command("mode")
+def code_llm_mode(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).llm_mode(), indent=2, default=str))
+
+
+@code_llm_app.command("route")
+def code_llm_route(
+    task: str,
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    allow_online: bool = typer.Option(False, "--allow-online"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).llm_route(task, llm_mode=llm_mode, allow_online=allow_online), indent=2, default=str))
+
+
+@code_patch_app.command("propose-replace")
+def code_patch_propose_replace(
+    file: str = typer.Option(..., "--file"),
+    old: str = typer.Option(..., "--old"),
+    new: str = typer.Option(..., "--new"),
+    task: str = typer.Option("replace text", "--task"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_propose_replace(file, old, new, task=task), indent=2, default=str))
+
+
+@code_patch_app.command("propose-insert-after")
+def code_patch_propose_insert_after(
+    file: str = typer.Option(..., "--file"),
+    anchor: str = typer.Option(..., "--anchor"),
+    text: str = typer.Option(..., "--text"),
+    task: str = typer.Option("insert text after anchor", "--task"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_propose_insert_after(file, anchor, text, task=task), indent=2, default=str))
+
+
+@code_patch_app.command("propose-create-file")
+def code_patch_propose_create_file(
+    file: str = typer.Option(..., "--file"),
+    content: str = typer.Option(..., "--content"),
+    task: str = typer.Option("create file", "--task"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_propose_create_file(file, content, task=task), indent=2, default=str))
+
+
+@code_patch_app.command("propose-unified-diff")
+def code_patch_propose_unified_diff(
+    diff_text: str = typer.Option(..., "--diff"),
+    task: str = typer.Option("unified diff", "--task"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_propose_unified_diff(diff_text, task=task), indent=2, default=str))
+
+
+@code_patch_app.command("list")
+def code_patch_list(limit: int = typer.Option(100, "--limit"), root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_list(limit=limit), indent=2, default=str))
+
+
+@code_patch_app.command("show")
+def code_patch_show(patch_id: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_show(patch_id), indent=2, default=str))
+
+
+@code_patch_app.command("apply")
+def code_patch_apply(
+    patch_id: str,
+    confirm: bool = typer.Option(False, "--confirm"),
+    pin: str | None = typer.Option(None, "--pin"),
+    checkpoint: bool = typer.Option(False, "--checkpoint"),
+    root: str | None = typer.Option(None, "--root"),
+) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_apply(patch_id, confirm=confirm, pin=pin, checkpoint=checkpoint), indent=2, default=str))
+
+
+@code_patch_app.command("reject")
+def code_patch_reject(patch_id: str, root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_reject(patch_id), indent=2, default=str))
+
+
+@code_patch_app.command("stats")
+def code_patch_stats(root: str | None = typer.Option(None, "--root")) -> None:
+    typer.echo(json.dumps(_code_agent(root).patch_stats(), indent=2, default=str))
+
+
 @app.command("automation")
 def save_automation(
     name: str,
@@ -288,13 +1153,20 @@ def describe() -> None:
 def desktop_agent_run(
     goal: str,
     max_steps: int | None = typer.Option(None, "--max-steps"),
+    mode: DesktopAgentAutonomyMode = typer.Option(DesktopAgentAutonomyMode.ACTIVE, "--mode"),
     detach: bool = typer.Option(False, "--detach", help="Create the mission and return immediately without waiting for completion."),
 ) -> None:
     jarvis = build_application()
     jarvis.start()
     try:
         receipt = jarvis.runtime_service.desktop_agent_run(
-            DesktopAgentMissionRequest(goal=goal, max_steps=max_steps, wait_for_completion=not detach)
+            DesktopAgentMissionRequest(
+                goal=goal,
+                max_steps=max_steps,
+                autonomy_mode=mode,
+                source_surface=DesktopAgentSourceSurface.CLI,
+                wait_for_completion=not detach,
+            )
         )
         typer.echo(json.dumps(receipt.model_dump(mode="json"), indent=2, default=str))
     finally:

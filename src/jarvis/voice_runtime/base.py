@@ -107,6 +107,8 @@ class SynthesisRequest(JarvisBaseModel):
     text: str
     voice_name: str | None = None
     profile_name: str | None = None
+    provider_name: str | None = None
+    fallback_provider_names: tuple[str, ...] = ()
     language: str | None = None
     rate: int | None = None
     play: bool = True

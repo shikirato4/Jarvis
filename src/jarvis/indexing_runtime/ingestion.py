@@ -70,11 +70,12 @@ class IndexingIngestionService:
         assert root is not None
         loader = DocumentLoader((root,))
         items: list[DiscoveredSourceItem] = []
+        excluded_dirnames = {name.casefold() for name in self._settings.indexing_excluded_dirnames}
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
             relative_parts = path.relative_to(root).parts
-            if any(part.casefold() in {name.casefold() for name in self._settings.indexing_excluded_dirnames} for part in relative_parts[:-1]):
+            if any(self._is_excluded_dir_part(part, excluded_dirnames) for part in relative_parts[:-1]):
                 continue
             if is_sensitive_path(path, self._settings, source):
                 continue
@@ -112,6 +113,11 @@ class IndexingIngestionService:
                 )
             )
         return items
+
+    @staticmethod
+    def _is_excluded_dir_part(part: str, excluded_dirnames: set[str]) -> bool:
+        lowered = part.casefold()
+        return lowered in excluded_dirnames or lowered.startswith(".venv")
 
     def _discover_research(self, source: IndexSource) -> list[DiscoveredSourceItem]:
         items: list[DiscoveredSourceItem] = []

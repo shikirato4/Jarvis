@@ -10,6 +10,7 @@ class DesktopAgentPolicyEngine:
         self._allow_discovered = settings.ui_allow_discovered_applications
 
     def assess_step(self, step: DesktopAgentStep) -> DesktopAgentPolicyResult:
+        trusted_window_tokens = {*self._allowed_titles, "explorer", "explorador"}
         if step.action_type == DesktopStepActionType.OPEN_PATH and not step.payload.get("result_from"):
             return DesktopAgentPolicyResult(
                 decision=DesktopPolicyDecision.REQUIRE_CONFIRMATION,
@@ -26,7 +27,7 @@ class DesktopAgentPolicyEngine:
                 )
         application = str(step.payload.get("application") or "").casefold()
         if step.action_type == DesktopStepActionType.OPEN_APPLICATION and application:
-            if not any(item in application for item in self._allowed_titles):
+            if not any(item in application for item in trusted_window_tokens):
                 decision = DesktopPolicyDecision.ALLOW if self._allow_discovered else DesktopPolicyDecision.REQUIRE_CONFIRMATION
                 return DesktopAgentPolicyResult(
                     decision=decision,
@@ -35,7 +36,7 @@ class DesktopAgentPolicyEngine:
                     metadata={"trusted_allowlist": list(self._allowed_titles)},
                 )
         target_window = str(step.payload.get("target_window") or step.payload.get("application") or "").casefold()
-        if target_window and not any(item in target_window for item in self._allowed_titles):
+        if target_window and not any(item in target_window for item in trusted_window_tokens):
             return DesktopAgentPolicyResult(
                 decision=DesktopPolicyDecision.REQUIRE_CONFIRMATION,
                 risk_level=DesktopAgentRiskLevel.MEDIUM,

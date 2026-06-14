@@ -1,6 +1,7 @@
 from .associations import AssociationResolver
 from .backends import *
 from .base import *
+from .file_ops import SystemFileOperations
 from .launcher import SystemLauncher
 from .registry import *
 from .resolver import ApplicationResolver, PathResolver, SystemTargetResolver
