@@ -1,3 +1,19 @@
 {
-    "python-envs.defaultEnvManager": "ms-python.python:system"
+    "python-envs.defaultEnvManager": "ms-python.python:venv",
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+    "files.exclude": {
+        "**/.venv": true,
+        "**/.venv312": true,
+        "**/.venv_legacy_src_backup": true
+    },
+    "search.exclude": {
+        "**/.venv": true,
+        "**/.venv312": true,
+        "**/.venv_legacy_src_backup": true
+    },
+    "files.watcherExclude": {
+        "**/.venv/**": true,
+        "**/.venv312/**": true,
+        "**/.venv_legacy_src_backup/**": true
+    }
 }

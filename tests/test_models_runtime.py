@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
 
 from jarvis.bootstrap import build_application
 from jarvis.config import Settings
-from jarvis.models_runtime.base import ModelRequest, ModelResponse, ProviderHealth, ProviderKind
+from jarvis.models_runtime.base import ModelRequest, ModelResponse, ProviderHealth, ProviderKind, StreamChunk
 from jarvis.models_runtime.catalog import ModelCatalog, ModelProfile, build_default_model_catalog
 from jarvis.models_runtime.gpt_oss import GptOssProvider
 from jarvis.models_runtime.ollama import OllamaProvider
@@ -61,10 +62,13 @@ def test_model_router_filters_by_mode_provider_kind() -> None:
 
 
 def test_ollama_provider_chat_and_healthcheck() -> None:
+    captured_payloads: list[dict] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/api/tags":
             return httpx.Response(200, json={"models": [{"name": "llama3.1:8b"}]})
         if request.url.path == "/api/chat":
+            captured_payloads.append(json.loads(request.content.decode("utf-8")))
             return httpx.Response(
                 200,
                 json={
@@ -80,7 +84,7 @@ def test_ollama_provider_chat_and_healthcheck() -> None:
     provider = OllamaProvider(Settings(ollama_enabled=True), client=client)
     health = provider.health_check()
     response = provider.infer(
-        ModelRequest(task_type="classification", logical_model="general_assistant", messages=[{"role": "user", "content": "hola"}]),
+        ModelRequest(task_type="classification", logical_model="general_assistant", messages=[{"role": "user", "content": "hola"}], max_tokens=42),
         model_name="llama3.1:8b",
         temperature=0.2,
         timeout_seconds=3.0,
@@ -88,6 +92,157 @@ def test_ollama_provider_chat_and_healthcheck() -> None:
     assert health.healthy is True
     assert response.content == '{"intent":"research"}'
     assert response.usage.total_tokens == 16
+    assert captured_payloads[0]["options"]["num_predict"] == 42
+
+
+def test_ollama_provider_streams_json_lines() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/chat"
+        return httpx.Response(
+            200,
+            content=b'{"message":{"content":"Ho"},"done":false}\n{"message":{"content":"la"},"done":false}\n{"done":true}\n',
+        )
+
+    client = httpx.Client(base_url="http://127.0.0.1:11434", transport=httpx.MockTransport(handler))
+    provider = OllamaProvider(Settings(ollama_enabled=True), client=client)
+
+    chunks = list(
+        provider.stream_infer(
+            ModelRequest(task_type="assistant", logical_model="general_assistant", messages=[{"role": "user", "content": "hola"}]),
+            model_name="gpt-oss:20b",
+            temperature=0.2,
+            timeout_seconds=3.0,
+        )
+    )
+
+    assert "".join(chunk.text for chunk in chunks) == "Hola"
+    assert chunks[-1].done is True
+
+
+def test_gpt_oss_provider_streams_openai_compatible_sse() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/chat/completions"
+        return httpx.Response(
+            200,
+            content=(
+                b'data: {"choices":[{"delta":{"content":"Ho"}}]}\n\n'
+                b'data: {"choices":[{"delta":{"content":"la"}}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    client = httpx.Client(base_url="http://127.0.0.1:11434/v1", transport=httpx.MockTransport(handler))
+    provider = GptOssProvider(Settings(gpt_oss_enabled=True, ollama_enabled=False, gpt_oss_base_url="http://127.0.0.1:11434/v1"), client=client)
+
+    chunks = list(
+        provider.stream_infer(
+            ModelRequest(task_type="assistant", logical_model="general_assistant", messages=[{"role": "user", "content": "hola"}]),
+            model_name="gpt-oss:20b",
+            temperature=0.2,
+            timeout_seconds=3.0,
+        )
+    )
+
+    assert "".join(chunk.text for chunk in chunks) == "Hola"
+    assert chunks[-1].done is True
+
+
+def test_gpt_oss_provider_reports_no_output_stream_debug() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/chat/completions"
+        return httpx.Response(
+            200,
+            content=(
+                b"\n"
+                b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
+                b"data: [DONE]\n\n"
+            ),
+        )
+
+    client = httpx.Client(base_url="http://127.0.0.1:11434/v1", transport=httpx.MockTransport(handler))
+    provider = GptOssProvider(Settings(gpt_oss_enabled=True, ollama_enabled=False, gpt_oss_base_url="http://127.0.0.1:11434/v1"), client=client)
+
+    chunks = list(
+        provider.stream_infer(
+            ModelRequest(task_type="assistant", logical_model="general_assistant", messages=[{"role": "user", "content": "hola"}]),
+            model_name="gpt-oss:20b",
+            temperature=0.2,
+            timeout_seconds=3.0,
+        )
+    )
+
+    assert chunks[-1].done is True
+    assert chunks[-1].metadata["reason"] == "no_output"
+    debug = chunks[-1].metadata["stream_debug"]
+    assert debug["endpoint"] == "openai_compatible"
+    assert debug["http_status"] == 200
+    assert debug["lines_seen"] == 2
+    assert debug["content_chunks"] == 0
+    assert debug["empty_chunks"] == 1
+    assert debug["done_seen"] is True
+
+
+def test_ollama_provider_reports_native_json_line_debug() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/chat"
+        return httpx.Response(200, content=b'{"message":{"content":"Ho"},"done":false}\n{"done":true}\n')
+
+    client = httpx.Client(base_url="http://127.0.0.1:11434", transport=httpx.MockTransport(handler))
+    provider = OllamaProvider(Settings(ollama_enabled=True), client=client)
+
+    chunks = list(
+        provider.stream_infer(
+            ModelRequest(task_type="assistant", logical_model="general_assistant", messages=[{"role": "user", "content": "hola"}]),
+            model_name="gpt-oss:20b",
+            temperature=0.2,
+            timeout_seconds=3.0,
+        )
+    )
+
+    assert chunks[0].text == "Ho"
+    assert chunks[-1].metadata["stream_debug"]["endpoint"] == "native"
+    assert chunks[-1].metadata["stream_debug"]["content_chunks"] == 1
+
+
+def test_model_service_auto_falls_back_to_native_stream_on_no_output() -> None:
+    class EmptyOpenAIStreamProvider(FakeProvider):
+        provider_name = "gpt_oss"
+
+        def __init__(self) -> None:
+            super().__init__("gpt_oss")
+
+        def stream_infer(self, *args, **kwargs):
+            yield StreamChunk(done=True, metadata={"provider": "gpt_oss", "model": "gpt-oss:20b", "reason": "no_output", "stream_debug": {"endpoint": "openai_compatible", "content_chunks": 0}})
+
+    class NativeStreamProvider(FakeProvider):
+        provider_name = "ollama"
+
+        def __init__(self) -> None:
+            super().__init__("ollama")
+
+        def stream_infer(self, *args, **kwargs):
+            yield StreamChunk(text="Hola", metadata={"provider": "ollama", "model": "gpt-oss:20b", "endpoint": "native"})
+            yield StreamChunk(done=True, metadata={"provider": "ollama", "model": "gpt-oss:20b", "stream_debug": {"endpoint": "native", "content_chunks": 1}})
+
+    settings = Settings(
+        gpt_oss_enabled=True,
+        ollama_enabled=True,
+        general_chat_model_provider="gpt_oss",
+        general_chat_model_fallback_order=(),
+        ollama_stream_endpoint="auto",
+    )
+    registry = ProviderRegistry()
+    registry.register(EmptyOpenAIStreamProvider())
+    registry.register(NativeStreamProvider())
+    app = build_application(settings)
+    catalog = build_default_model_catalog(settings)
+    service = ModelService(settings, app.mode_manager, registry, catalog, ModelRouter(catalog, app.mode_manager), app.event_bus)
+
+    chunks = list(service.stream(ModelRequest(task_type="assistant", logical_model="general_assistant", messages=[{"role": "user", "content": "hola"}])))
+
+    assert "".join(chunk.text for chunk in chunks) == "Hola"
+    assert chunks[-1].metadata["provider"] == "ollama"
+    assert chunks[-1].metadata["fallback_from"] == "openai_compatible"
 
 
 def test_model_service_applies_fallback_between_providers() -> None:
@@ -175,6 +330,8 @@ def test_model_service_applies_configured_fallback_for_general_chat(tmp_path: Pa
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
+        model_provider_default="ollama",
+        general_chat_model_provider="gpt_oss",
         gpt_oss_enabled=True,
         ollama_enabled=False,
         general_chat_model_fallback_order=("reasoning_engine",),
@@ -231,13 +388,16 @@ def test_integration_orchestrator_uses_model_service_and_records_observability(t
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
+        model_provider_default="ollama",
+        general_chat_model_provider="ollama",
+        gpt_oss_enabled=False,
         ollama_enabled=False,
     )
     app = build_application(settings)
     app.provider_registry.register(FakeProvider("ollama"))
     app.start()
     try:
-        response = app.runtime_service.route({"raw_input": "Necesito un brief sobre alpha"})
+        response = app.runtime_service.route({"raw_input": "Necesito un brief sobre alpha", "intent": "research_brief"})
         snapshot = app.runtime_service.snapshot()
         assert response.orchestration is not None
         assert response.orchestration.resolved_intent == "research_brief"

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.config
+from logging import Logger
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from datetime import datetime, timezone
@@ -89,3 +90,22 @@ def configure_logging(
             "root": {"handlers": root_handlers, "level": level.upper()},
         }
     )
+
+
+def shutdown_logging() -> None:
+    # Explicitly close handlers so temporary log files can be removed on Windows.
+    root = logging.getLogger()
+    _close_handlers(root)
+    for logger in list(logging.root.manager.loggerDict.values()):
+        if isinstance(logger, Logger):
+            _close_handlers(logger)
+    logging.shutdown()
+
+
+def _close_handlers(logger: Logger) -> None:
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+        try:
+            handler.flush()
+        finally:
+            handler.close()

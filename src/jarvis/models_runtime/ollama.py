@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from typing import Any
 
@@ -7,7 +8,7 @@ import httpx
 
 from jarvis.config import Settings
 
-from .base import ModelProvider, ModelRequest, ModelResponse, ModelUsage, ProviderHealth, ProviderKind
+from .base import ModelProvider, ModelRequest, ModelResponse, ModelUsage, ProviderHealth, ProviderKind, StreamChunk
 
 
 class OllamaProvider(ModelProvider):
@@ -47,6 +48,8 @@ class OllamaProvider(ModelProvider):
             "stream": False,
             "options": {"temperature": temperature if temperature is not None else request.temperature},
         }
+        if request.max_tokens is not None:
+            payload["options"]["num_predict"] = request.max_tokens
         if request.messages:
             payload["messages"] = [message.model_dump(mode="json") for message in request.messages]
         elif request.prompt:
@@ -92,3 +95,98 @@ class OllamaProvider(ModelProvider):
                 time.sleep(self._settings.ollama_retry_backoff_seconds * attempt)
         assert last_error is not None
         raise last_error
+
+    def stream_infer(self, request: ModelRequest, *, model_name: str, temperature: float | None, timeout_seconds: float | None, cancel_check=None):
+        timeout = timeout_seconds or self._settings.ollama_timeout_seconds
+        payload = {
+            "model": model_name,
+            "stream": True,
+            "options": {"temperature": temperature if temperature is not None else request.temperature},
+        }
+        if request.max_tokens is not None:
+            payload["options"]["num_predict"] = request.max_tokens
+        if request.messages:
+            payload["messages"] = [message.model_dump(mode="json") for message in request.messages]
+        elif request.prompt:
+            payload["messages"] = [{"role": "user", "content": request.prompt}]
+        else:
+            payload["messages"] = []
+        started_at = time.perf_counter()
+        chunk_count = 0
+        lines_seen = 0
+        empty_chunks = 0
+        parse_errors = 0
+        first_line_ms: float | None = None
+        first_content_ms: float | None = None
+        http_status: int | None = None
+        debug_base = {
+            "endpoint": "native",
+            "request_sent": True,
+            "cancelled": False,
+        }
+        with self._client.stream("POST", self._settings.ollama_chat_endpoint, json=payload, timeout=timeout) as response:
+            http_status = response.status_code
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if cancel_check is not None and cancel_check():
+                    debug = {
+                        **debug_base,
+                        "http_status": http_status,
+                        "first_line_ms": first_line_ms,
+                        "first_content_ms": first_content_ms,
+                        "lines_seen": lines_seen,
+                        "content_chunks": chunk_count,
+                        "done_seen": False,
+                        "empty_chunks": empty_chunks,
+                        "parse_errors": parse_errors,
+                        "cancelled": True,
+                    }
+                    yield StreamChunk(done=True, metadata={"cancelled": True, "chunks": chunk_count, "stream_debug": debug})
+                    return
+                if not line:
+                    continue
+                lines_seen += 1
+                if first_line_ms is None:
+                    first_line_ms = round((time.perf_counter() - started_at) * 1000, 2)
+                try:
+                    payload_line = json.loads(line)
+                except Exception:
+                    parse_errors += 1
+                    continue
+                message = payload_line.get("message") or {}
+                text = message.get("content") or payload_line.get("response") or ""
+                if text:
+                    if first_content_ms is None:
+                        first_content_ms = round((time.perf_counter() - started_at) * 1000, 2)
+                    chunk_count += 1
+                    yield StreamChunk(text=text, metadata={"provider": self.provider_name, "model": model_name, "endpoint": "native"})
+                else:
+                    empty_chunks += 1
+                if payload_line.get("done"):
+                    debug = {
+                        **debug_base,
+                        "http_status": http_status,
+                        "first_line_ms": first_line_ms,
+                        "first_content_ms": first_content_ms,
+                        "lines_seen": lines_seen,
+                        "content_chunks": chunk_count,
+                        "done_seen": True,
+                        "empty_chunks": empty_chunks,
+                        "parse_errors": parse_errors,
+                        "cancelled": False,
+                    }
+                    yield StreamChunk(done=True, metadata={"chunks": chunk_count, "latency_ms": round((time.perf_counter() - started_at) * 1000, 2), "reason": "no_output" if chunk_count == 0 else None, "stream_debug": debug})
+                    return
+            debug = {
+                **debug_base,
+                "http_status": http_status,
+                "first_line_ms": first_line_ms,
+                "first_content_ms": first_content_ms,
+                "lines_seen": lines_seen,
+                "content_chunks": chunk_count,
+                "done_seen": False,
+                "empty_chunks": empty_chunks,
+                "parse_errors": parse_errors,
+                "cancelled": False,
+            }
+            yield StreamChunk(done=True, metadata={"chunks": chunk_count, "latency_ms": round((time.perf_counter() - started_at) * 1000, 2), "reason": "no_output" if chunk_count == 0 else None, "stream_debug": debug})

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from concurrent.futures import Future
 from datetime import datetime, timezone
+import json
+import logging
 from time import perf_counter
 
 from .styling import JARVIS_QSS
@@ -9,21 +11,28 @@ from .widgets import ConversationSurfaceWidget, MetricCard, ReactorCoreWidget, S
 
 try:
     from PySide6.QtCore import QRect, QSize, Qt, QTimer
-    from PySide6.QtGui import QAction, QColor
+    from PySide6.QtGui import QAction, QColor, QFont
     from PySide6.QtWidgets import (
         QApplication,
         QFrame,
         QGridLayout,
         QHBoxLayout,
         QLabel,
+        QComboBox,
         QLineEdit,
+        QListWidget,
+        QListWidgetItem,
         QMainWindow,
+        QMessageBox,
+        QPlainTextEdit,
         QPushButton,
         QSizePolicy,
         QSplitter,
         QTabWidget,
+        QTextEdit,
         QTreeWidget,
         QTreeWidgetItem,
+        QInputDialog,
         QVBoxLayout,
         QWidget,
     )
@@ -42,12 +51,15 @@ if QApplication is not None:
         def __init__(self, desktop_service) -> None:
             super().__init__()
             self._desktop = desktop_service
+            self._logger = logging.getLogger("jarvis.desktop.window")
             self._is_processing = False
             self._sending = False
             self._pending_future: Future | None = None
             self._pending_correlation_id: str | None = None
             self._last_submit_at = 0.0
             self._last_render_signature = None
+            self._last_dev_action_id: str | None = None
+            self._patch_items: dict[str, dict] = {}
             self._focus_mode = True
             self._left_panel_open = False
             self._right_panel_open = False
@@ -64,8 +76,8 @@ if QApplication is not None:
             root = QFrame()
             root.setObjectName("ShellRoot")
             layout = QVBoxLayout(root)
-            layout.setContentsMargins(20, 20, 20, 20)
-            layout.setSpacing(16)
+            layout.setContentsMargins(18, 18, 18, 18)
+            layout.setSpacing(12)
 
             layout.addWidget(self._build_header())
 
@@ -113,9 +125,11 @@ if QApplication is not None:
             self._health_badge = StatusBadge("STATUS", "active")
             self._ops_badge = StatusBadge("OPS", "neutral")
             self._voice_badge = StatusBadge("VOICE", "neutral")
+            self._llm_badge = StatusBadge("LLM", "neutral")
             layout.addWidget(self._health_badge)
             layout.addWidget(self._ops_badge)
             layout.addWidget(self._voice_badge)
+            layout.addWidget(self._llm_badge)
 
             self._focus_button = QPushButton("FOCUS MODE")
             self._focus_button.setObjectName("ModeToggle")
@@ -168,6 +182,11 @@ if QApplication is not None:
             self._voice_mute_button.clicked.connect(self._toggle_voice_muted)
             layout.addWidget(self._voice_mute_button)
 
+            self._voice_test_button = QPushButton("TEST VOICE")
+            self._voice_test_button.setObjectName("GhostButton")
+            self._voice_test_button.clicked.connect(self._test_voice)
+            layout.addWidget(self._voice_test_button)
+
             self._refresh_button = QPushButton("REFRESH")
             self._refresh_button.setObjectName("GhostButton")
             self._refresh_button.clicked.connect(self.refresh_view)
@@ -208,16 +227,16 @@ if QApplication is not None:
             panel = QFrame()
             panel.setObjectName("CentralHalo")
             layout = QVBoxLayout(panel)
-            layout.setContentsMargins(30, 24, 30, 24)
-            layout.setSpacing(14)
+            layout.setContentsMargins(24, 18, 24, 18)
+            layout.setSpacing(12)
 
             hero = QFrame()
             hero.setObjectName("HeroCard")
             hero.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-            hero.setMinimumHeight(260)
+            hero.setMinimumHeight(200)
             hero_layout = QVBoxLayout(hero)
-            hero_layout.setContentsMargins(24, 22, 24, 20)
-            hero_layout.setSpacing(10)
+            hero_layout.setContentsMargins(22, 18, 22, 16)
+            hero_layout.setSpacing(8)
 
             hero_top = QHBoxLayout()
             hero_top.addWidget(
@@ -256,7 +275,7 @@ if QApplication is not None:
 
             chat_card = QFrame()
             chat_card.setObjectName("HistoryCard")
-            chat_card.setMinimumHeight(280)
+            chat_card.setMinimumHeight(420)
             chat_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             chat_layout = QVBoxLayout(chat_card)
             chat_layout.setContentsMargins(0, 0, 0, 0)
@@ -286,7 +305,7 @@ if QApplication is not None:
             self._send_button.clicked.connect(self._submit_chat)
             composer_layout.addWidget(self._send_button)
             chat_layout.addWidget(composer)
-            layout.addWidget(chat_card, 2)
+            layout.addWidget(chat_card, 3)
             return panel
 
         def _build_right_panel(self) -> QWidget:
@@ -329,9 +348,88 @@ if QApplication is not None:
             self._ops_tree.setRootIsDecorated(False)
             ops_layout.addWidget(self._ops_tree)
 
+            context_tab = QWidget()
+            context_layout = QVBoxLayout(context_tab)
+            context_layout.setContentsMargins(6, 10, 6, 6)
+            context_layout.setSpacing(8)
+            context_layout.addWidget(self._section_header("Jarvis Context", "Identidad, proveedores, web search, memoria y reglas activas"))
+            self._context_output = QTextEdit()
+            self._context_output.setReadOnly(True)
+            self._context_output.setObjectName("DevOutput")
+            self._context_output.setPlaceholderText("Contexto seguro de Jarvis.")
+            context_layout.addWidget(self._context_output, 1)
+
+            code_tab = QWidget()
+            code_layout = QVBoxLayout(code_tab)
+            code_layout.setContentsMargins(6, 10, 6, 6)
+            code_layout.setSpacing(8)
+            code_layout.addWidget(self._section_header("Code Agent", "Patches revisables, Git, memoria y doctor sin aplicar cambios automaticos"))
+            self._dev_status = QLabel("Code Agent standby")
+            self._dev_status.setObjectName("SectionMeta")
+            self._dev_status.setWordWrap(True)
+            code_layout.addWidget(self._dev_status)
+            self._dev_task_input = QLineEdit()
+            self._dev_task_input.setObjectName("ChatInput")
+            self._dev_task_input.setPlaceholderText("Describe una tarea de codigo...")
+            code_layout.addWidget(self._dev_task_input)
+            mode_row = QHBoxLayout()
+            mode_row.setSpacing(8)
+            mode_row.addWidget(QLabel("Mode"))
+            self._dev_mode = QComboBox()
+            self._dev_mode.addItems(["auto", "offline", "online", "disabled"])
+            mode_row.addWidget(self._dev_mode, 1)
+            code_layout.addLayout(mode_row)
+            self._patch_id_input = QLineEdit()
+            self._patch_id_input.setObjectName("ChatInput")
+            self._patch_id_input.setPlaceholderText("patch_id para show/apply/reject")
+            code_layout.addWidget(self._patch_id_input)
+            self._patch_list = QListWidget()
+            self._patch_list.setObjectName("PatchList")
+            self._patch_list.setMaximumHeight(132)
+            self._patch_list.setAlternatingRowColors(False)
+            self._patch_list.itemSelectionChanged.connect(self._on_patch_selection_changed)
+            code_layout.addWidget(self._patch_list)
+            code_grid = QGridLayout()
+            code_grid.setHorizontalSpacing(8)
+            code_grid.setVerticalSpacing(8)
+            self._dev_buttons: list[QPushButton] = []
+            for index, (action_id, label) in enumerate(
+                [
+                    ("plan", "Plan"),
+                    ("generate_patch", "Generate Patch"),
+                    ("patch_list", "Patch List"),
+                    ("patch_show", "Patch Show"),
+                    ("patch_apply", "Apply Patch"),
+                    ("patch_reject", "Reject Patch"),
+                    ("git_status", "Git Status"),
+                    ("memory", "Memory"),
+                    ("doctor", "Doctor"),
+                ]
+            ):
+                button = QPushButton(label)
+                button.clicked.connect(lambda _checked=False, action=action_id: self._run_dev_action(action))
+                code_grid.addWidget(button, index // 3, index % 3)
+                self._dev_buttons.append(button)
+            code_layout.addLayout(code_grid)
+            self._dev_output = QTextEdit()
+            self._dev_output.setReadOnly(True)
+            self._dev_output.setObjectName("DevOutput")
+            self._dev_output.setPlaceholderText("Los resultados del Code Agent apareceran aqui.")
+            code_layout.addWidget(self._dev_output, 1)
+            self._patch_diff_output = QPlainTextEdit()
+            self._patch_diff_output.setReadOnly(True)
+            self._patch_diff_output.setObjectName("PatchDiffOutput")
+            self._patch_diff_output.setPlaceholderText("Diff del patch seleccionado.")
+            self._patch_diff_output.setLineWrapMode(QPlainTextEdit.NoWrap)
+            self._patch_diff_output.setMaximumBlockCount(900)
+            self._patch_diff_output.setFont(QFont("Consolas", 9))
+            code_layout.addWidget(self._patch_diff_output, 2)
+
             tabs.addTab(missions_tab, "Missions")
             tabs.addTab(timeline_tab, "Timeline")
             tabs.addTab(ops_tab, "Ops")
+            tabs.addTab(context_tab, "Context")
+            tabs.addTab(code_tab, "Code Agent")
             layout.addWidget(tabs, 1)
 
             self._quick_action_frame = QFrame()
@@ -407,7 +505,15 @@ if QApplication is not None:
             self._set_processing_state(True, "PROCESSING")
             correlation_id = f"desktop-ui-{int(perf_counter() * 1000)}"
             self._pending_correlation_id = correlation_id
-            self._pending_future = self._desktop.send_chat_async(text, correlation_id=correlation_id)
+            pending_placeholder: Future = Future()
+            self._pending_future = pending_placeholder
+
+            def _start_chat_request() -> None:
+                if pending_placeholder.cancelled():
+                    return
+                self._pending_future = self._desktop.send_chat_async(text, correlation_id=correlation_id, metadata={"stream": True})
+
+            QTimer.singleShot(0, _start_chat_request)
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
 
@@ -417,6 +523,47 @@ if QApplication is not None:
             self._sending = True
             self._set_processing_state(True, f"EXECUTING {action_id.upper()}")
             self._pending_future = self._desktop.execute_quick_action_async(action_id)
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _run_dev_action(self, action_id: str) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            payload = {
+                "task": self._dev_task_input.text().strip(),
+                "patch_id": self._selected_or_typed_patch_id(),
+                "llm_mode": self._dev_mode.currentText(),
+            }
+            if action_id in {"patch_show", "patch_apply", "patch_reject"} and not payload["patch_id"]:
+                self._dev_output.setPlainText("Selecciona un patch o escribe un patch_id.")
+                return
+            if action_id == "patch_apply":
+                if not payload["patch_id"]:
+                    self._dev_output.setPlainText("Selecciona o escribe un patch_id antes de aplicar.")
+                    return
+                answer = QMessageBox.question(
+                    self,
+                    "Confirm Apply Patch",
+                    "Aplicar este patch modificara archivos del proyecto. Continuar?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if answer != QMessageBox.Yes:
+                    self._dev_output.setPlainText("Apply patch cancelado por el usuario.")
+                    return
+                payload["confirm"] = True
+                if self._last_patch_requires_pin():
+                    pin, ok = QInputDialog.getText(self, "PIN requerido", "PIN maestro:", QLineEdit.Password)
+                    if not ok:
+                        self._dev_output.setPlainText("Apply patch cancelado: PIN no ingresado.")
+                        return
+                    payload["pin"] = pin
+            if payload["patch_id"]:
+                self._patch_id_input.setText(payload["patch_id"])
+            self._sending = True
+            self._last_dev_action_id = action_id
+            self._set_processing_state(True, f"CODE {action_id.upper()}")
+            self._pending_future = self._desktop.execute_dev_action_async(action_id, payload=payload)
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
 
@@ -438,6 +585,10 @@ if QApplication is not None:
 
         def _cancel_listening(self) -> None:
             self._desktop.cancel_voice_listening()
+            self.refresh_view()
+
+        def _test_voice(self) -> None:
+            self._desktop.test_voice()
             self.refresh_view()
 
         def _set_focus_mode(self, focus_mode: bool) -> None:
@@ -496,6 +647,8 @@ if QApplication is not None:
             self._mic_button.setEnabled(not enabled)
             for button in self._quick_buttons:
                 button.setEnabled(not enabled)
+            for button in getattr(self, "_dev_buttons", []):
+                button.setEnabled(not enabled)
             if enabled:
                 self._reactor.set_state("thinking", activity=0.88)
                 self._conversation.set_status("PROCESSING")
@@ -511,8 +664,17 @@ if QApplication is not None:
             if self._pending_future is not None and self._pending_future.done():
                 try:
                     self._pending_future.result()
-                except Exception:
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    self._logger.exception(
+                        "desktop_window_request_failed",
+                        extra={
+                            "correlation_id": self._pending_correlation_id,
+                            "exception_type": type(exc).__name__,
+                            "exception_message": str(exc),
+                        },
+                    )
+                    if hasattr(self, "_dev_output"):
+                        self._dev_output.setPlainText(f"Accion fallida: {type(exc).__name__}: {self._safe_error_text(str(exc))}")
                 self._pending_future = None
                 self._pending_correlation_id = None
                 self._sending = False
@@ -520,14 +682,18 @@ if QApplication is not None:
             signature = self._render_signature(state)
             if signature != self._last_render_signature:
                 self._last_render_signature = signature
+                self._desktop.note_ui_refresh(applied=True)
                 self._render_conversation(state)
                 self._render_services(state)
                 self._render_alerts(state)
                 self._render_missions(state)
                 self._render_timeline(state)
                 self._render_ops(state)
+                self._render_dev_runtime(state)
                 self._render_header(state)
                 self._render_metrics(state)
+            else:
+                self._desktop.note_ui_refresh(applied=False)
             if not self._is_processing and not state.busy:
                 self._sync_reactor_state(state)
             live_voice_states = {"LISTENING", "TRANSCRIBING", "PROCESSING", "ERROR"}
@@ -569,6 +735,7 @@ if QApplication is not None:
                 state.voice.input_error,
                 state.voice.last_transcript,
                 (getattr(state, "performance", {}) or {}).get("last_request_ms"),
+                json.dumps(getattr(state, "dev_runtime", {}) or {}, sort_keys=True, default=str),
             )
 
         def _render_conversation(self, state) -> None:
@@ -591,6 +758,11 @@ if QApplication is not None:
                     self._conversation.set_meta("JARVIS está procesando la orden hablada.")
                 self._hero_state.setText(f"VOICE {voice_input_state}")
                 return
+            if getattr(voice_state, "profile_name", None):
+                profile_meta = f"Perfil: {voice_state.profile_name}"
+                if getattr(voice_state, "clone_status", None):
+                    profile_meta = f"{profile_meta} | Clone: {voice_state.clone_status}"
+                self._conversation.set_meta(profile_meta)
             if bool(getattr(state, "busy", False)):
                 activity = str(getattr(state, "activity_label", "PROCESSING") or "PROCESSING").upper()
                 self._conversation.set_status(activity)
@@ -681,6 +853,255 @@ if QApplication is not None:
                 if key == "aggregate_status":
                     row.setForeground(1, QColor(tone_color(str(value))))
 
+        def _render_dev_runtime(self, state) -> None:
+            dev = getattr(state, "dev_runtime", {}) or {}
+            mode = dev.get("llm_mode") or getattr(state, "llm_mode", "disabled")
+            provider = dev.get("llm_provider") or getattr(state, "llm_provider", "none")
+            model = dev.get("llm_model") or "n/a"
+            ollama = "OK" if dev.get("ollama_available") else "FAIL"
+            self._dev_status.setText(f"LLM {mode} | provider={provider} | model={model} | Ollama={ollama}")
+            last = dev.get("last_result") if isinstance(dev.get("last_result"), dict) else {}
+            if last:
+                self._dev_output.setPlainText(self._format_dev_result(last))
+                self._sync_patch_selector(last)
+                self._render_patch_diff_from_result(last)
+                patch_id = self._extract_patch_id(last)
+                if patch_id and not self._patch_id_input.text().strip():
+                    self._patch_id_input.setText(patch_id)
+            if hasattr(self, "_context_output"):
+                self._context_output.setPlainText(self._format_context_state(dev))
+
+        def _format_context_state(self, dev: dict) -> str:
+            web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            policy = dev.get("policy") if isinstance(dev.get("policy"), dict) else {}
+            return "\n".join(
+                [
+                    "Contexto actual de Jarvis",
+                    "",
+                    "Identidad:",
+                    "Jarvis. Sin identidad externa. OpenAI y Gemini bloqueados.",
+                    "",
+                    "Modelo:",
+                    f"Modo: {dev.get('llm_mode') or 'disabled'}",
+                    f"Provider local: {dev.get('llm_provider') or 'none'}",
+                    f"Modelo local: {dev.get('llm_model') or 'n/a'}",
+                    f"Ollama disponible: {str(bool(dev.get('ollama_available'))).lower()}",
+                    "",
+                    "Web:",
+                    f"Provider: {web.get('provider', 'disabled')}",
+                    f"Enabled: {str(bool(web.get('enabled'))).lower()}",
+                    f"Available: {str(bool(web.get('available'))).lower()}",
+                    f"Brave key configured: {str(bool(web.get('configured'))).lower()}",
+                    "Brave solo busca; Ollama local redacta.",
+                    "No se envia contexto privado, archivos de entorno, tokens, PIN ni archivos del proyecto a internet.",
+                    "",
+                    "Politica:",
+                    f"OpenAI: {policy.get('openai', 'blocked')}",
+                    f"Gemini: {policy.get('gemini', 'blocked')}",
+                    f"Online LLM: {policy.get('online_llm', 'disabled')}",
+                    f"Online search: {policy.get('online_search', 'Brave + local Ollama')}",
+                    "",
+                    "Code Agent:",
+                    "Patches revisables; nada se aplica automaticamente.",
+                    "GitHub learning no clona repos sin confirmacion.",
+                ]
+            )
+
+        def _format_dev_result(self, result: dict) -> str:
+            display = self._dev_display_payload(result)
+            text = json.dumps(display, indent=2, ensure_ascii=False, default=str)
+            if len(text) > 12000:
+                return text[:12000] + "\n...[truncated]"
+            return text
+
+        def _dev_display_payload(self, result: dict) -> dict:
+            display = dict(result)
+            patches = display.get("patches")
+            if isinstance(patches, list):
+                display["patches"] = [self._patch_list_summary(item) for item in patches if isinstance(item, dict)]
+            return display
+
+        def _patch_list_summary(self, patch: dict) -> dict:
+            patch_id = str(patch.get("id") or patch.get("patch_id") or "")
+            files = patch.get("target_files") or patch.get("touched_files") or []
+            if not isinstance(files, list):
+                files = []
+            return {
+                "id": patch_id,
+                "status": str(patch.get("status") or "unknown"),
+                "summary": self._safe_patch_text(str(patch.get("summary") or patch.get("message") or ""))[:240],
+                "files": [self._safe_patch_text(str(item)) for item in files[:4]],
+            }
+
+        def _sync_patch_selector(self, result: dict) -> None:
+            patches = self._patches_from_result(result)
+            if not patches:
+                if self._last_dev_action_id == "patch_list":
+                    self._patch_items = {}
+                    self._patch_list.clear()
+                    self._patch_diff_output.setPlainText("")
+                    self._dev_output.setPlainText("No hay patches revisables todavia.")
+                return
+            current_id = self._selected_or_typed_patch_id()
+            self._patch_items = {}
+            self._patch_list.blockSignals(True)
+            self._patch_list.clear()
+            for patch in patches:
+                patch_id = str(patch.get("id") or patch.get("patch_id") or "")
+                if not patch_id:
+                    continue
+                self._patch_items[patch_id] = patch
+                item = QListWidgetItem(self._patch_item_label(patch))
+                item.setData(Qt.UserRole, patch_id)
+                self._patch_list.addItem(item)
+                if patch_id == current_id:
+                    item.setSelected(True)
+                    self._patch_list.setCurrentItem(item)
+            self._patch_list.blockSignals(False)
+
+        def _patches_from_result(self, result: dict) -> list[dict]:
+            patches = result.get("patches")
+            if isinstance(patches, list):
+                return [item for item in patches if isinstance(item, dict)]
+            if result.get("id") or result.get("patch_id"):
+                return [result]
+            patch = result.get("patch")
+            if isinstance(patch, dict):
+                return [patch]
+            return []
+
+        def _patch_item_label(self, patch: dict) -> str:
+            patch_id = str(patch.get("id") or patch.get("patch_id") or "")
+            status = str(patch.get("status") or "unknown")
+            summary = self._safe_patch_text(str(patch.get("summary") or patch.get("message") or "")).replace("\n", " ")
+            files = patch.get("target_files") or patch.get("touched_files") or []
+            if not isinstance(files, list):
+                files = []
+            files_text = ", ".join(self._safe_patch_text(str(item)) for item in files[:3])
+            label = f"{patch_id} | {status}"
+            if summary:
+                label = f"{label} | {summary[:90]}"
+            if files_text:
+                label = f"{label} | {files_text[:90]}"
+            return label
+
+        def _selected_or_typed_patch_id(self) -> str:
+            item = self._patch_list.currentItem() if hasattr(self, "_patch_list") else None
+            if item is not None:
+                patch_id = item.data(Qt.UserRole)
+                if isinstance(patch_id, str) and patch_id:
+                    return patch_id
+            return self._patch_id_input.text().strip()
+
+        def _on_patch_selection_changed(self) -> None:
+            patch_id = self._selected_or_typed_patch_id()
+            if not patch_id:
+                return
+            self._patch_id_input.setText(patch_id)
+            patch = self._patch_items.get(patch_id)
+            if patch:
+                self._dev_output.setPlainText(self._format_dev_result(patch))
+                self._render_patch_diff_from_result(patch)
+
+        def _render_patch_diff_from_result(self, result: dict) -> None:
+            patch = result.get("patch") if isinstance(result.get("patch"), dict) else result
+            if not isinstance(patch, dict):
+                return
+            diff = str(patch.get("unified_diff") or "")
+            if not diff:
+                changes = patch.get("changes")
+                if isinstance(changes, list):
+                    diff = "\n".join(str(item.get("unified_diff") or "") for item in changes if isinstance(item, dict))
+            self._patch_diff_output.setPlainText(self._format_patch_diff(diff))
+
+        def _format_patch_diff(self, diff: str, *, max_chars: int = 16000) -> str:
+            safe = self._safe_patch_text(diff)
+            if not safe:
+                return ""
+            truncated = len(safe) > max_chars
+            rendered = safe[:max_chars]
+            if truncated:
+                rendered += "\n...[diff truncated]"
+            return rendered
+
+        def _safe_patch_text(self, text: str) -> str:
+            lowered = text.casefold()
+            sensitive_terms = (
+                ".env",
+                "api_key",
+                "apikey",
+                "api key",
+                "password",
+                "token",
+                "secret",
+                "credential",
+                "private key",
+                "-----begin",
+                "certificate",
+                ".pem",
+                ".key",
+                "id_rsa",
+            )
+            if any(term in lowered for term in sensitive_terms):
+                return "[redacted]"
+            return text
+
+        def _safe_error_text(self, text: str) -> str:
+            lowered = text.casefold()
+            sensitive_terms = (
+                ".env",
+                "api_key",
+                "apikey",
+                "password",
+                "token",
+                "secret",
+                "credential",
+                "private key",
+                "-----begin",
+                "pin",
+            )
+            if any(term in lowered for term in sensitive_terms):
+                return "[redacted]"
+            if len(text) > 1000:
+                return text[:1000] + "\n...[truncated]"
+            return text
+
+        def _extract_patch_id(self, result: dict) -> str:
+            for key in ("patch_id", "id"):
+                value = result.get(key)
+                if isinstance(value, str) and value:
+                    return value
+            patch = result.get("patch")
+            if isinstance(patch, dict):
+                for key in ("patch_id", "id"):
+                    value = patch.get(key)
+                    if isinstance(value, str) and value:
+                        return value
+            patches = result.get("patches")
+            if isinstance(patches, list) and patches:
+                first = patches[0]
+                if isinstance(first, dict):
+                    value = first.get("id") or first.get("patch_id")
+                    if isinstance(value, str):
+                        return value
+            return ""
+
+        def _last_patch_requires_pin(self) -> bool:
+            selected_patch_id = self._selected_or_typed_patch_id() if hasattr(self, "_patch_list") else ""
+            if selected_patch_id:
+                selected_patch = self._patch_items.get(selected_patch_id, {})
+                if isinstance(selected_patch, dict) and bool(selected_patch.get("requires_pin")):
+                    return True
+            state = self._state
+            if state is None:
+                return False
+            dev = getattr(state, "dev_runtime", {}) or {}
+            last = dev.get("last_result") if isinstance(dev.get("last_result"), dict) else {}
+            if bool(last.get("requires_pin")):
+                return True
+            patch = last.get("patch")
+            return bool(isinstance(patch, dict) and patch.get("requires_pin"))
+
         def _render_header(self, state) -> None:
             aggregate = str(state.panel_snapshot.health_summary.get("aggregate_status", "unknown"))
             active_ops = int(state.panel_snapshot.health_summary.get("active_operations", 0))
@@ -689,6 +1110,23 @@ if QApplication is not None:
             self._health_badge.set_tone(aggregate)
             self._ops_badge.setText(f"OPS {active_ops}")
             self._ops_badge.set_tone("active" if active_ops else "neutral")
+            
+            # Setup LLM badge
+            llm_mode = getattr(state, "llm_mode", "disabled").upper()
+            llm_provider = getattr(state, "llm_provider", "none").upper()
+            if llm_mode == "DISABLED":
+                self._llm_badge.setText("LLM DISABLED")
+                self._llm_badge.set_tone("error")
+            elif llm_mode == "AUTO":
+                self._llm_badge.setText(f"LLM AUTO ({llm_provider})")
+                self._llm_badge.set_tone("active")
+            elif llm_mode == "OFFLINE":
+                self._llm_badge.setText(f"LLM OFFLINE ({llm_provider})")
+                self._llm_badge.set_tone("warning")
+            else:
+                self._llm_badge.setText(f"LLM {llm_mode}")
+                self._llm_badge.set_tone("active")
+            
             if str(voice_state.input_state).upper() == "ERROR":
                 self._voice_badge.setText("VOICE ERROR")
                 self._voice_badge.set_tone("error")
@@ -720,6 +1158,7 @@ if QApplication is not None:
             self._voice_enable_button.setText("VOICE ON" if voice_state.enabled else "VOICE OFF")
             self._voice_mute_button.setChecked(bool(voice_state.muted))
             self._voice_mute_button.setText("UNMUTE" if voice_state.muted else "MUTE")
+            self._voice_test_button.setEnabled(bool(voice_state.enabled and not self._is_processing))
             self._mic_enable_button.setChecked(bool(voice_state.input_enabled and not voice_state.input_muted))
             self._mic_enable_button.setText("MIC ON" if voice_state.input_enabled and not voice_state.input_muted else "MIC OFF")
             self._listen_button.setEnabled(bool(voice_state.input_enabled and not voice_state.input_muted and not self._is_processing))

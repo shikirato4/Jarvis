@@ -110,3 +110,38 @@ def test_window_geometry_defaults_are_safe_for_full_hd(tmp_path, monkeypatch) ->
         assert window.minimumHeight() <= 720
     finally:
         backend.stop()
+
+
+def test_window_refresh_skips_full_repaint_when_state_is_unchanged(tmp_path) -> None:
+    from jarvis.config import Settings
+    from jarvis.desktop import build_desktop_runtime
+    from jarvis.desktop_runtime.window import JarvisDesktopWindow
+
+    app = create_qt_application()
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        ui_backend_kind="in_memory",
+        voice_audio_output_backend_default="in_memory",
+        voice_tts_provider_default="in_memory",
+    )
+    backend, desktop = build_desktop_runtime(settings)
+    try:
+        window = JarvisDesktopWindow(desktop)
+        window.show()
+        window.refresh_view()
+        first_state = desktop.shell_state()
+        applied_before = int(first_state.performance.get("ui_refresh_applied") or 0)
+        skipped_before = int(first_state.performance.get("ui_refresh_skipped") or 0)
+
+        window.refresh_view()
+        app.processEvents()
+
+        second_state = desktop.shell_state()
+        assert int(second_state.performance.get("ui_refresh_applied") or 0) >= applied_before
+        assert int(second_state.performance.get("ui_refresh_skipped") or 0) >= skipped_before + 1
+    finally:
+        backend.stop()
+        desktop.shutdown()

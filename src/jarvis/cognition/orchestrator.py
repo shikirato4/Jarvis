@@ -10,6 +10,7 @@ from jarvis.actions.router import ActionRouter
 from jarvis.cognition.context import RetrievedContextFormatter
 from jarvis.core.capabilities import CapabilityRegistry, RegisteredCapability
 from jarvis.core.errors import OrchestrationError
+from jarvis.identity import jarvis_identity_prompt, sanitize_assistant_identity
 from jarvis.memory.service import MemoryService
 from jarvis.memory_semantic.base import RetrievedContext, SemanticSearchQuery
 from jarvis.memory_semantic.documents import DocumentIngestionRequest
@@ -163,7 +164,13 @@ class CognitiveOrchestrator:
             steps = [ActionStep.model_validate(item) for item in raw_steps]
             if all(step.action in capability.descriptor.action_names for step in steps):
                 return steps
-        except Exception:
+        except Exception as exc:
+            self._log_suppressed_exception(
+                "orchestrator_model_plan_fallback",
+                exc,
+                correlation_id=correlation_id,
+                intent=capability.descriptor.intent,
+            )
             return None
         return None
 
@@ -230,7 +237,13 @@ class CognitiveOrchestrator:
             parsed = json.loads(response.content)
             if isinstance(parsed, list):
                 return [str(item) for item in parsed]
-        except Exception:
+        except Exception as exc:
+            self._log_suppressed_exception(
+                "orchestrator_findings_summary_fallback",
+                exc,
+                correlation_id=correlation_id,
+                intent=request.intent or "research_brief",
+            )
             return findings
         return findings
 
@@ -276,8 +289,13 @@ class CognitiveOrchestrator:
                 valid_intents = {item.descriptor.intent for item in self._capabilities.list_capabilities()}
                 if intent in valid_intents and self._is_safe_keyword_intent(str(intent), query):
                     return str(intent)
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log_suppressed_exception(
+                "orchestrator_model_classification_fallback",
+                exc,
+                correlation_id=correlation_id,
+                query=query,
+            )
         inferred = self._capabilities.infer_intent(query, default_intent=None)
         if inferred is not None and self._is_safe_keyword_intent(inferred, query):
             return inferred
@@ -308,7 +326,9 @@ class CognitiveOrchestrator:
                 messages=[
                     ModelMessage(
                         role="system",
-                        content="You are JARVIS. Reply directly, clearly, and helpfully. Do not mention internal runtimes or workspace search unless the user explicitly asked for research.",
+                        content=jarvis_identity_prompt(
+                            "Responde directamente. No menciones runtimes internos ni busqueda de workspace salvo que el usuario lo pida."
+                        ),
                     ),
                     ModelMessage(role="user", content=prompt),
                 ],
@@ -324,12 +344,14 @@ class CognitiveOrchestrator:
                 "fallback_used": response.fallback_used,
             },
         )
+        response_data = response.model_dump(mode="json")
+        response_data["content"] = sanitize_assistant_identity(str(response_data.get("content") or ""))
         receipt = ActionExecutionReceipt(
             correlation_id=correlation_id,
             action="model.chat",
             status=ExecutionStatus.SUCCESS,
             message="general chat completed",
-            data=response.model_dump(mode="json"),
+            data=response_data,
         )
         return OrchestrationResponse(
             correlation_id=correlation_id,
@@ -480,7 +502,13 @@ class CognitiveOrchestrator:
             if len(context.chunks) > 0:
                 context.chunks = context.chunks[: self._max_context_chunks]
             return context
-        except Exception:
+        except Exception as exc:
+            self._log_suppressed_exception(
+                "orchestrator_semantic_context_skipped",
+                exc,
+                correlation_id=correlation_id,
+                intent=capability.descriptor.intent,
+            )
             return None
 
     def _merge_findings(self, existing: list[str], semantic_context: RetrievedContext | None) -> list[str]:
@@ -516,6 +544,19 @@ class CognitiveOrchestrator:
         )
         if any(keyword in lowered for keyword in research_keywords):
             return False
+        if lowered.startswith(("busca ", "buscar ", "search ", "find ")) and any(
+            marker in lowered
+            for marker in (
+                "significado de",
+                "meaning of",
+                "definicion de",
+                "definición de",
+                "que es",
+                "qué es",
+                "what is",
+            )
+        ):
+            return True
         if lowered.startswith(action_keywords):
             return False
         return True
@@ -534,6 +575,13 @@ class CognitiveOrchestrator:
         )
 
     @staticmethod
+    def _looks_like_semantic_search_request(query: str) -> bool:
+        lowered = query.casefold()
+        semantic_terms = ("semant", "semantic", "embedding", "indice", "indexado", "coleccion", "collection", "corpus")
+        retrieval_terms = ("busca", "buscar", "recupera", "retrieve", "search", "encuentra")
+        return any(term in lowered for term in semantic_terms) and any(term in lowered for term in retrieval_terms)
+
+    @staticmethod
     def _looks_like_science(query: str) -> bool:
         lowered = query.casefold()
         return any(keyword in lowered for keyword in ("calcula", "deriv", "integr", "simula", "resuelve", "ecuacion"))
@@ -546,7 +594,10 @@ class CognitiveOrchestrator:
     @staticmethod
     def _looks_like_system_open(query: str) -> bool:
         lowered = query.casefold().strip()
-        return lowered.startswith(("abre ", "abrir ", "open ", "launch "))
+        if not lowered.startswith(("abre ", "abrir ", "open ", "launch ")):
+            return False
+        compound_markers = (" y busca ", " y search ", " y escribe ", " and search ", " and type ", " paso a paso")
+        return not any(marker in lowered for marker in compound_markers)
 
     @staticmethod
     def _looks_like_system_search(query: str) -> bool:
@@ -626,18 +677,20 @@ class CognitiveOrchestrator:
             return "voice_runtime"
         if payload.get("command"):
             return "operate"
-        if self._looks_like_ui_awareness_request(query):
-            return "ui_awareness"
-        if self._looks_like_visual_request(query):
-            return "screen_read"
         if self._looks_like_system_open(query):
             return "system_open"
         if self._looks_like_system_search(query):
             return "system_search"
+        if self._looks_like_ui_awareness_request(query):
+            return "ui_awareness"
+        if self._looks_like_visual_request(query):
+            return "screen_read"
         if self._looks_like_voice_request(query):
             return "voice_runtime"
         if self._looks_like_explicit_research(query):
-            return "research"
+            return "research_brief"
+        if self._looks_like_desktop_agent_task(query):
+            return "desktop_agent"
         if self._looks_like_security(query):
             return "security"
         if self._looks_like_science(query):
@@ -645,12 +698,16 @@ class CognitiveOrchestrator:
         return None
 
     def _is_safe_keyword_intent(self, intent: str, query: str) -> bool:
+        if intent == "desktop_agent":
+            return self._looks_like_desktop_agent_task(query)
         if intent in {"vision", "screen_read"}:
             return self._looks_like_visual_request(query)
         if intent == "ui_awareness":
             return self._looks_like_ui_awareness_request(query)
         if intent in {"research", "deep_research", "research_brief"}:
             return self._looks_like_explicit_research(query)
+        if intent == "semantic_search":
+            return self._looks_like_semantic_search_request(query)
         if intent == "system_search":
             return self._looks_like_system_search(query)
         if intent == "system_open":
@@ -663,3 +720,55 @@ class CognitiveOrchestrator:
     def _looks_like_coding_query(query: str) -> bool:
         lowered = query.casefold()
         return any(keyword in lowered for keyword in ("codigo", "code", "python", "bug", "funcion", "function", "clase", "class", "script"))
+
+    @classmethod
+    def _looks_like_desktop_agent_task(cls, query: str) -> bool:
+        lowered = query.casefold().strip()
+        if not lowered:
+            return False
+        if cls._looks_like_explicit_research(lowered) or cls._looks_like_science(lowered) or cls._looks_like_security(lowered):
+            return False
+        direct_markers = (
+            "haz click",
+            "haz clic",
+            "click en",
+            "clic en",
+            "ve a la ventana activa",
+            "ventana activa",
+            "llena este formulario",
+            "rellena este formulario",
+            "completa este formulario",
+            "cambia a ",
+            "switch to ",
+            "guarda el documento",
+            "guardar el documento",
+            "continua mi libro",
+            "continua el documento",
+            "continúa mi libro",
+            "continúa el documento",
+            "escribe esto",
+            "escribir esto",
+            "mueve el mouse",
+            "scroll",
+            "desplaza",
+            "explorador",
+            "explorer",
+        )
+        if any(marker in lowered for marker in direct_markers):
+            return True
+        if any(token in lowered for token in ("archivo", "carpeta")) and any(
+            marker in lowered for marker in ("abre", "abrir", "crea", "crear", "copia", "copiar", "mueve", "mover", "renombra", "renombrar", "busca", "buscar")
+        ):
+            return True
+        app_markers = ("chrome", "word", "vscode", "explorador", "explorer", "youtube")
+        return lowered.startswith(("abre ", "abrir ", "open ", "launch ")) and any(marker in lowered for marker in app_markers)
+
+    def _log_suppressed_exception(self, event: str, exc: Exception, **extra: Any) -> None:
+        self._logger.warning(
+            event,
+            extra={
+                **extra,
+                "exception_type": type(exc).__name__,
+                "exception_message": str(exc),
+            },
+        )

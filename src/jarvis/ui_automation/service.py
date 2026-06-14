@@ -90,7 +90,7 @@ class UIAutomationService:
             risk_level=classify_risk("focus_window"),
             message="window focused",
             active_window=window,
-            data={"target": request.target, "trusted_mode_bypass": elevated},
+            data={"target": request.target, "trusted_mode_bypass": elevated, "verified_focus": self._matches_window_target(window, request.target)},
             started_at=started_at,
         )
 
@@ -220,6 +220,7 @@ class UIAutomationService:
                 "match_source": match_source,
                 "region": region,
                 "awareness_summary": awareness.get("summary"),
+                "verified_target": True,
             }
         )
         return click_receipt
@@ -431,6 +432,7 @@ class UIAutomationService:
                     "block_count": len(request.blocks),
                     "text_length": len(original_text or "".join(request.blocks)),
                     "trusted_mode_bypass": elevated,
+                    "verified_focus": active_window.title if active_window else None,
                 },
                 started_at=started_at,
             )
@@ -448,8 +450,10 @@ class UIAutomationService:
         started_at = datetime.now(timezone.utc)
         with self._lock:
             token = self._cancellations.get(request.correlation_id)
-            if token is not None:
-                token.set()
+            if token is None:
+                token = Event()
+                self._cancellations[request.correlation_id] = token
+            token.set()
         return self._publish_success(
             correlation_id=request.correlation_id,
             operation_name="cancel_ui_operation",
@@ -476,6 +480,9 @@ class UIAutomationService:
 
     def _register_cancellation(self, correlation_id: str) -> Event:
         with self._lock:
+            token = self._cancellations.get(correlation_id)
+            if token is not None:
+                return token
             token = Event()
             self._cancellations[correlation_id] = token
             return token
@@ -684,6 +691,18 @@ class UIAutomationService:
             ):
                 return window
         return None
+
+    @staticmethod
+    def _matches_window_target(window: WindowInfo | None, target: str | None) -> bool:
+        if window is None or not target:
+            return False
+        lowered = target.casefold()
+        return (
+            window.handle.casefold() == lowered
+            or lowered in window.title.casefold()
+            or lowered == (window.process_name or "").casefold()
+            or lowered in (window.class_name or "").casefold()
+        )
 
     def _discovered_application_names(self) -> list[str]:
         if self._application_registry is None:

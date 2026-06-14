@@ -6,7 +6,7 @@ from datetime import datetime
 from .theme import PALETTE
 
 try:
-    from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+    from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer
     from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
     from PySide6.QtWidgets import (
         QApplication,
@@ -275,9 +275,18 @@ if QWidget is not object:
         def set_content_width(self, width: int) -> None:
             bubble_width = max(width, 240)
             self.setFixedWidth(bubble_width)
-            self._body.setFixedWidth(max(bubble_width - 32, 180))
+            body_width = max(bubble_width - 32, 180)
+            self._body.setFixedWidth(body_width)
+            body_height = self._body.fontMetrics().boundingRect(
+                QRect(0, 0, body_width, 100000),
+                Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop,
+                self._body.text(),
+            ).height()
+            if body_height > 0:
+                self._body.setFixedHeight(body_height + 14)
             self.layout().activate()
             self.adjustSize()
+            self.setFixedHeight(self.sizeHint().height())
             self.updateGeometry()
 
         @staticmethod
@@ -321,6 +330,7 @@ if QWidget is not object:
             self._placeholder.setWordWrap(True)
             self._message_widgets: list[ChatMessageWidget] = []
             self._message_signatures: list[tuple[str, str, str, str]] = []
+            self._content_height = 0
 
         def set_messages(self, messages: list) -> None:
             signatures = [self._signature(message) for message in messages]
@@ -355,20 +365,19 @@ if QWidget is not object:
             else:
                 self._placeholder.hide()
 
-            self._container.adjustSize()
+            self._apply_content_height()
             self.widget().updateGeometry()
             self.viewport().update()
-            QApplication.processEvents()
 
             if was_near_bottom:
                 QTimer.singleShot(0, self.scroll_to_bottom)
 
         def resizeEvent(self, event) -> None:  # noqa: N802
             super().resizeEvent(event)
-            self.widget().setMinimumWidth(max(0, self.viewport().width()))
             bubble_width = self.viewport().width() - 12
             for widget in self._message_widgets:
                 widget.set_content_width(bubble_width)
+            self._apply_content_height()
 
         def scroll_to_bottom(self) -> None:
             scrollbar = self.verticalScrollBar()
@@ -379,6 +388,15 @@ if QWidget is not object:
 
         def message_widgets(self) -> list[ChatMessageWidget]:
             return list(self._message_widgets)
+
+        def _apply_content_height(self) -> None:
+            self._layout.activate()
+            widget_height = sum(widget.height() or widget.sizeHint().height() for widget in self._message_widgets)
+            if self._message_widgets:
+                widget_height += self._layout.spacing() * max(len(self._message_widgets) - 1, 0)
+            self._content_height = max(self._layout.sizeHint().height(), widget_height, self._content_height)
+            self._container.setMinimumSize(max(0, self.viewport().width()), self._content_height)
+            self._container.resize(max(self._container.width(), self.viewport().width()), self._content_height)
 
         def _clear(self) -> None:
             self._message_widgets.clear()

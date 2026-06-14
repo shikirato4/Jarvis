@@ -42,6 +42,9 @@ class DesktopAgentMissionCoordinator:
         control = self.control(mission_id)
         control.abort_requested.set()
         control.pause_requested.clear()
+        future = self.future(mission_id)
+        if future is not None and not future.running():
+            future.cancel()
 
     def clear_abort(self, mission_id: str) -> None:
         self.control(mission_id).abort_requested.clear()

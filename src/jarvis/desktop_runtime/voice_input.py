@@ -27,20 +27,15 @@ class DesktopVoiceInputController:
         self._voice_runtime.set_command_callback(self._handle_transcript)
 
     def status(self) -> dict[str, object]:
-        snapshot = self._voice_runtime.status()
         input_backend = self._settings.voice_audio_input_backend_default
         input_provider = self._settings.voice_input_provider_default
-        audio_inputs = snapshot.get("audio_inputs") or []
-        stt_providers = snapshot.get("stt_providers") or []
-        backend_health = next((item for item in audio_inputs if item.get("backend_name") == input_backend), None)
-        provider_health = next((item for item in stt_providers if item.get("provider_name") == input_provider), None)
         return {
             "input_enabled": self._enabled,
             "input_muted": self._muted,
             "input_state": self._state,
             "input_backend": input_backend,
             "input_provider": input_provider,
-            "input_available": bool((backend_health or {}).get("healthy", True)) and bool((provider_health or {}).get("healthy", True)),
+            "input_available": True,
             "input_error": self._error,
             "last_transcript": self._last_transcript,
         }

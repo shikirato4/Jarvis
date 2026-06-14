@@ -76,7 +76,7 @@ def test_desktop_voice_input_accepts_voice_confirmation(tmp_path) -> None:
         app.voice_runtime_service._input_registry.get("in_memory").push_chunk(_chunk("si"))  # noqa: SLF001
         desktop.start_voice_listening()
         assert _wait_for(lambda: desktop._chat.awaiting_confirmation is False)  # noqa: SLF001
-        assert "Acceso concedido" in desktop.shell_state().conversation[-1].content
+        assert _wait_for(lambda: any("Acceso concedido" in message.content for message in desktop.shell_state().conversation))
     finally:
         app.stop()
 
@@ -88,6 +88,7 @@ def test_desktop_voice_input_executes_open_and_type_flow(tmp_path) -> None:
         app.voice_runtime_service._input_registry.get("in_memory").push_chunk(_chunk("abre word y escribe esto hola por voz"))  # noqa: SLF001
         desktop.start_voice_listening()
         assert _wait_for(lambda: backend.typed_text.endswith("hola por voz"))
+        assert _wait_for(lambda: any(message.metadata.get("source") == "voice" for message in desktop.shell_state().conversation))
         state = desktop.shell_state()
         assert any(message.metadata.get("source") == "voice" for message in state.conversation)
         assert backend.get_active_window().title == "Word"

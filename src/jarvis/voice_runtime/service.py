@@ -7,7 +7,7 @@ from threading import Lock, Thread
 from uuid import uuid4
 
 from jarvis.config import Settings
-from jarvis.core.errors import VoiceCancelledError, VoiceRuntimeError
+from jarvis.core.errors import ServiceUnavailableError, VoiceCancelledError, VoiceRuntimeError
 from jarvis.core.events import EventBus
 from jarvis.core.modes import ModeManager
 
@@ -30,11 +30,12 @@ from .buffers import AudioWindowBuffer
 from .clap import ClapPatternDetector
 from .detection import detect_audio_activity
 from .playback import PlaybackController
-from .spoken import build_spoken_metadata, resolve_voice_profile, split_tts_text
+from .spoken import build_spoken_metadata, build_tts_segments, prepare_spoken_text
 from .safeguards import validate_clap_access, validate_microphone_access, validate_playback_access, validate_session_duration
 from .session import VoiceSessionManager
 from .stt import STTService
 from .tts import TTSService
+from .voice_clone_manager import VoiceCloneManager
 
 
 class VoiceRuntimeService:
@@ -53,6 +54,7 @@ class VoiceRuntimeService:
         command_callback=None,
         cancel_callback=None,
         operation_registry=None,
+        voice_clone_manager: VoiceCloneManager | None = None,
     ) -> None:
         self._settings = settings
         self._mode_manager = mode_manager
@@ -69,6 +71,7 @@ class VoiceRuntimeService:
         )
         self._playback = PlaybackController(output_registry, settings.voice_audio_output_backend_default)
         self._logger = logger or logging.getLogger("jarvis.voice")
+        self._voice_clone = voice_clone_manager or VoiceCloneManager(settings, logger=self._logger)
         self._cancellations: dict[str, CancellationToken] = {}
         self._operations = operation_registry
         self._dictate_callback = dictate_callback
@@ -93,7 +96,7 @@ class VoiceRuntimeService:
         if worker is not None and worker.is_alive():
             worker.join(timeout=1.0)
 
-    def status(self) -> dict[str, object]:
+    def status(self, *, lightweight_voice_clone: bool = False) -> dict[str, object]:
         active = self._sessions.active()
         return {
             "active_session": active.model_dump(mode="json") if active else None,
@@ -105,7 +108,8 @@ class VoiceRuntimeService:
             "voice_enabled": self._voice_enabled,
             "voice_muted": self._voice_muted,
             "speaking": self._speaking,
-            "voice_profile": self._settings.voice_profile_default,
+            "voice_profile": self._settings.voice_clone_profile_default or self._settings.voice_profile_default,
+            "voice_clone": self._voice_clone.status(resolve=not lightweight_voice_clone),
             "current_speech_correlation_id": self._current_speech_correlation_id,
             "last_speech_result": self._last_speech_result,
         }
@@ -154,7 +158,7 @@ class VoiceRuntimeService:
             backend=capture.backend_name,
         )
 
-    def speak(self, text: str, *, correlation_id: str | None = None) -> VoiceOperationReceipt:
+    def speak(self, text: str, *, correlation_id: str | None = None, literal: bool = False) -> VoiceOperationReceipt:
         validate_playback_access(self._mode_manager)
         correlation_id = correlation_id or str(uuid4())
         started = datetime.now(timezone.utc)
@@ -175,7 +179,7 @@ class VoiceRuntimeService:
         self._cancel_active_speech()
         token = CancellationToken(correlation_id)
         self._cancellations[correlation_id] = token
-        worker = Thread(target=self._run_speech, args=(correlation_id, text, token), daemon=True)
+        worker = Thread(target=self._run_speech, args=(correlation_id, text, token, literal), daemon=True)
         with self._speech_lock:
             self._speech_worker = worker
             self._current_speech_correlation_id = correlation_id
@@ -361,46 +365,91 @@ class VoiceRuntimeService:
         finally:
             self._cancellations.pop(request.correlation_id or "", None)
 
-    def _run_speech(self, correlation_id: str, text: str, token: CancellationToken) -> None:
+    def _run_speech(self, correlation_id: str, text: str, token: CancellationToken, literal: bool = False) -> None:
         started = datetime.now(timezone.utc)
-        operation_handle = self._begin_operation("voice.speak", correlation_id)
-        profile = resolve_voice_profile(self._settings)
-        spoken_metadata = build_spoken_metadata(profile)
-        request_metadata = dict(spoken_metadata)
-        segments = split_tts_text(text)
-        self._logger.info(
-            "voice_speak_request",
-            extra={
-                "correlation_id": correlation_id,
-                "profile_name": profile.name,
-                "provider_selected": self._settings.voice_tts_provider_default,
-                "fallback_order": list(self._settings.voice_tts_provider_fallback_order),
-                "style": request_metadata.get("style"),
-                "speaker_name": request_metadata.get("speaker_name"),
-                "speaker_wav": request_metadata.get("speaker_wav"),
-                "speaking_rate": request_metadata.get("speaking_rate"),
-                "rate": profile.rate,
-                "text_length": len(text),
-                "segment_count": len(segments),
-            },
-        )
+        started_perf = time.perf_counter()
+        operation_handle = None
+        operation_finished = False
+        cancellation_reason: str | None = None
+        profile = None
+        request_metadata: dict[str, object] = {}
+        prepared_text = text
         try:
+            if token.cancelled():
+                self._logger.info("voice_speak_skipped", extra={"correlation_id": correlation_id, "reason": "cancelled_before_start"})
+                return
+            try:
+                operation_handle = self._begin_operation("voice.speak", correlation_id)
+            except ServiceUnavailableError as exc:
+                self._logger.warning(
+                    "voice_speak_skipped",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "reason": "operation_admission_rejected",
+                        "error": str(exc),
+                    },
+                )
+                self._event_bus.publish(
+                    "voice.skipped",
+                    {
+                        "correlation_id": correlation_id,
+                        "operation_name": "voice.speak.skipped",
+                        "reason": "operation_admission_rejected",
+                    },
+                )
+                return
+            if token.cancelled():
+                cancellation_reason = "cancelled_after_admission"
+                self._logger.info("voice_speak_cancelled", extra={"correlation_id": correlation_id, "reason": cancellation_reason})
+                return
+
+            requested_profile_name = self._settings.voice_clone_profile_default or self._settings.voice_profile_default
+            profile = self._voice_clone.resolve_profile(requested_profile_name)
+            spoken_metadata = build_spoken_metadata(profile)
+            request_metadata = dict(spoken_metadata)
+            request_metadata.update(self._voice_clone.build_request_metadata(profile))
+            prepared_text = prepare_spoken_text(text, profile=None if literal else profile)
+            segments = build_tts_segments(prepared_text, profile=profile)
+            self._logger.info(
+                "voice_speak_request",
+                extra={
+                    "correlation_id": correlation_id,
+                    "profile_name": profile.name,
+                    "provider_selected": profile.backend,
+                    "fallback_order": list(profile.fallback_backends),
+                    "voice_clone_ready": request_metadata.get("voice_clone_ready"),
+                    "voice_clone_validation_status": request_metadata.get("voice_clone_validation_status"),
+                    "voice_clone_quality_score": request_metadata.get("voice_clone_quality_score"),
+                    "style": request_metadata.get("style"),
+                    "speaker_name": request_metadata.get("speaker_name"),
+                    "speaker_wav": request_metadata.get("speaker_wav"),
+                    "speaking_rate": request_metadata.get("speaking_rate"),
+                    "rate": profile.rate,
+                    "text_length": len(text),
+                    "prepared_text_length": len(prepared_text),
+                    "segment_count": len(segments),
+                },
+            )
             if not segments:
                 raise VoiceRuntimeError("voice speak received empty normalized text")
             segment_results: list[dict[str, object]] = []
             fallback_used = False
             fallback_reason: str | None = None
-            for segment_index, segment_text in enumerate(segments, start=1):
+            tts_start_ms: float | None = None
+            for segment_index, segment in enumerate(segments, start=1):
                 if token.cancelled():
-                    self._log_speech_cancelled(correlation_id, reason="cancelled_before_segment", segment_index=segment_index, segment_total=len(segments))
+                    cancellation_reason = "cancelled_before_segment"
+                    self._log_speech_cancelled(correlation_id, reason=cancellation_reason, segment_index=segment_index, segment_total=len(segments))
                     return
                 segment_metadata = dict(request_metadata)
                 segment_metadata.update(
                     {
                         "segment_index": segment_index,
                         "segment_total": len(segments),
-                        "segment_text_length": len(segment_text),
-                        "full_text_length": len(text),
+                        "segment_text_length": len(segment.text),
+                        "full_text_length": len(prepared_text),
+                        "pause_ms_effective": segment.pause_ms,
+                        "pause_kind": segment.pause_kind,
                     }
                 )
                 self._logger.info(
@@ -409,29 +458,38 @@ class VoiceRuntimeService:
                         "correlation_id": correlation_id,
                         "segment_index": segment_index,
                         "segment_total": len(segments),
-                        "segment_text_length": len(segment_text),
+                        "segment_text_length": len(segment.text),
+                        "pause_ms_effective": segment.pause_ms,
+                        "pause_kind": segment.pause_kind,
                     },
                 )
+                segment_started = time.perf_counter()
                 result = self._tts.synthesize(
                     SynthesisRequest(
-                        text=segment_text,
+                        text=segment.text,
                         voice_name=profile.speaker_name or self._settings.voice_default_voice_name,
                         profile_name=profile.name,
+                        provider_name=profile.backend,
+                        fallback_provider_names=tuple(profile.fallback_backends),
                         language=self._settings.voice_default_language,
                         rate=profile.rate,
                         correlation_id=correlation_id,
                         metadata=segment_metadata,
                     )
                 )
+                if tts_start_ms is None:
+                    tts_start_ms = (time.perf_counter() - started_perf) * 1000
                 if token.cancelled():
-                    self._log_speech_cancelled(correlation_id, reason="cancelled_after_synthesis", segment_index=segment_index, segment_total=len(segments))
+                    cancellation_reason = "cancelled_after_synthesis"
+                    self._log_speech_cancelled(correlation_id, reason=cancellation_reason, segment_index=segment_index, segment_total=len(segments))
                     return
                 playback_handle = self._playback.play(result, cancellation=token)
                 self._current_playback_handle = playback_handle
                 result.played = True
                 playback_handle.wait(result.duration_seconds)
                 if token.cancelled():
-                    self._log_speech_cancelled(correlation_id, reason="cancelled_during_playback", segment_index=segment_index, segment_total=len(segments))
+                    cancellation_reason = "cancelled_during_playback"
+                    self._log_speech_cancelled(correlation_id, reason=cancellation_reason, segment_index=segment_index, segment_total=len(segments))
                     return
                 fallback_used = fallback_used or result.fallback_used
                 fallback_reason = fallback_reason or result.metadata.get("fallback_reason")
@@ -442,7 +500,10 @@ class VoiceRuntimeService:
                         "backend": result.backend_name,
                         "fallback_used": result.fallback_used,
                         "latency_ms": result.latency_ms,
+                        "segment_latency_ms": round((time.perf_counter() - segment_started) * 1000, 2),
                         "fallback_reason": result.metadata.get("fallback_reason"),
+                        "pause_ms": segment.pause_ms,
+                        "pause_kind": segment.pause_kind,
                     }
                 )
                 self._logger.info(
@@ -456,6 +517,8 @@ class VoiceRuntimeService:
                         "fallback_used": result.fallback_used,
                     },
                 )
+                if segment_index < len(segments) and segment.pause_ms > 0:
+                    time.sleep(segment.pause_ms / 1000)
             final_result = segment_results[-1]
             self._last_speech_result = {
                 "provider": final_result["provider"],
@@ -463,15 +526,27 @@ class VoiceRuntimeService:
                 "fallback_used": fallback_used,
                 "latency_ms": final_result["latency_ms"],
                 "correlation_id": correlation_id,
+                "tts_start_ms": round(tts_start_ms or 0.0, 2),
+                "tts_total_ms": round((time.perf_counter() - started_perf) * 1000, 2),
                 "voice_profile": profile.name,
                 "requested_provider": self._settings.voice_tts_provider_default,
+                "requested_clone_backend": profile.backend,
                 "speaker_name": request_metadata.get("speaker_name"),
                 "speaker_wav": request_metadata.get("speaker_wav"),
+                "speaker_wav_effective": request_metadata.get("speaker_wav_effective") or request_metadata.get("speaker_wav"),
                 "speaking_rate": request_metadata.get("speaking_rate"),
                 "rate": profile.rate,
                 "style": request_metadata.get("style"),
+                "voice_clone_ready": request_metadata.get("voice_clone_ready"),
+                "voice_clone_validation_status": request_metadata.get("voice_clone_validation_status"),
+                "voice_clone_quality_score": request_metadata.get("voice_clone_quality_score"),
+                "voice_clone_warnings": request_metadata.get("voice_clone_warnings"),
+                "voice_clone_recommendations": request_metadata.get("voice_clone_recommendations"),
+                "pause_ms": request_metadata.get("pause_ms"),
+                "pause_style": request_metadata.get("pause_style"),
                 "segment_count": len(segments),
-                "text_length": len(text),
+                "text_length": len(prepared_text),
+                "prepared_text": prepared_text,
                 "segments": segment_results,
                 "fallback_reason": fallback_reason,
             }
@@ -488,15 +563,18 @@ class VoiceRuntimeService:
                     "speaking_rate_effective": self._last_speech_result.get("speaking_rate"),
                     "rate_effective": self._last_speech_result.get("rate"),
                     "segment_count": len(segments),
-                    "text_length": len(text),
+                    "text_length": len(prepared_text),
+                    "tts_start_ms": self._last_speech_result.get("tts_start_ms"),
+                    "tts_total_ms": self._last_speech_result.get("tts_total_ms"),
                     "fallback_reason": fallback_reason,
                 },
             )
             if operation_handle is not None:
                 self._operations.complete(
                     operation_handle.operation_id,
-                    metadata={"text_length": len(text), "provider": final_result["provider"], "backend": final_result["backend"], "segment_count": len(segments)},
+                    metadata={"text_length": len(prepared_text), "provider": final_result["provider"], "backend": final_result["backend"], "segment_count": len(segments)},
                 )
+                operation_finished = True
             self._event_bus.publish(
                 "voice.executed",
                 {
@@ -505,7 +583,13 @@ class VoiceRuntimeService:
                     "provider": final_result["provider"],
                     "backend": final_result["backend"],
                     "latency_ms": final_result["latency_ms"],
-                    "data": {"text_length": len(text), "fallback_used": fallback_used, "segment_count": len(segments)},
+                    "data": {
+                        "text_length": len(prepared_text),
+                        "fallback_used": fallback_used,
+                        "segment_count": len(segments),
+                        "tts_start_ms": self._last_speech_result.get("tts_start_ms"),
+                        "tts_total_ms": self._last_speech_result.get("tts_total_ms"),
+                    },
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -514,16 +598,17 @@ class VoiceRuntimeService:
                 extra={
                     "correlation_id": correlation_id,
                     "provider_selected": self._settings.voice_tts_provider_default,
-                    "profile_name": profile.name,
+                    "profile_name": profile.name if profile is not None else None,
                     "style": request_metadata.get("style"),
                     "speaker_name": request_metadata.get("speaker_name"),
                     "speaker_wav": request_metadata.get("speaker_wav"),
                     "speaking_rate": request_metadata.get("speaking_rate"),
-                    "rate": profile.rate,
+                    "rate": profile.rate if profile is not None else None,
                 },
             )
             if operation_handle is not None:
                 self._operations.fail(operation_handle.operation_id, error=str(exc))
+                operation_finished = True
             self._event_bus.publish(
                 "voice.failed",
                 {
@@ -533,6 +618,15 @@ class VoiceRuntimeService:
                 },
             )
         finally:
+            if operation_handle is not None and not operation_finished:
+                self._operations.complete(
+                    operation_handle.operation_id,
+                    metadata={
+                        "cancelled": bool(cancellation_reason),
+                        "reason": cancellation_reason or "speech_thread_stopped",
+                        "text_length": len(prepared_text or ""),
+                    },
+                )
             self._cancellations.pop(correlation_id, None)
             with self._speech_lock:
                 if self._current_speech_correlation_id == correlation_id:

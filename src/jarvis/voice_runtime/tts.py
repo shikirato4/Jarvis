@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any
 
 from jarvis.config import Settings
@@ -28,12 +29,13 @@ class TTSService:
         self._event_bus = event_bus
         self._logger = logger or logging.getLogger("jarvis.voice.tts")
         self._resilience = resilience_controller
+        self._provider_backoff_until: dict[str, float] = {}
 
     def health(self) -> list[dict[str, Any]]:
         return [provider.health_check() for provider in self._registry.list_providers()]
 
     def synthesize(self, request: SynthesisRequest) -> SynthesisResult:
-        candidates = self._candidate_providers()
+        candidates = self._candidate_providers(request)
         if not candidates:
             raise CapabilityUnavailableError("no tts providers available")
         last_error: Exception | None = None
@@ -41,16 +43,17 @@ class TTSService:
         metadata = request.metadata or {}
         selected_names = [provider.provider_name for provider in candidates]
         self._logger.info(
-            "voice_tts_selection",
+            "tts_provider_selected",
             extra={
                 "correlation_id": request.correlation_id,
-                "preferred_provider": self._settings.voice_tts_provider_default,
+                "preferred_provider": request.provider_name or self._settings.voice_tts_provider_default,
                 "candidate_providers": selected_names,
                 "profile_name": request.profile_name,
                 "voice_name": request.voice_name,
                 "rate": request.rate,
                 "speaker_name": metadata.get("speaker_name"),
                 "speaker_wav": metadata.get("speaker_wav"),
+                "speaker_wav_effective": metadata.get("speaker_wav_effective") or metadata.get("speaker_wav"),
                 "speaking_rate": metadata.get("speaking_rate"),
             },
         )
@@ -83,7 +86,7 @@ class TTSService:
                 result.fallback_used = index > 0
                 result.metadata["requested_provider"] = self._coalesce_metadata_value(
                     result.metadata.get("requested_provider"),
-                    self._settings.voice_tts_provider_default,
+                    request.provider_name or self._settings.voice_tts_provider_default,
                 )
                 result.metadata["profile_name"] = self._coalesce_metadata_value(result.metadata.get("profile_name"), request.profile_name)
                 result.metadata["voice_name"] = self._coalesce_metadata_value(result.metadata.get("voice_name"), request.voice_name)
@@ -135,6 +138,7 @@ class TTSService:
                 return result
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
+                self._mark_provider_backoff(provider.provider_name, exc)
                 failure_details.append({"provider": provider.provider_name, "reason": str(exc)})
                 self._logger.exception("voice_tts_failed", extra={"provider": provider.provider_name})
                 self._event_bus.publish(
@@ -155,12 +159,19 @@ class TTSService:
             return current
         return fallback
 
-    def _candidate_providers(self) -> list[TTSProvider]:
-        preferred = (self._settings.voice_tts_provider_default, *self._settings.voice_tts_provider_fallback_order)
+    def _candidate_providers(self, request: SynthesisRequest) -> list[TTSProvider]:
+        preferred = (
+            request.provider_name or self._settings.voice_tts_provider_default,
+            *request.fallback_provider_names,
+            *self._settings.voice_tts_provider_fallback_order,
+        )
         seen: set[str] = set()
         providers: list[TTSProvider] = []
+        now = perf_counter()
         for name in preferred:
             if not name or name in seen:
+                continue
+            if self._provider_backoff_until.get(name, 0.0) > now:
                 continue
             provider = self._registry.get(name)
             if provider is not None:
@@ -168,10 +179,29 @@ class TTSService:
                 seen.add(name)
         if providers:
             return providers
-        return self._registry.list_providers()
+        return [provider for provider in self._registry.list_providers() if self._provider_backoff_until.get(provider.provider_name, 0.0) <= now]
 
     def _resolve_timeout_ms(self, request: SynthesisRequest) -> int | None:
         timeout_seconds = getattr(request, "timeout_seconds", None)
         if timeout_seconds is not None:
             return int(timeout_seconds * 1000)
         return self._settings.voice_watchdog_timeout_ms
+
+    def _mark_provider_backoff(self, provider_name: str, exc: Exception) -> None:
+        if not self._should_back_off(exc):
+            return
+        self._provider_backoff_until[provider_name] = perf_counter() + 30.0
+
+    @staticmethod
+    def _should_back_off(exc: Exception) -> bool:
+        text = str(exc).casefold()
+        return any(
+            token in text
+            for token in (
+                "package not installed",
+                "module not found",
+                "no module named",
+                "unavailable",
+                "missing speaker_wav",
+            )
+        )

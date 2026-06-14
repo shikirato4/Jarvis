@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -60,6 +62,8 @@ class VisionRuntimeService:
         self._ui_metadata_adapter = ui_metadata_adapter
         self._logger = logger or logging.getLogger("jarvis.vision")
         self._operations = operation_registry
+        self._ocr_cache: dict[str, tuple[float, VisionOperationReceipt]] = {}
+        self._awareness_cache: dict[str, tuple[float, VisionOperationReceipt]] = {}
 
     def status(self) -> dict[str, object]:
         active_window = self._active_window()
@@ -89,12 +93,16 @@ class VisionRuntimeService:
         try:
             validate_ocr_request(self._settings, request)
             capture_result = self._resolve_capture(request.capture, correlation_id=correlation_id) if request.capture else None
+            cache_key = self._ocr_cache_key(request, capture_result)
+            cached_receipt = self._cache_get(self._ocr_cache, cache_key)
+            if cached_receipt is not None:
+                return cached_receipt.model_copy(update={"correlation_id": correlation_id})
             ocr_result = self._ocr.extract_text(request, capture=capture_result)
             if len(ocr_result.blocks) > self._settings.vision_ocr_max_blocks:
                 raise CapabilityUnavailableError("ocr block limit exceeded", component="vision_runtime")
             if handle is not None:
                 self._operations.complete(handle.operation_id, metadata={"block_count": len(ocr_result.blocks)})
-            return self._publish_success(
+            receipt = self._publish_success(
                 correlation_id=correlation_id,
                 operation_name="vision.extract_text",
                 started_at=started_at,
@@ -104,8 +112,15 @@ class VisionRuntimeService:
                 fallback_used=ocr_result.fallback_used,
                 capture_result=capture_result,
                 ocr_result=ocr_result,
-                data={"text": ocr_result.text, "block_count": len(ocr_result.blocks), "language": ocr_result.language},
+                data={
+                    "text": ocr_result.text,
+                    "block_count": len(ocr_result.blocks),
+                    "language": ocr_result.language,
+                    "ocr_ms": ocr_result.latency_ms,
+                },
             )
+            self._cache_put(self._ocr_cache, cache_key, receipt, ttl_seconds=1.0)
+            return receipt
         except Exception as exc:  # noqa: BLE001
             if handle is not None:
                 self._operations.fail(handle.operation_id, error=str(exc))
@@ -248,7 +263,12 @@ class VisionRuntimeService:
         started_at = datetime.now(timezone.utc)
         try:
             capture_result = self._resolve_awareness_capture(request, correlation_id=correlation_id)
+            cache_key = self._awareness_cache_key(request, capture_result)
+            cached_receipt = self._cache_get(self._awareness_cache, cache_key)
+            if cached_receipt is not None:
+                return cached_receipt.model_copy(update={"correlation_id": correlation_id})
             ocr_result = None
+            ocr_started = time.perf_counter()
             if request.include_ocr:
                 ocr_result = self._ocr.extract_text(
                     OCRRequest(
@@ -262,6 +282,8 @@ class VisionRuntimeService:
                     ),
                     capture=capture_result,
                 )
+            ocr_ms = (time.perf_counter() - ocr_started) * 1000 if request.include_ocr else 0.0
+            awareness_started = time.perf_counter()
             awareness_results = []
             if request.include_ui_tree:
                 for analyzer in self._awareness_registry.list_analyzers():
@@ -275,7 +297,8 @@ class VisionRuntimeService:
                 window=self._active_window(),
                 awareness_results=awareness_results,
             )
-            return self._publish_success(
+            awareness_ms = (time.perf_counter() - awareness_started) * 1000
+            receipt = self._publish_success(
                 correlation_id=correlation_id,
                 operation_name=operation_name,
                 started_at=started_at,
@@ -287,8 +310,16 @@ class VisionRuntimeService:
                 capture_result=capture_result,
                 ocr_result=ocr_result,
                 awareness_result=awareness,
-                data={"summary": awareness.summary, "element_count": len(awareness.elements), "anchor_count": len(awareness.anchors)},
+                data={
+                    "summary": awareness.summary,
+                    "element_count": len(awareness.elements),
+                    "anchor_count": len(awareness.anchors),
+                    "ocr_ms": round(ocr_ms, 2),
+                    "awareness_ms": round(awareness_ms, 2),
+                },
             )
+            self._cache_put(self._awareness_cache, cache_key, receipt, ttl_seconds=0.5)
+            return receipt
         except Exception as exc:  # noqa: BLE001
             self._publish_failure(correlation_id, operation_name, started_at, error=exc)
             raise
@@ -296,6 +327,7 @@ class VisionRuntimeService:
     def _capture(self, request: ScreenCaptureRequest, *, correlation_id: str | None, operation_name: str) -> VisionOperationReceipt:
         correlation_id = correlation_id or request.correlation_id or str(uuid4())
         started_at = datetime.now(timezone.utc)
+        started_perf = time.perf_counter()
         try:
             result = self._resolve_capture(request, correlation_id=correlation_id)
             return self._publish_success(
@@ -303,9 +335,10 @@ class VisionRuntimeService:
                 operation_name=operation_name,
                 started_at=started_at,
                 backend=result.backend_name,
+                latency_ms=round((time.perf_counter() - started_perf) * 1000, 2),
                 capture_target=result.target_type.value,
                 capture_result=result,
-                data={"width": result.width, "height": result.height},
+                data={"width": result.width, "height": result.height, "capture_ms": round((time.perf_counter() - started_perf) * 1000, 2)},
             )
         except Exception as exc:  # noqa: BLE001
             self._publish_failure(correlation_id, operation_name, started_at, error=exc)
@@ -510,3 +543,49 @@ class VisionRuntimeService:
             if backend.backend_name not in names:
                 names.append(backend.backend_name)
         return names
+
+    def _ocr_cache_key(self, request: OCRRequest, capture_result: ScreenCaptureResult | None) -> str | None:
+        if capture_result is None and request.image_bytes is None and request.image_path is None:
+            return None
+        image_hash = self._image_hash(capture_result.image_bytes if capture_result else request.image_bytes, capture_result.image_path if capture_result else request.image_path)
+        if image_hash is None:
+            return None
+        return f"ocr:{request.provider_name or 'default'}:{request.language or self._settings.vision_default_ocr_language}:{image_hash}"
+
+    def _awareness_cache_key(self, request: UIAwarenessRequest, capture_result: ScreenCaptureResult | None) -> str | None:
+        if capture_result is None and request.image_bytes is None and request.image_path is None:
+            return None
+        image_hash = self._image_hash(capture_result.image_bytes if capture_result else request.image_bytes, capture_result.image_path if capture_result else request.image_path)
+        if image_hash is None:
+            return None
+        return f"aware:{request.include_ocr}:{request.include_ui_tree}:{request.ocr_provider_name or 'default'}:{request.analyzer_name or self._settings.vision_awareness_backend_default}:{image_hash}"
+
+    @staticmethod
+    def _image_hash(image_bytes: bytes | None, image_path: str | None) -> str | None:
+        if image_bytes:
+            return hashlib.sha1(image_bytes).hexdigest()
+        if image_path:
+            path = Path(image_path)
+            if path.exists():
+                stat = path.stat()
+                return hashlib.sha1(f"{path.resolve(strict=False)}:{stat.st_mtime_ns}:{stat.st_size}".encode("utf-8")).hexdigest()
+        return None
+
+    @staticmethod
+    def _cache_get(cache: dict[str, tuple[float, VisionOperationReceipt]], key: str | None) -> VisionOperationReceipt | None:
+        if not key:
+            return None
+        cached = cache.get(key)
+        if cached is None:
+            return None
+        expires_at, receipt = cached
+        if expires_at < time.perf_counter():
+            cache.pop(key, None)
+            return None
+        return receipt
+
+    @staticmethod
+    def _cache_put(cache: dict[str, tuple[float, VisionOperationReceipt]], key: str | None, receipt: VisionOperationReceipt, *, ttl_seconds: float) -> None:
+        if not key:
+            return
+        cache[key] = (time.perf_counter() + ttl_seconds, receipt)

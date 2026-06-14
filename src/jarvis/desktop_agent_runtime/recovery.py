@@ -80,6 +80,30 @@ class DesktopAgentRecoveryEngine:
                 step_update={"payload": {**step.payload, "query": query}},
             )
 
+        if step.action_type in {DesktopStepActionType.OPEN_FILE, DesktopStepActionType.OPEN_FOLDER} and not self._memory.has_recovery_attempt(world, step.step_id, "retry_reveal_path"):
+            world = self._memory.note_recovery_attempt(world, step.step_id, "retry_reveal_path")
+            replacement = DesktopStepActionType.OPEN_FOLDER if step.action_type == DesktopStepActionType.OPEN_FOLDER else DesktopStepActionType.OPEN_PATH
+            return world, DesktopAgentRecoveryDecision(
+                should_retry=True,
+                note="Retrying with a direct path open strategy.",
+                strategy="retry_reveal_path",
+                step_update={"payload": dict(step.payload), "action_type": replacement.value},
+            )
+
+        if "action_success" in missing and step.action_type in {
+            DesktopStepActionType.CREATE_FILE,
+            DesktopStepActionType.CREATE_FOLDER,
+            DesktopStepActionType.COPY_FILE,
+            DesktopStepActionType.MOVE_FILE,
+            DesktopStepActionType.RENAME_FILE,
+        }:
+            world = self._memory.note_error(world, verification.note)
+            return world, DesktopAgentRecoveryDecision(
+                abort=True,
+                note="File operation stopped because the safe system layer did not confirm success.",
+                strategy="abort_file_operation",
+            )
+
         if step.action_type == DesktopStepActionType.WRITE_TEXT and verification.status == DesktopVerificationStatus.PARTIAL:
             strategy = "refocus_before_write"
             if not self._memory.has_recovery_attempt(world, step.step_id, strategy):
@@ -90,6 +114,17 @@ class DesktopAgentRecoveryEngine:
                     note="Retrying write after refocusing the intended editor window.",
                     strategy=strategy,
                     step_update={"payload": {**step.payload, **({"target_window": target_window} if target_window else {})}},
+                )
+
+        if step.action_type == DesktopStepActionType.CLICK_TARGET:
+            strategy = "broaden_visual_grounding"
+            if not self._memory.has_recovery_attempt(world, step.step_id, strategy):
+                world = self._memory.note_recovery_attempt(world, step.step_id, strategy)
+                return world, DesktopAgentRecoveryDecision(
+                    should_retry=True,
+                    note="Retrying click after broadening the visual grounding strategy.",
+                    strategy=strategy,
+                    step_update={"payload": {**step.payload, "kind": None}},
                 )
 
         strategy = "heuristic_replan_current_subgoal"

@@ -83,9 +83,9 @@ class Settings(BaseSettings):
     sqlite_pool_pre_ping: bool = True
     sqlite_check_same_thread: bool = False
     model_provider_default: str = "ollama"
-    model_provider_fallback_order: tuple[str, ...] = ("ollama",)
-    general_chat_model_provider: str = "gpt_oss"
-    general_chat_model_fallback_order: tuple[str, ...] = ()
+    model_provider_fallback_order: tuple[str, ...] = ("ollama", "gpt_oss")
+    general_chat_model_provider: str = "ollama"
+    general_chat_model_fallback_order: tuple[str, ...] = ("gpt_oss",)
     gpt_oss_enabled: bool = False
     gpt_oss_base_url: str = "http://127.0.0.1:8000/v1"
     gpt_oss_api_key: str | None = None
@@ -167,8 +167,20 @@ class Settings(BaseSettings):
     voice_coqui_speaker_wav: Path | None = None
     voice_coqui_speaker_name: str | None = None
     voice_coqui_tos_agreed: bool = False
-    voice_profile_default: str = "jarvis_serious"
-    voice_formality_level: int = 4
+    voice_clone_enabled: bool = True
+    voice_clone_backend_default: str = ""
+    voice_clone_profile_default: str = "jarvis_premium"
+    voice_clone_sample_path: Path | None = None
+    voice_clone_preprocess_enabled: bool = True
+    voice_clone_quality_check_enabled: bool = True
+    voice_clone_quality_threshold: float = 0.35
+    voice_clone_openvoice_enabled: bool = False
+    voice_clone_rvc_enabled: bool = False
+    voice_profile_default: str = "jarvis_premium"
+    voice_style_preset: str = "cinematic"
+    voice_pause_style: str = "balanced"
+    voice_speaking_rate: float = 0.90
+    voice_formality_level: int = 5
     voice_tts_rate: int = 168
     voice_cleanup_enabled: bool = True
     voice_style_enabled: bool = True
@@ -300,10 +312,24 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: float = 90.0
     ollama_healthcheck_timeout_seconds: float = 5.0
+    chat_default_max_tokens: int = 256
+    chat_fast_max_tokens: int = 160
+    chat_detailed_max_tokens: int = 700
+    chat_temperature: float = 0.4
+    llm_timeout_seconds: float = 60.0
+    llm_fast_timeout_seconds: float = 20.0
+    llm_detailed_timeout_seconds: float = 120.0
+    web_synthesis_timeout_seconds: float = 75.0
+    web_synthesis_max_sources: int = 3
+    web_synthesis_snippet_chars: int = 500
+    ollama_keep_warm: bool = False
+    ollama_keep_warm_prompt: str = "ping"
+    ollama_keep_warm_delay_seconds: float = 5.0
     ollama_max_retries: int = 2
     ollama_retry_backoff_seconds: float = 0.25
     ollama_chat_endpoint: str = "/api/chat"
     ollama_tags_endpoint: str = "/api/tags"
+    ollama_stream_endpoint: str = "auto"
     unity_allowed_bridge_commands: tuple[str, ...] = ()
     unity_blocked_bridge_commands: tuple[str, ...] = ()
     unity_require_confirmation_for_editor_commands: bool = True
@@ -320,7 +346,7 @@ class Settings(BaseSettings):
     research_watchdog_timeout_ms: int = 45_000
     research_require_citations: bool = True
     indexing_runtime_enabled: bool = True
-    indexing_auto_sync_on_start: bool = True
+    indexing_auto_sync_on_start: bool = False
     indexing_auto_index_research: bool = True
     indexing_auto_index_writing: bool = True
     indexing_default_batch_size: int = 32
@@ -370,6 +396,8 @@ class Settings(BaseSettings):
     indexing_excluded_dirnames: tuple[str, ...] = (
         ".git",
         ".venv",
+        ".venv312",
+        ".venv_legacy_src_backup",
         "venv",
         "node_modules",
         "__pycache__",
@@ -383,7 +411,7 @@ class Settings(BaseSettings):
     hud_enabled: bool = True
     hud_poll_interval_ms: int = 5000
 
-    @field_validator("data_dir", "logs_dir", "workspace_root", "vision_capture_dir", "voice_coqui_speaker_wav", mode="before")
+    @field_validator("data_dir", "logs_dir", "workspace_root", "vision_capture_dir", "voice_coqui_speaker_wav", "voice_clone_sample_path", mode="before")
     @classmethod
     def _coerce_path(cls, value: str | Path | None) -> Path | None:
         if value is None:
@@ -542,6 +570,12 @@ class Settings(BaseSettings):
         if self.voice_coqui_speaker_wav is None:
             return None
         return self.voice_coqui_speaker_wav.resolve()
+
+    @property
+    def resolved_voice_clone_sample_path(self) -> Path | None:
+        if self.voice_clone_sample_path is None:
+            return None
+        return self.voice_clone_sample_path.resolve()
 
     @property
     def resolved_log_file(self) -> Path:

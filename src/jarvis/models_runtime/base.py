@@ -53,6 +53,13 @@ class ModelResponse(JarvisBaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StreamChunk(JarvisBaseModel):
+    text: str = ""
+    done: bool = False
+    error: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class ProviderHealth(JarvisBaseModel):
     provider_name: str
     healthy: bool
@@ -67,3 +74,5 @@ class ModelProvider(Protocol):
     def health_check(self) -> ProviderHealth: ...
 
     def infer(self, request: ModelRequest, *, model_name: str, temperature: float | None, timeout_seconds: float | None) -> ModelResponse: ...
+
+    def stream_infer(self, request: ModelRequest, *, model_name: str, temperature: float | None, timeout_seconds: float | None, cancel_check=None): ...

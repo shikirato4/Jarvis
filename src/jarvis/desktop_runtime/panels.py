@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from time import perf_counter
+
 from .base import DesktopMissionView, DesktopPanelSnapshot, DesktopServiceView, DesktopTimelineEntry
 
 
 class DesktopPanelComposer:
+    _CACHE_TTL_SECONDS = 0.75
+
     def __init__(self, bridge) -> None:
         self._bridge = bridge
+        self._cached_snapshot: DesktopPanelSnapshot | None = None
+        self._cached_at = 0.0
 
     def compose(self) -> DesktopPanelSnapshot:
+        now = perf_counter()
+        if self._cached_snapshot is not None and (now - self._cached_at) < self._CACHE_TTL_SECONDS:
+            return self._cached_snapshot
         dashboard = self._bridge.hud_dashboard()
         health = self._bridge.hud_health()
         timeline = self._bridge.hud_timeline(limit=24)
@@ -26,8 +35,11 @@ class DesktopPanelComposer:
             )
             for item in dashboard.get("missions", [])
         ]
+        known_mission_ids = {mission.mission_id for mission in missions if mission.mission_id}
         if latest_agent:
             for mission in reversed(desktop_agent_missions):
+                if mission.get("mission_id") in known_mission_ids:
+                    continue
                 world_state = mission.get("world_state") or {}
                 current_step = (world_state.get("current_step") or {}).get("title")
                 missions.insert(
@@ -41,15 +53,19 @@ class DesktopPanelComposer:
                         metadata={
                             "current_step": current_step,
                             "current_subtask": mission.get("current_subtask_label"),
+                            "target_path": world_state.get("target_path"),
+                            "active_path": world_state.get("active_path"),
                             "progress": mission.get("progress"),
                             "summary": mission.get("summary"),
                             "last_verification_note": mission.get("last_verification_note"),
                             "last_recovery_note": mission.get("last_recovery_note"),
+                            "metrics": mission.get("metrics"),
                             **mission,
                         },
                     ),
                 )
-        return DesktopPanelSnapshot(
+                known_mission_ids.add(mission.get("mission_id"))
+        snapshot = DesktopPanelSnapshot(
             mode=dashboard.get("mode", {}),
             health_summary=dashboard.get("health_summary", {}),
             services=[
@@ -82,9 +98,12 @@ class DesktopPanelComposer:
                             "summary": latest_agent.get("summary"),
                             "current_step": (latest_agent.get("world_state") or {}).get("current_step", {}).get("title"),
                             "current_subtask": latest_agent.get("current_subtask_label"),
+                            "target_path": (latest_agent.get("world_state") or {}).get("target_path"),
+                            "active_path": (latest_agent.get("world_state") or {}).get("active_path"),
                             "progress": latest_agent.get("progress"),
                             "last_verification_note": latest_agent.get("last_verification_note"),
                             "last_recovery_note": latest_agent.get("last_recovery_note"),
+                            "metrics": latest_agent.get("metrics"),
                         }
                     ]
                     if latest_agent
@@ -92,3 +111,6 @@ class DesktopPanelComposer:
                 ),
             ],
         )
+        self._cached_snapshot = snapshot
+        self._cached_at = perf_counter()
+        return snapshot

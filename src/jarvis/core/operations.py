@@ -197,7 +197,7 @@ class OperationRegistry:
         if not admission.granted:
             if admission.deferred:
                 return OperationHandle(self, record, token)
-            self.cancel(operation_id, reason=admission.reason or "admission rejected")
+            self.fail(operation_id, error=admission.reason or "admission rejected")
             raise ServiceUnavailableError(admission.reason or "operation admission rejected", details=admission.model_dump(mode="json"))
         return OperationHandle(self, record, token)
 

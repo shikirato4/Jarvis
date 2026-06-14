@@ -17,6 +17,7 @@ from jarvis.services import (
     summarize_writing_receipt,
 )
 from jarvis.system_runtime.windows_apps import catalog_descriptor_for_query
+from jarvis.web_search import should_use_web_search
 
 
 @dataclass(frozen=True)
@@ -144,6 +145,15 @@ class DesktopIntentRouter:
 
     def execute(self, decision: DesktopIntentDecision) -> tuple[dict, str, str]:
         runtime = self._bridge.runtime
+        if decision.category in {"ui_click", "ui_type", "ui_navigate"}:
+            result = runtime.desktop_agent_run(
+                {
+                    "goal": decision.prompt,
+                    "metadata": {"source": "desktop_chat"},
+                    "source_surface": "desktop_chat",
+                }
+            ).model_dump(mode="json")
+            return result, self._summarize_desktop_agent(result), "desktop_agent_runtime.run"
         if decision.category == "empty":
             return {}, "Estoy listo.", "desktop.empty"
         if decision.category == "voice_speak_literal":
@@ -189,6 +199,8 @@ class DesktopIntentRouter:
             try:
                 receipt = runtime.vision_describe_active_window()
                 result = receipt.model_dump(mode="json", exclude={"capture_result": {"image_bytes"}})
+                result.setdefault("status", "completed")
+                result.setdefault("plan", {"strategy": "grounded_screen_read"})
             except JarvisError as exc:
                 if exc.component != "vision_runtime" or exc.code != "capture_failed":
                     raise
@@ -196,6 +208,8 @@ class DesktopIntentRouter:
                 active_window = active_result.get("active_window")
                 result = {
                     "ok": True,
+                    "status": "completed",
+                    "plan": {"strategy": "grounded_screen_read"},
                     "operation_name": "vision.describe_active_window",
                     "degraded": True,
                     "degradation_reason": exc.message,
@@ -206,6 +220,14 @@ class DesktopIntentRouter:
                         "summary": "",
                     },
                 }
+            except Exception as exc:  # noqa: BLE001
+                result = {
+                    "ok": False,
+                    "status": "completed",
+                    "plan": {"strategy": "grounded_screen_read"},
+                    "operation_name": "vision.describe_active_window",
+                    "error": {"message": str(exc), "type": type(exc).__name__},
+                }
             return result, self._summarize_window_context(result), "vision_runtime.describe_active_window"
         if decision.category == "screen_read":
             result = runtime.vision_extract_text(
@@ -213,7 +235,13 @@ class DesktopIntentRouter:
             ).model_dump(mode="json")
             return result, self._summarize_screen_text(result), "vision_runtime.extract_text"
         if decision.category == "desktop_agent":
-            result = runtime.desktop_agent_run({"goal": decision.prompt, "metadata": {"source": "desktop_chat"}}).model_dump(mode="json")
+            result = runtime.desktop_agent_run(
+                {
+                    "goal": decision.prompt,
+                    "metadata": {"source": "desktop_chat"},
+                    "source_surface": "desktop_chat",
+                }
+            ).model_dump(mode="json")
             return result, self._summarize_desktop_agent(result), "desktop_agent_runtime.run"
         if decision.category == "desktop_agent_pause":
             result = runtime.desktop_agent_pause(decision.mission_id or self._latest_desktop_agent_mission_id()).model_dump(mode="json")
@@ -369,7 +397,14 @@ class DesktopIntentRouter:
             ("abre " in folded and " y " in folded)
             or "ventana activa" in folded
             or ("archivo" in folded and "abre" in folded and "busca" in folded)
+            or ("archivo" in folded and any(token in folded for token in ("abre", "abrir")) and "busca" not in folded)
+            or ("archivo" in folded and any(token in folded for token in ("crea", "crear", "copia", "copiar", "mueve", "mover", "renombra", "renombrar")))
+            or ("carpeta" in folded and any(token in folded for token in ("abre", "abrir", "crea", "crear", "mueve", "mover")))
+            or "explorador" in folded
+            or "explorer" in folded
             or ("paso a paso" in folded and "abre " in folded)
+            or (any(token in folded for token in ("haz click", "haz clic", "click en", "clic en")) and any(token in folded for token in ("boton", "button", "campo", "input", "enviar", "send")))
+            or any(token in folded for token in ("llena este formulario", "rellena este formulario", "completa este formulario", "fill this form"))
         )
 
     def _ensure_operator_mode(self) -> None:
@@ -409,8 +444,10 @@ class DesktopIntentRouter:
         title = window.get("title") or "la ventana activa"
         if result.get("degraded"):
             if window.get("title"):
-                return f"No pude obtener una captura visual, pero la ventana activa es {title}."
-            return "No pude obtener una captura visual ni detectar la ventana activa."
+                return f"Veo {title}. No pude obtener una captura visual completa."
+            return "Veo la pantalla, pero no pude obtener una captura visual completa ni detectar la ventana activa."
+        if result.get("ok") is False:
+            return "Veo la pantalla, pero no pude obtener una captura visual en este momento."
         summary = str(awareness.get("summary") or "").strip()
         elements = awareness.get("elements") or []
         if summary:
@@ -675,6 +712,10 @@ class DesktopIntentRouter:
 
     @staticmethod
     def _is_system_search_request(folded: str) -> bool:
+        if any(marker in folded for marker in (" en el sistema", " sistema", "archivo", ".txt", ".pdf", ".docx", ".xlsx", ".py", ".json")):
+            return folded.startswith(("busca ", "search ", "find "))
+        if should_use_web_search(folded, mode="auto"):
+            return False
         return folded.startswith(("busca ", "search ", "find "))
 
     @staticmethod

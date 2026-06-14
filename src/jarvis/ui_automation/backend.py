@@ -412,7 +412,7 @@ class InMemoryDesktopAutomationBackend:
                 on_progress()
             self.typed_text += char
             if interval_seconds > 0:
-                time.sleep(interval_seconds)
+                time.sleep(min(interval_seconds, 0.0001))
 
     def hotkey(self, keys: tuple[str, ...]) -> None:
         self.hotkeys.append(keys)

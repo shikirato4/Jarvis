@@ -14,6 +14,8 @@ def jarvis_app(tmp_path: Path):
         research_allowed_roots=(tmp_path,),
         command_allowlist=("where",),
         ollama_enabled=False,
+        gpt_oss_enabled=False,
+        embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)

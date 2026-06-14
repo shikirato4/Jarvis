@@ -111,3 +111,64 @@ def test_native_application_catalog_provider_uses_registry_aliases(tmp_path: Pat
     assert code is not None
     assert code.display_name == "Visual Studio Code"
     assert code.path == str(fake_code)
+
+
+def test_system_runtime_create_folder_and_file_receipts(tmp_path: Path) -> None:
+    app = _build_system_app(tmp_path)
+    try:
+        folder = tmp_path / "Documents" / "Fisica"
+        file_path = folder / "notas.txt"
+        folder_receipt = app.runtime_service.system_create_folder({"path": str(folder)})
+        file_receipt = app.runtime_service.system_create_file({"path": str(file_path)})
+        assert folder_receipt.success is True
+        assert folder.exists() and folder.is_dir()
+        assert file_receipt.success is True
+        assert file_path.exists() and file_path.is_file()
+    finally:
+        app.stop()
+
+
+def test_system_runtime_copy_move_and_rename_file(tmp_path: Path) -> None:
+    source = tmp_path / "notes.txt"
+    source.write_text("jarvis", encoding="utf-8")
+    app = _build_system_app(tmp_path)
+    try:
+        copied = tmp_path / "Downloads" / "notes.txt"
+        moved = tmp_path / "Documents" / "notes.txt"
+        renamed_name = "archive.txt"
+        copy_receipt = app.runtime_service.system_copy_file({"path": str(source), "destination_path": str(copied)})
+        assert copy_receipt.success is True
+        assert copied.exists()
+        move_receipt = app.runtime_service.system_move_file({"path": str(copied), "destination_path": str(moved)})
+        assert move_receipt.success is True
+        assert moved.exists()
+        rename_receipt = app.runtime_service.system_rename_file({"path": str(moved), "new_name": renamed_name})
+        assert rename_receipt.success is True
+        assert (moved.parent / renamed_name).exists()
+    finally:
+        app.stop()
+
+
+def test_system_runtime_move_file_requires_confirmation_for_sensitive_target(tmp_path: Path) -> None:
+    sensitive = tmp_path / "system-root"
+    sensitive.mkdir()
+    source = tmp_path / "notes.txt"
+    source.write_text("jarvis", encoding="utf-8")
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        ui_backend_kind="in_memory",
+        system_backend_kind="in_memory",
+        system_search_roots=(tmp_path,),
+        system_sensitive_roots=(sensitive,),
+    )
+    app = build_application(settings)
+    app.start()
+    try:
+        receipt = app.runtime_service.system_move_file({"path": str(source), "destination_path": str(sensitive / "notes.txt")})
+        assert receipt.status.value == "confirmation_required"
+        assert receipt.confirmation_required is True
+    finally:
+        app.stop()

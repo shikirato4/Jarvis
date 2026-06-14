@@ -32,6 +32,9 @@ class Database:
                 return
             raise PersistenceError(str(exc)) from exc
 
+    def close(self) -> None:
+        self.engine.dispose()
+
     @contextmanager
     def session_scope(self) -> Iterator[Session]:
         session = self._session_factory()

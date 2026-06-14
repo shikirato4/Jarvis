@@ -21,6 +21,9 @@ class WritingModelAdapter:
         metadata: dict[str, Any],
         timeout_seconds: float | None = None,
     ) -> dict[str, Any] | None:
+        settings = getattr(self._models, "_settings", None)
+        if settings is not None and not getattr(settings, "ollama_enabled", True):
+            return None
         try:
             response = self._models.infer(
                 ModelRequest(

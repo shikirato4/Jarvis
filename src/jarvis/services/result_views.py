@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from jarvis.identity import sanitize_assistant_identity
+
 
 def summarize_model_response(payload: dict[str, Any]) -> str:
     content = str(payload.get("content") or "").strip()
     if content:
-        return content
+        return sanitize_assistant_identity(content)
     return "El modelo local no devolvio contenido."
 
 
