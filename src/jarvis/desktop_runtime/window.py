@@ -64,6 +64,7 @@ if QApplication is not None:
             self._left_panel_open = False
             self._right_panel_open = False
             self._state = None
+            self._nav_buttons: dict[str, QPushButton] = {}
             self.setWindowTitle("JARVIS Desktop")
             self._build_ui()
             self._configure_window_geometry()
@@ -126,10 +127,20 @@ if QApplication is not None:
             self._ops_badge = StatusBadge("OPS", "neutral")
             self._voice_badge = StatusBadge("VOICE", "neutral")
             self._llm_badge = StatusBadge("LLM", "neutral")
+            self._mode_badge = StatusBadge("MODE AUTO", "active")
+            self._model_badge = StatusBadge("MODEL gpt-oss:20b", "active")
+            self._web_badge = StatusBadge("WEB BRAVE", "neutral")
+            self._openai_badge = StatusBadge("OPENAI BLOCKED", "warning")
+            self._gemini_badge = StatusBadge("GEMINI BLOCKED", "warning")
             layout.addWidget(self._health_badge)
             layout.addWidget(self._ops_badge)
             layout.addWidget(self._voice_badge)
             layout.addWidget(self._llm_badge)
+            layout.addWidget(self._mode_badge)
+            layout.addWidget(self._model_badge)
+            layout.addWidget(self._web_badge)
+            layout.addWidget(self._openai_badge)
+            layout.addWidget(self._gemini_badge)
 
             self._focus_button = QPushButton("FOCUS MODE")
             self._focus_button.setObjectName("ModeToggle")
@@ -202,6 +213,29 @@ if QApplication is not None:
             layout.setSpacing(12)
 
             layout.addWidget(self._section_header("Service Surface", "Secondary systems and live alerts"))
+
+            nav_card = QFrame()
+            nav_card.setObjectName("ChromeCard")
+            nav_layout = QVBoxLayout(nav_card)
+            nav_layout.setContentsMargins(12, 12, 12, 12)
+            nav_layout.setSpacing(8)
+            nav_layout.addWidget(self._section_header("Jarvis Navigation", "Real tools plus safe previews"))
+            for action_id, label in (
+                ("chat", "Chat"),
+                ("agent", "Agent Mode"),
+                ("web", "Web"),
+                ("context", "Context"),
+                ("memory", "Memory"),
+                ("code", "Code Agent"),
+                ("learning", "Learning"),
+                ("settings", "Settings"),
+            ):
+                button = QPushButton(label)
+                button.setObjectName("NavButton")
+                button.clicked.connect(lambda _checked=False, action=action_id: self._navigate_shell(action))
+                nav_layout.addWidget(button)
+                self._nav_buttons[action_id] = button
+            layout.addWidget(nav_card)
 
             metrics_row = QHBoxLayout()
             metrics_row.setSpacing(10)
@@ -315,10 +349,12 @@ if QApplication is not None:
             layout = QVBoxLayout(panel)
             layout.setContentsMargins(16, 16, 16, 16)
             layout.setSpacing(12)
-            layout.addWidget(self._section_header("Operations Surface", "Timeline, missions and secondary controls"))
+            layout.addWidget(self._section_header("Jarvis Ops", "Estado local, contexto, memoria, Code Agent y aprendizaje seguro"))
 
             tabs = QTabWidget()
+            tabs.setObjectName("RightTabs")
             tabs.setDocumentMode(True)
+            self._right_tabs = tabs
 
             from PySide6.QtWidgets import QListWidget
 
@@ -347,6 +383,81 @@ if QApplication is not None:
             self._ops_tree.setHeaderLabels(["Metric", "Value"])
             self._ops_tree.setRootIsDecorated(False)
             ops_layout.addWidget(self._ops_tree)
+
+            status_tab = QWidget()
+            status_layout = QVBoxLayout(status_tab)
+            status_layout.setContentsMargins(6, 10, 6, 6)
+            status_layout.setSpacing(10)
+            status_layout.addWidget(self._section_header("Live System", "Brave busca; Ollama local redacta; OpenAI/Gemini bloqueados"))
+            status_grid = QGridLayout()
+            status_grid.setHorizontalSpacing(10)
+            status_grid.setVerticalSpacing(10)
+            self._local_model_card = MetricCard("Local Model", "gpt-oss:20b")
+            self._web_search_card = MetricCard("Web Search", "Brave")
+            self._voice_card = MetricCard("Voice", "ready")
+            self._context_card = MetricCard("Context", "active")
+            self._memory_card = MetricCard("Memory", "enabled")
+            self._code_agent_card = MetricCard("Code Agent", "ready")
+            self._learning_card = MetricCard("Learning", "ready")
+            self._safety_card = MetricCard("Safety", "protected")
+            status_cards = (
+                self._local_model_card,
+                self._web_search_card,
+                self._voice_card,
+                self._context_card,
+                self._memory_card,
+                self._code_agent_card,
+                self._learning_card,
+                self._safety_card,
+            )
+            for index, card in enumerate(status_cards):
+                status_grid.addWidget(card, index // 2, index % 2)
+            status_layout.addLayout(status_grid)
+            status_layout.addStretch(1)
+
+            agent_tab = QWidget()
+            agent_layout = QVBoxLayout(agent_tab)
+            agent_layout.setContentsMargins(6, 10, 6, 6)
+            agent_layout.setSpacing(10)
+            agent_layout.addWidget(self._section_header("Agent Mode", "Observe -> Plan -> Confirm -> Execute -> Verify"))
+            self._agent_state = MetricCard("State", "Standby")
+            agent_layout.addWidget(self._agent_state)
+            self._agent_timeline = QLabel("Observe -> Plan -> Confirm -> Execute -> Verify")
+            self._agent_timeline.setObjectName("SectionMeta")
+            self._agent_timeline.setWordWrap(True)
+            agent_layout.addWidget(self._agent_timeline)
+            self._agent_steps: list[QLabel] = []
+            for label, detail in (
+                ("Observe", "Read current state"),
+                ("Plan", "Prepare safe steps"),
+                ("Confirm", "Await user authorization"),
+                ("Execute", "Run approved low/confirmed actions"),
+                ("Verify", "Report result after action"),
+            ):
+                step = QLabel(f"{label.upper()}  |  {detail}")
+                step.setObjectName("AgentStepLabel")
+                step.setWordWrap(True)
+                agent_layout.addWidget(step)
+                self._agent_steps.append(step)
+            self._agent_note = QLabel("Guided Control activo. Usa el chat para dar un objetivo; acciones sensibles esperan Confirm Action.")
+            self._agent_note.setObjectName("SectionMeta")
+            self._agent_note.setWordWrap(True)
+            agent_layout.addWidget(self._agent_note)
+            self._start_guided_agent_button = QPushButton("Start Guided Agent")
+            self._start_guided_agent_button.setObjectName("PrimaryActionButton")
+            self._start_guided_agent_button.clicked.connect(self._start_guided_agent)
+            self._confirm_action_button = QPushButton("Confirm Action")
+            self._confirm_action_button.setObjectName("PrimaryActionButton")
+            self._confirm_action_button.setEnabled(False)
+            self._confirm_action_button.clicked.connect(self._confirm_agent_action)
+            self._stop_agent_button = QPushButton("Stop Agent")
+            self._stop_agent_button.setObjectName("DangerActionButton")
+            self._stop_agent_button.setEnabled(False)
+            self._stop_agent_button.clicked.connect(self._stop_agent)
+            agent_layout.addWidget(self._start_guided_agent_button)
+            agent_layout.addWidget(self._confirm_action_button)
+            agent_layout.addWidget(self._stop_agent_button)
+            agent_layout.addStretch(1)
 
             context_tab = QWidget()
             context_layout = QVBoxLayout(context_tab)
@@ -425,6 +536,8 @@ if QApplication is not None:
             self._patch_diff_output.setFont(QFont("Consolas", 9))
             code_layout.addWidget(self._patch_diff_output, 2)
 
+            tabs.addTab(status_tab, "Status")
+            tabs.addTab(agent_tab, "Agent Mode")
             tabs.addTab(missions_tab, "Missions")
             tabs.addTab(timeline_tab, "Timeline")
             tabs.addTab(ops_tab, "Ops")
@@ -511,11 +624,18 @@ if QApplication is not None:
             def _start_chat_request() -> None:
                 if pending_placeholder.cancelled():
                     return
-                self._pending_future = self._desktop.send_chat_async(text, correlation_id=correlation_id, metadata={"stream": True})
+                self._pending_future = self._desktop.send_chat_async(text, correlation_id=correlation_id, metadata={"stream": self._should_stream_chat(text)})
 
-            QTimer.singleShot(0, _start_chat_request)
+            QTimer.singleShot(25, _start_chat_request)
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
+
+        @staticmethod
+        def _should_stream_chat(text: str) -> bool:
+            lowered = (text or "").casefold()
+            if any(marker in lowered for marker in ("calcula", "simula", "estima", "resuelve", "deriv", "integr", "ecuacion")):
+                return False
+            return True
 
         def _run_quick_action(self, action_id: str) -> None:
             if self._sending or self._has_pending_work():
@@ -523,6 +643,46 @@ if QApplication is not None:
             self._sending = True
             self._set_processing_state(True, f"EXECUTING {action_id.upper()}")
             self._pending_future = self._desktop.execute_quick_action_async(action_id)
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _start_guided_agent(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            text = self._input.text().strip()
+            if not text:
+                self._agent_note.setText("Escribe un objetivo en el chat y pulsa Start Guided Agent.")
+                self._input.setFocus()
+                return
+            self._input.clear()
+            self._input.setFocus()
+            self._sending = True
+            self._set_processing_state(True, "AGENT PLANNING")
+            correlation_id = f"desktop-agent-{int(perf_counter() * 1000)}"
+            self._pending_correlation_id = correlation_id
+            self._pending_future = self._desktop.send_chat_async(
+                text,
+                correlation_id=correlation_id,
+                metadata={"stream": False, "agent_mode": "guided_control"},
+            )
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _confirm_agent_action(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            self._sending = True
+            self._set_processing_state(True, "AGENT CONFIRM")
+            self._pending_future = self._desktop.confirm_latest_agent_action_async()
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _stop_agent(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            self._sending = True
+            self._set_processing_state(True, "AGENT STOP")
+            self._pending_future = self._desktop.stop_latest_agent_async()
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
 
@@ -619,6 +779,32 @@ if QApplication is not None:
                 self._right_panel_open = not self._right_panel_open
             self._apply_shell_mode()
 
+        def _navigate_shell(self, action_id: str) -> None:
+            if action_id == "chat":
+                self._set_focus_mode(True)
+                self._input.setFocus()
+                return
+            self._focus_mode = False
+            self._right_panel_open = True
+            self._left_panel_open = action_id in {"settings"}
+            self._apply_shell_mode()
+            tab_map = {
+                "agent": "Agent Mode",
+                "web": "Status",
+                "context": "Context",
+                "memory": "Context",
+                "code": "Code Agent",
+                "learning": "Context",
+                "settings": "Ops",
+            }
+            target = tab_map.get(action_id, "Status")
+            for index in range(self._right_tabs.count()):
+                if self._right_tabs.tabText(index) == target:
+                    self._right_tabs.setCurrentIndex(index)
+                    break
+            if action_id == "agent":
+                self._reactor.set_state("agent_preview", activity=0.35)
+
         def _apply_shell_mode(self) -> None:
             left_visible = (not self._focus_mode) and self._left_panel_open
             right_visible = (not self._focus_mode) and self._right_panel_open
@@ -690,6 +876,7 @@ if QApplication is not None:
                 self._render_timeline(state)
                 self._render_ops(state)
                 self._render_dev_runtime(state)
+                self._render_agent_mode(state)
                 self._render_header(state)
                 self._render_metrics(state)
             else:
@@ -723,6 +910,7 @@ if QApplication is not None:
                 tuple((alert.get("title"), alert.get("message"), alert.get("level")) for alert in state.panel_snapshot.alerts),
                 tuple((mission.mission_id, mission.status, mission.pending_approval_step_id) for mission in state.panel_snapshot.missions),
                 tuple((entry.timestamp.isoformat(), entry.source, entry.title, entry.status) for entry in state.panel_snapshot.timeline),
+                json.dumps(getattr(state.panel_snapshot, "runtime_panels", []) or [], sort_keys=True, default=str),
                 state.panel_snapshot.health_summary.get("aggregate_status"),
                 state.panel_snapshot.health_summary.get("active_operations"),
                 latest.get("cpu_percent"),
@@ -853,6 +1041,41 @@ if QApplication is not None:
                 if key == "aggregate_status":
                     row.setForeground(1, QColor(tone_color(str(value))))
 
+        def _render_agent_mode(self, state) -> None:
+            latest = self._latest_agent_panel(state)
+            status = str(latest.get("status") or "idle")
+            current_step = str(latest.get("current_step") or "Sin paso activo")
+            summary = str(latest.get("summary") or "Agent Mode listo para Guided Control.")
+            progress = latest.get("progress") if isinstance(latest.get("progress"), dict) else {}
+            completed = progress.get("completed_steps", 0)
+            total = progress.get("total_steps", 0)
+            self._agent_state.set_value(status)
+            self._agent_timeline.setText(
+                f"Estado: {status} | Paso: {current_step} | Progreso: {completed}/{total}"
+            )
+            self._agent_note.setText(summary)
+            labels = [
+                ("Observe", "Captura segura o contexto de ventana"),
+                ("Plan", str(latest.get("goal") or "Sin objetivo activo")[:120]),
+                ("Confirm", "Pendiente" if status == "waiting_confirmation" else "Sin confirmacion pendiente"),
+                ("Execute", current_step),
+                ("Verify", str(latest.get("last_verification_note") or "Sin verificacion reciente")[:120]),
+            ]
+            for step_label, (label, detail) in zip(self._agent_steps, labels, strict=False):
+                step_label.setText(f"{label.upper()}  |  {detail}")
+            active_statuses = {"pending", "observing", "planning", "waiting_confirmation", "executing", "verifying", "recovering", "paused"}
+            self._start_guided_agent_button.setEnabled(not self._is_processing and not self._has_pending_work())
+            self._confirm_action_button.setEnabled(status == "waiting_confirmation" and not self._is_processing and not self._has_pending_work())
+            self._stop_agent_button.setEnabled(status in active_statuses and not self._is_processing and not self._has_pending_work())
+
+        @staticmethod
+        def _latest_agent_panel(state) -> dict:
+            panels = getattr(state.panel_snapshot, "runtime_panels", []) or []
+            for panel in reversed(panels):
+                if isinstance(panel, dict) and panel.get("runtime") == "desktop_agent_runtime":
+                    return panel
+            return {}
+
         def _render_dev_runtime(self, state) -> None:
             dev = getattr(state, "dev_runtime", {}) or {}
             mode = dev.get("llm_mode") or getattr(state, "llm_mode", "disabled")
@@ -860,6 +1083,14 @@ if QApplication is not None:
             model = dev.get("llm_model") or "n/a"
             ollama = "OK" if dev.get("ollama_available") else "FAIL"
             self._dev_status.setText(f"LLM {mode} | provider={provider} | model={model} | Ollama={ollama}")
+            web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            self._local_model_card.set_value(model if model != "n/a" else "gpt-oss:20b")
+            self._web_search_card.set_value("Brave" if web.get("provider", "disabled") == "brave" else str(web.get("provider", "disabled")))
+            self._context_card.set_value("active")
+            self._memory_card.set_value("enabled")
+            self._code_agent_card.set_value("ready")
+            self._learning_card.set_value("repo/web")
+            self._safety_card.set_value("protected")
             last = dev.get("last_result") if isinstance(dev.get("last_result"), dict) else {}
             if last:
                 self._dev_output.setPlainText(self._format_dev_result(last))
@@ -1148,12 +1379,30 @@ if QApplication is not None:
             elif state.busy:
                 self._voice_badge.setText(str(getattr(state, "activity_label", "PROCESSING")).upper())
                 self._voice_badge.set_tone("active")
+                self._voice_card.set_value("busy")
             elif voice_state.speaking:
                 self._voice_badge.setText("VOICE SPEAKING")
                 self._voice_badge.set_tone("active")
+                self._voice_card.set_value("speaking")
             else:
                 self._voice_badge.setText("VOICE READY")
                 self._voice_badge.set_tone("neutral")
+                self._voice_card.set_value("ready" if voice_state.enabled else "off")
+            dev = getattr(state, "dev_runtime", {}) or {}
+            llm_model = str(dev.get("llm_model") or getattr(state, "llm_model", "") or "gpt-oss:20b")
+            web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            web_provider = str(web.get("provider") or "disabled")
+            web_available = bool(web.get("available"))
+            self._mode_badge.setText(f"MODE {llm_mode}")
+            self._mode_badge.set_tone("active" if llm_mode in {"AUTO", "ONLINE"} else "warning" if llm_mode == "OFFLINE" else "neutral")
+            self._model_badge.setText(f"MODEL {llm_model}")
+            self._model_badge.set_tone("active")
+            self._web_badge.setText(f"WEB {web_provider.upper()}")
+            self._web_badge.set_tone("active" if web_available else "neutral")
+            self._openai_badge.setText("OPENAI BLOCKED")
+            self._openai_badge.set_tone("warning")
+            self._gemini_badge.setText("GEMINI BLOCKED")
+            self._gemini_badge.set_tone("warning")
             self._voice_enable_button.setChecked(bool(voice_state.enabled))
             self._voice_enable_button.setText("VOICE ON" if voice_state.enabled else "VOICE OFF")
             self._voice_mute_button.setChecked(bool(voice_state.muted))
@@ -1182,10 +1431,14 @@ if QApplication is not None:
                     latest_assistant_time = message.created_at
                     break
             if bool(getattr(state, "busy", False)):
-                self._reactor.set_state("thinking", activity=0.9)
-                self._thinking_label.setText(str(getattr(state, "activity_label", "PROCESSING")).upper())
-                self._hero_state.setText(str(getattr(state, "activity_label", "PROCESSING")).upper())
-                self._conversation.set_status(str(getattr(state, "activity_label", "PROCESSING")).upper())
+                activity = str(getattr(state, "activity_label", "PROCESSING") or "PROCESSING").upper()
+                if "WEB" in activity or "BRAVE" in activity or "SEARCH" in activity or "FUENTE" in activity:
+                    self._reactor.set_state("web_search", activity=0.9)
+                else:
+                    self._reactor.set_state("thinking", activity=0.9)
+                self._thinking_label.setText(activity)
+                self._hero_state.setText(activity)
+                self._conversation.set_status(activity)
                 return
             voice_input_state = str(state.voice.input_state or "IDLE").casefold()
             if voice_input_state == "error":
@@ -1195,7 +1448,7 @@ if QApplication is not None:
                 self._conversation.set_status("ERROR")
                 return
             if voice_input_state == "listening":
-                self._reactor.set_state("active", activity=0.94)
+                self._reactor.set_state("listening", activity=0.94)
                 self._thinking_label.setText("VOICE LISTENING")
                 self._hero_state.setText("LISTENING")
                 self._conversation.set_status("LISTENING")

@@ -575,6 +575,12 @@ class JarvisRuntimeService(RuntimeServiceContract):
             raise ServiceUnavailableError("desktop agent runtime is not available")
         return self._desktop_agent_runtime_service.resume_mission(mission_id)
 
+    def desktop_agent_confirm(self, mission_id: str, *, strong: bool = False, pin_verified: bool = False):
+        self._ensure_started()
+        if self._desktop_agent_runtime_service is None:
+            raise ServiceUnavailableError("desktop agent runtime is not available")
+        return self._desktop_agent_runtime_service.confirm_mission(mission_id, strong=strong, pin_verified=pin_verified)
+
     def desktop_agent_abort(self, mission_id: str, *, reason: str | None = None):
         self._ensure_started()
         if self._desktop_agent_runtime_service is None:

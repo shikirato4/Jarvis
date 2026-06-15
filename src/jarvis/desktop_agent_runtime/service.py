@@ -89,7 +89,11 @@ class DesktopAgentRuntimeService:
     def status(self) -> dict[str, object]:
         latest = self._state.latest()
         missions = self._state.list()
-        active = [mission for mission in missions if mission.status in {*self._ACTIVE_PHASES, DesktopAgentPhase.PAUSED, DesktopAgentPhase.BLOCKED}]
+        active = [
+            mission
+            for mission in missions
+            if mission.status in {*self._ACTIVE_PHASES, DesktopAgentPhase.PAUSED, DesktopAgentPhase.BLOCKED, DesktopAgentPhase.WAITING_CONFIRMATION}
+        ]
         return {
             "enabled": self._started,
             "missions": len(missions),
@@ -155,6 +159,40 @@ class DesktopAgentRuntimeService:
         if future is None or future.done():
             self._coordinator.submit(mission_id, self._execute_mission_safe, mission_id)
         return self.get_mission_status(mission_id)
+
+    def confirm_mission(
+        self,
+        mission_id: str,
+        *,
+        strong: bool = False,
+        pin_verified: bool = False,
+    ) -> DesktopAgentMissionReceipt:
+        self._ensure_started()
+        mission = self.get_mission_status(mission_id)
+        if mission.status != DesktopAgentPhase.WAITING_CONFIRMATION:
+            return mission
+        request_data = dict(mission.mission_snapshot.get("request") or {"goal": mission.goal})
+        metadata = dict(request_data.get("metadata") or {})
+        metadata["confirmed"] = True
+        metadata["confirmation_source"] = "desktop_user"
+        if strong:
+            metadata["strong_confirmed"] = True
+        if pin_verified:
+            metadata["pin_verified"] = True
+        request_data["metadata"] = metadata
+        request_data["wait_for_completion"] = True
+        mission.mission_snapshot["request"] = request_data
+        mission.status = DesktopAgentPhase.PENDING
+        mission.current_phase = DesktopAgentPhase.PENDING
+        mission.world_state.phase = DesktopAgentPhase.PENDING
+        mission.world_state.last_error = None
+        mission.summary = "Confirmacion recibida. Jarvis continuara la mision desde el paso pendiente."
+        mission.updated_at = datetime.now(timezone.utc)
+        self._coordinator.request_resume(mission_id)
+        self._coordinator.clear_abort(mission_id)
+        self._append_timeline(mission, DesktopAgentPhase.PENDING, "confirmation_received", mission.summary, step_id=mission.world_state.current_step_id, subtask_id=mission.current_subtask)
+        self._save_mission(mission)
+        return self._coordinator.submit(mission_id, self._execute_mission_safe, mission_id).result()
 
     def abort_mission(self, mission_id: str, reason: str | None = None) -> DesktopAgentMissionReceipt:
         self._ensure_started()
@@ -335,28 +373,66 @@ class DesktopAgentRuntimeService:
             world.risk_level = policy_result.risk_level
             world.policy_decision = policy_result.decision
             if policy_result.decision != DesktopPolicyDecision.ALLOW:
-                failed_step_id = step.step_id
-                world.phase = DesktopAgentPhase.BLOCKED
-                world.last_error = policy_result.reason
-                world.failed_steps.append(step.step_id)
-                mission.status = DesktopAgentPhase.BLOCKED
-                mission.current_phase = DesktopAgentPhase.BLOCKED
-                mission.failed_steps = list(dict.fromkeys([*mission.failed_steps, step.step_id]))
-                mission.failed_step_id = step.step_id
-                step_receipts.append(
-                    DesktopAgentStepReceipt(
+                if policy_result.decision == DesktopPolicyDecision.REQUIRE_CONFIRMATION and self._has_step_confirmation(
+                    payload,
+                    step=step,
+                    policy_result=policy_result,
+                ):
+                    self._append_timeline(
+                        mission,
+                        DesktopAgentPhase.PLANNING,
+                        "confirmation_applied",
+                        f"Confirmacion aplicada para '{step.title}'.",
                         step_id=step.step_id,
-                        title=step.title,
-                        status=DesktopVerificationStatus.FAILED,
-                        action_type=step.action_type,
-                        action_result={"policy_reason": policy_result.reason},
-                        observation_summary=world.last_observation_summary,
+                        subtask_id=mission.current_subtask,
                     )
-                )
-                mark_subtask_terminal(mission.subtasks, step.step_id, DesktopMissionStepStatus.BLOCKED, policy_result.reason)
-                mission.summary = f"Mision bloqueada por politica en '{step.title}'."
-                self._append_timeline(mission, DesktopAgentPhase.BLOCKED, "policy_blocked", mission.summary, step_id=step.step_id, subtask_id=mission.current_subtask)
-                break
+                elif policy_result.decision == DesktopPolicyDecision.REQUIRE_CONFIRMATION:
+                    world.phase = DesktopAgentPhase.WAITING_CONFIRMATION
+                    world.last_error = policy_result.reason
+                    mission.status = DesktopAgentPhase.WAITING_CONFIRMATION
+                    mission.current_phase = DesktopAgentPhase.WAITING_CONFIRMATION
+                    mission.next_step_index = index
+                    mission.summary = self._build_confirmation_summary(step, policy_result)
+                    mission.final_result = {
+                        "status": mission.status.value,
+                        "success": False,
+                        "confirmation_required": True,
+                        "step_id": step.step_id,
+                        "risk_level": policy_result.risk_level.value,
+                        "reason": policy_result.reason,
+                    }
+                    self._append_timeline(
+                        mission,
+                        DesktopAgentPhase.WAITING_CONFIRMATION,
+                        "confirmation_required",
+                        mission.summary,
+                        step_id=step.step_id,
+                        subtask_id=mission.current_subtask,
+                    )
+                    return self._checkpoint_and_save(mission, world)
+                else:
+                    failed_step_id = step.step_id
+                    world.phase = DesktopAgentPhase.BLOCKED
+                    world.last_error = policy_result.reason
+                    world.failed_steps.append(step.step_id)
+                    mission.status = DesktopAgentPhase.BLOCKED
+                    mission.current_phase = DesktopAgentPhase.BLOCKED
+                    mission.failed_steps = list(dict.fromkeys([*mission.failed_steps, step.step_id]))
+                    mission.failed_step_id = step.step_id
+                    step_receipts.append(
+                        DesktopAgentStepReceipt(
+                            step_id=step.step_id,
+                            title=step.title,
+                            status=DesktopVerificationStatus.FAILED,
+                            action_type=step.action_type,
+                            action_result={"policy_reason": policy_result.reason},
+                            observation_summary=world.last_observation_summary,
+                        )
+                    )
+                    mark_subtask_terminal(mission.subtasks, step.step_id, DesktopMissionStepStatus.BLOCKED, policy_result.reason)
+                    mission.summary = f"Mision bloqueada por politica en '{step.title}'."
+                    self._append_timeline(mission, DesktopAgentPhase.BLOCKED, "policy_blocked", mission.summary, step_id=step.step_id, subtask_id=mission.current_subtask)
+                    break
 
             if self._should_stop(mission, control):
                 break
@@ -611,6 +687,37 @@ class DesktopAgentRuntimeService:
         mission.current_subtask = latest.current_subtask
         mission.current_subtask_label = latest.current_subtask_label
         mission.world_state = latest.world_state
+
+    @staticmethod
+    def _has_step_confirmation(
+        payload: DesktopAgentMissionRequest,
+        *,
+        step: DesktopAgentStep,
+        policy_result,
+    ) -> bool:
+        metadata = payload.metadata or {}
+        if bool(metadata.get("confirmed") or metadata.get("agent_confirmed") or metadata.get("confirm_all")):
+            if getattr(policy_result.risk_level, "value", policy_result.risk_level) == "high":
+                return bool(metadata.get("strong_confirmed") or metadata.get("pin_verified"))
+            return True
+        confirmed_steps = metadata.get("confirmed_steps") or []
+        if isinstance(confirmed_steps, (list, tuple, set)) and step.step_id in {str(item) for item in confirmed_steps}:
+            return True
+        return bool(step.payload.get("approved"))
+
+    @staticmethod
+    def _build_confirmation_summary(step: DesktopAgentStep, policy_result) -> str:
+        target = step.payload.get("path") or step.payload.get("destination_path") or step.payload.get("application") or step.payload.get("target_window") or step.payload.get("label")
+        lines = [
+            "Necesito confirmacion antes de actuar.",
+            f"Accion: {step.title}",
+            f"Riesgo: {policy_result.risk_level.value}",
+            f"Motivo: {policy_result.reason}",
+        ]
+        if target:
+            lines.append(f"Afecta: {target}")
+        lines.append("Si confirmas, Jarvis ejecutara este paso y verificara el resultado.")
+        return "\n".join(lines)
 
     def _normalize_hydrated_mission(self, mission: DesktopAgentMissionReceipt) -> DesktopAgentMissionReceipt:
         if mission.status in self._ACTIVE_PHASES:

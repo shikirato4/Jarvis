@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from time import perf_counter
+from typing import Any
 
 from .base import DesktopMissionView, DesktopPanelSnapshot, DesktopServiceView, DesktopTimelineEntry
 
@@ -12,46 +14,68 @@ class DesktopPanelComposer:
         self._bridge = bridge
         self._cached_snapshot: DesktopPanelSnapshot | None = None
         self._cached_at = 0.0
+        self._logger = logging.getLogger("jarvis.desktop.panels")
 
     def compose(self) -> DesktopPanelSnapshot:
         now = perf_counter()
         if self._cached_snapshot is not None and (now - self._cached_at) < self._CACHE_TTL_SECONDS:
             return self._cached_snapshot
-        dashboard = self._bridge.hud_dashboard()
-        health = self._bridge.hud_health()
-        timeline = self._bridge.hud_timeline(limit=24)
-        agent_status = self._bridge.runtime.desktop_agent_status()
-        desktop_agent_missions = [item.model_dump(mode="json") for item in self._bridge.runtime.desktop_agent_list()[:5]]
-        latest_agent = agent_status.get("latest_mission") or {}
+        try:
+            snapshot = self._compose_uncached()
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning(
+                "desktop_panel_compose_degraded",
+                extra={"exception_type": type(exc).__name__, "exception_message": str(exc)},
+            )
+            snapshot = self._safe_snapshot()
+        self._cached_snapshot = snapshot
+        self._cached_at = perf_counter()
+        return snapshot
+
+    def _compose_uncached(self) -> DesktopPanelSnapshot:
+        dashboard = _as_dict(self._bridge.hud_dashboard())
+        health = _as_dict(self._bridge.hud_health())
+        timeline = _as_dict(self._bridge.hud_timeline(limit=24))
+        runtime = self._bridge.runtime
+        agent_status = _as_dict(runtime.desktop_agent_status())
+        desktop_agent_missions = [
+            _as_dict(item.model_dump(mode="json")) for item in _as_list(runtime.desktop_agent_list())[:5]
+        ]
+        latest_agent = _as_dict(agent_status.get("latest_mission"))
+
         missions = [
             DesktopMissionView(
-                mission_id=item.get("mission_id", ""),
-                goal=item.get("goal", ""),
-                status=item.get("status", ""),
+                mission_id=str(item.get("mission_id") or ""),
+                goal=str(item.get("goal") or ""),
+                status=str(item.get("status") or ""),
                 autonomy_level=item.get("autonomy_level"),
                 pending_approval_step_id=item.get("pending_approval_step_id"),
-                available_actions=item.get("available_actions", []),
+                available_actions=_as_list(item.get("available_actions")),
                 metadata=item,
             )
-            for item in dashboard.get("missions", [])
+            for item in _as_list(dashboard.get("missions"))
+            if isinstance(item, dict)
         ]
         known_mission_ids = {mission.mission_id for mission in missions if mission.mission_id}
         if latest_agent:
             for mission in reversed(desktop_agent_missions):
-                if mission.get("mission_id") in known_mission_ids:
+                mission_id = str(mission.get("mission_id") or "")
+                if mission_id in known_mission_ids:
                     continue
-                world_state = mission.get("world_state") or {}
-                current_step = (world_state.get("current_step") or {}).get("title")
+                world_state = _as_dict(mission.get("world_state"))
+                current_step = _as_dict(world_state.get("current_step")).get("title")
+                pending_step_id = world_state.get("current_step_id") if str(mission.get("status") or "") == "waiting_confirmation" else None
                 missions.insert(
                     0,
                     DesktopMissionView(
-                        mission_id=mission.get("mission_id", ""),
-                        goal=mission.get("goal", ""),
-                        status=mission.get("status", ""),
+                        mission_id=mission_id,
+                        goal=str(mission.get("goal") or ""),
+                        status=str(mission.get("status") or ""),
                         autonomy_level="desktop_agent",
-                        available_actions=[],
+                        pending_approval_step_id=pending_step_id,
+                        available_actions=["confirm", "stop"] if pending_step_id else ["stop"],
                         metadata={
-                            "current_step": current_step,
+                            "current_step": current_step or "Sin paso activo",
                             "current_subtask": mission.get("current_subtask_label"),
                             "target_path": world_state.get("target_path"),
                             "active_path": world_state.get("active_path"),
@@ -64,31 +88,40 @@ class DesktopPanelComposer:
                         },
                     ),
                 )
-                known_mission_ids.add(mission.get("mission_id"))
+                known_mission_ids.add(mission_id)
+
+        latest_world_state = _as_dict(latest_agent.get("world_state"))
+        latest_current_step = _as_dict(latest_world_state.get("current_step")).get("title")
         snapshot = DesktopPanelSnapshot(
-            mode=dashboard.get("mode", {}),
-            health_summary=dashboard.get("health_summary", {}),
+            mode=_as_dict(dashboard.get("mode")),
+            health_summary=_as_dict(dashboard.get("health_summary")),
             services=[
-                DesktopServiceView(name=item.get("name", ""), status=item.get("status", "unknown"), details=item.get("details", {}))
-                for item in dashboard.get("services", [])
+                DesktopServiceView(
+                    name=str(item.get("name") or ""),
+                    status=str(item.get("status") or "unknown"),
+                    details=_as_dict(item.get("details")),
+                )
+                for item in _as_list(dashboard.get("services"))
+                if isinstance(item, dict)
             ],
-            alerts=dashboard.get("alerts", []),
+            alerts=[item for item in _as_list(dashboard.get("alerts")) if isinstance(item, dict)],
             missions=missions,
             timeline=[
                 DesktopTimelineEntry(
-                    entry_type=item.get("entry_type", "event"),
-                    title=item.get("title", ""),
-                    status=item.get("status", ""),
+                    entry_type=str(item.get("entry_type") or "event"),
+                    title=str(item.get("title") or ""),
+                    status=str(item.get("status") or ""),
                     timestamp=item.get("timestamp"),
                     source=item.get("service_name"),
-                    data=item.get("data", {}),
+                    data=_as_dict(item.get("data")),
                 )
-                for item in timeline.get("entries", [])
+                for item in _as_list(timeline.get("entries"))
+                if isinstance(item, dict)
             ],
-            resources=health.get("resources", {}),
-            operations=health.get("operations", {}),
+            resources=_as_dict(health.get("resources")),
+            operations=_as_dict(health.get("operations")),
             runtime_panels=[
-                *dashboard.get("runtimes", []),
+                *[item for item in _as_list(dashboard.get("runtimes")) if isinstance(item, dict)],
                 *(
                     [
                         {
@@ -96,10 +129,13 @@ class DesktopPanelComposer:
                             "status": latest_agent.get("status"),
                             "goal": latest_agent.get("goal"),
                             "summary": latest_agent.get("summary"),
-                            "current_step": (latest_agent.get("world_state") or {}).get("current_step", {}).get("title"),
+                            "current_step": latest_current_step or "Sin paso activo",
+                            "pending_approval_step_id": latest_world_state.get("current_step_id") if str(latest_agent.get("status") or "") == "waiting_confirmation" else None,
+                            "risk_level": latest_world_state.get("risk_level"),
+                            "policy_decision": latest_world_state.get("policy_decision"),
                             "current_subtask": latest_agent.get("current_subtask_label"),
-                            "target_path": (latest_agent.get("world_state") or {}).get("target_path"),
-                            "active_path": (latest_agent.get("world_state") or {}).get("active_path"),
+                            "target_path": latest_world_state.get("target_path"),
+                            "active_path": latest_world_state.get("active_path"),
                             "progress": latest_agent.get("progress"),
                             "last_verification_note": latest_agent.get("last_verification_note"),
                             "last_recovery_note": latest_agent.get("last_recovery_note"),
@@ -111,6 +147,31 @@ class DesktopPanelComposer:
                 ),
             ],
         )
-        self._cached_snapshot = snapshot
-        self._cached_at = perf_counter()
         return snapshot
+
+    @staticmethod
+    def _safe_snapshot() -> DesktopPanelSnapshot:
+        return DesktopPanelSnapshot(
+            health_summary={"aggregate_status": "degraded", "active_operations": 0},
+            services=[],
+            alerts=[
+                {
+                    "title": "Desktop panel degraded",
+                    "message": "El panel se recupero con un snapshot seguro.",
+                    "level": "warning",
+                }
+            ],
+            missions=[],
+            timeline=[],
+            resources={},
+            operations={},
+            runtime_panels=[],
+        )
+
+
+def _as_dict(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_list(value: Any) -> list:
+    return value if isinstance(value, list) else []

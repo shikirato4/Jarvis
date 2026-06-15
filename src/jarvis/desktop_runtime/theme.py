@@ -112,6 +112,14 @@ QLabel#HeroStateLabel {{
     font-weight: 600;
     letter-spacing: 2px;
 }}
+QLabel#AgentStepLabel {{
+    background: rgba(3, 12, 22, 0.56);
+    border-left: 2px solid rgba(117, 232, 255, 0.36);
+    border-radius: 8px;
+    padding: 8px 10px;
+    color: {palette.text_dim};
+    font-size: 9pt;
+}}
 QLabel#StatusBadge {{
     background: rgba(14, 35, 56, 0.95);
     border: 1px solid {palette.border};
@@ -174,6 +182,18 @@ QTabBar::tab:selected {{
     color: {palette.text};
     border: 1px solid {palette.border_bright};
 }}
+QPushButton#NavButton {{
+    background: rgba(3, 12, 22, 0.78);
+    border: 1px solid rgba(124, 232, 255, 0.22);
+    border-radius: 14px;
+    padding: 11px 14px;
+    text-align: left;
+    color: {palette.text};
+}}
+QPushButton#NavButton:hover {{
+    background: rgba(10, 43, 64, 0.9);
+    border: 1px solid rgba(124, 232, 255, 0.42);
+}}
 QPushButton {{
     background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(8, 38, 56, 0.96), stop:1 rgba(8, 60, 88, 0.98));
     border: 1px solid rgba(124, 232, 255, 0.34);
@@ -195,6 +215,22 @@ QPushButton#GhostButton, QPushButton#PanelToggle {{
 QPushButton#GhostButton:hover, QPushButton#PanelToggle:hover {{
     background: rgba(8, 28, 44, 0.84);
 }}
+QPushButton#PrimaryActionButton {{
+    background: rgba(10, 62, 84, 0.96);
+    border: 1px solid rgba(124, 232, 255, 0.48);
+    color: {palette.text};
+}}
+QPushButton#PrimaryActionButton:hover {{
+    background: rgba(13, 78, 106, 1.0);
+}}
+QPushButton#DangerActionButton {{
+    background: rgba(72, 26, 34, 0.9);
+    border: 1px solid rgba(255, 112, 112, 0.42);
+    color: {palette.text};
+}}
+QPushButton#DangerActionButton:hover {{
+    background: rgba(92, 32, 42, 1.0);
+}}
 QPushButton#ModeToggle {{
     background: rgba(6, 28, 44, 0.66);
     border: 1px solid rgba(117, 232, 255, 0.18);
@@ -204,6 +240,15 @@ QPushButton#ModeToggle:checked {{
     background: rgba(10, 50, 74, 0.96);
     border: 1px solid {palette.border_bright};
     color: {palette.text};
+}}
+QPushButton#DisabledActionButton {{
+    background: rgba(24, 24, 29, 0.78);
+    border: 1px solid rgba(255, 209, 102, 0.24);
+    color: rgba(205, 238, 248, 0.48);
+}}
+QPushButton:disabled {{
+    color: rgba(205, 238, 248, 0.48);
+    border: 1px solid rgba(124, 232, 255, 0.12);
 }}
 QLineEdit#ChatInput {{
     background: rgba(3, 10, 18, 0.96);

@@ -312,9 +312,9 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: float = 90.0
     ollama_healthcheck_timeout_seconds: float = 5.0
-    chat_default_max_tokens: int = 256
+    chat_default_max_tokens: int = 500
     chat_fast_max_tokens: int = 160
-    chat_detailed_max_tokens: int = 700
+    chat_detailed_max_tokens: int = 1200
     chat_temperature: float = 0.4
     llm_timeout_seconds: float = 60.0
     llm_fast_timeout_seconds: float = 20.0
@@ -322,6 +322,9 @@ class Settings(BaseSettings):
     web_synthesis_timeout_seconds: float = 75.0
     web_synthesis_max_sources: int = 3
     web_synthesis_snippet_chars: int = 500
+    research_visible_sources: int = 5
+    research_synthesis_max_tokens: int = 900
+    research_short_max_tokens: int = 220
     ollama_keep_warm: bool = False
     ollama_keep_warm_prompt: str = "ping"
     ollama_keep_warm_delay_seconds: float = 5.0

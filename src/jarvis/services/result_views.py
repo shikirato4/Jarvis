@@ -204,7 +204,12 @@ def summarize_error(prompt: str, error: str) -> str:
     if "abre" in lowered or "open" in lowered or "sistema" in lowered or "system" in lowered:
         return f"No pude completar la operacion del sistema: {detail}"
     if "investiga" in lowered or "research" in lowered:
-        return f"No pude completar la operacion de research: {detail}"
+        if "watchdog timeout" in lowered_detail or "operation deadline exceeded" in lowered_detail or "timed out" in lowered_detail:
+            return (
+                "No pude terminar la investigacion a tiempo. Puede que la busqueda o la redaccion local hayan tardado demasiado. "
+                "Puedo intentarlo otra vez con menos fuentes o darte solo las fuentes encontradas."
+            )
+        return "No pude completar la investigacion en este momento. Intentalo de nuevo con una consulta mas especifica."
     if "science" in lowered or "calcula" in lowered or "simula" in lowered or "deriv" in lowered or "integr" in lowered:
         return f"No pude completar la operacion cientifica: {detail}"
     if "seguridad" in lowered or "vulnerabilidad" in lowered or "contrase" in lowered:

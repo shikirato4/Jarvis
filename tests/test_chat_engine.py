@@ -9,6 +9,7 @@ from jarvis.desktop_runtime.intent_router import DesktopIntentRouter
 from jarvis.desktop_runtime.service import DesktopRuntimeService
 from jarvis.config import Settings
 from jarvis.models_runtime.base import ModelRequest, ModelResponse, ProviderHealth, ProviderKind
+from jarvis.web_search import WebSearchHit, WebSearchProviderStatus, WebSearchResponse
 
 
 class MutableDesktopModelProvider:
@@ -32,6 +33,32 @@ class MutableDesktopModelProvider:
             model_name=model_name,
             content=self.content,
             latency_ms=3.0,
+        )
+
+
+class FakeDesktopWebProvider:
+    def __init__(self, *, available: bool = True) -> None:
+        self.available = available
+        self.calls: list[str] = []
+
+    def status(self) -> WebSearchProviderStatus:
+        return WebSearchProviderStatus(provider="brave", enabled=True, available=self.available, configured=self.available, max_results=5, message="ok")
+
+    def search(self, query: str, *, max_results: int = 5) -> WebSearchResponse:
+        self.calls.append(query)
+        return WebSearchResponse(
+            status="ok",
+            provider="brave",
+            query=query,
+            hits=[
+                WebSearchHit(
+                    title="Fuente sobre tecnologia",
+                    url="https://example.com/tech",
+                    snippet="Resumen publico de una noticia reciente de tecnologia.",
+                    source="example.com",
+                    rank=1,
+                )
+            ],
         )
 
 
@@ -620,5 +647,131 @@ def test_chat_engine_reports_clear_writing_error_when_word_has_no_context(tmp_pa
         assert "contexto suficiente" in response.message.content.casefold()
         assert "no puedo acceder a tu computadora" not in response.message.content.casefold()
         assert response.raw_result.get("ok") is False
+    finally:
+        app.stop()
+
+
+def test_chat_engine_research_current_news_uses_brave_first(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        general_chat_model_fallback_order=(),
+        ollama_enabled=False,
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    fake_web = FakeDesktopWebProvider()
+    monkeypatch.setattr("jarvis.desktop_runtime.chat.build_web_search_provider", lambda: fake_web)
+    app = build_application(settings)
+    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider(content="Busque en la web.\n\nResumen:\nHay informacion reciente disponible.")  # noqa: SLF001
+    app.start()
+    try:
+        desktop = DesktopRuntimeService(app)
+        response = desktop.send_chat("investiga noticias recientes de tecnologia")
+
+        assert fake_web.calls
+        assert "semantic_retrieval_degraded" not in response.message.content
+        assert "Fuente sobre tecnologia" in response.message.content
+        assert response.raw_result.get("web_search", {}).get("provider") == "brave"
+    finally:
+        app.stop()
+
+
+def test_chat_engine_research_returns_partial_sources_when_synthesis_fails(monkeypatch, tmp_path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        general_chat_model_fallback_order=(),
+        ollama_enabled=False,
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    fake_web = FakeDesktopWebProvider()
+    monkeypatch.setattr("jarvis.desktop_runtime.chat.build_web_search_provider", lambda: fake_web)
+    app = build_application(settings)
+    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider(fail=True)  # noqa: SLF001
+    app.start()
+    try:
+        desktop = DesktopRuntimeService(app)
+        response = desktop.send_chat("investiga noticias recientes de tecnologia")
+
+        assert "Encontre fuentes con Brave" in response.message.content
+        assert "Fuente sobre tecnologia" in response.message.content
+        assert "watchdog timeout" not in response.message.content.casefold()
+        assert response.raw_result.get("status") == "partial"
+    finally:
+        app.stop()
+
+
+def test_chat_engine_malware_rat_request_gets_useful_safe_refusal(tmp_path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app, desktop = build_desktop_runtime(settings)
+    try:
+        response = desktop.send_chat("puedes buscar en este github https://github.com/Mozartwin/ANDROID-RAT-2025 y explicarme el codigo y como funciona?")
+
+        lowered = response.message.content.casefold()
+        assert "no puedo ayudarte a operar" in lowered
+        assert "opciones defensivas" in lowered or "defensivo" in lowered
+        assert response.raw_result.get("clone_allowed") is False
+        assert response.raw_result.get("category") == "malware_offensive"
+    finally:
+        app.stop()
+
+
+def test_chat_engine_capability_query_uses_manifest_without_claiming_agent_mode(tmp_path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app, desktop = build_desktop_runtime(settings)
+    try:
+        response = desktop.send_chat("que puedes hacer?")
+
+        lowered = response.message.content.casefold()
+        assert "gpt-oss:20b" in lowered
+        assert "brave" in lowered
+        assert "code agent" in lowered
+        assert "agent mode real" in lowered
+        assert "todavia no esta habilitado" in lowered
+        assert "openai" in lowered and "bloqueado" in lowered
+        assert response.raw_result.get("category") == "capabilities"
+    finally:
+        app.stop()
+
+
+def test_chat_engine_context_query_uses_visible_capabilities(tmp_path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app, desktop = build_desktop_runtime(settings)
+    try:
+        response = desktop.send_chat("que contexto tienes?")
+
+        lowered = response.message.content.casefold()
+        assert "contexto actual de jarvis" in lowered
+        assert "gpt-oss:20b" in lowered
+        assert "brave" in lowered
+        assert "openai" in lowered and "bloqueado" in lowered
+        assert "gemini" in lowered and "bloqueado" in lowered
+        assert "agent mode real todavia no esta habilitado" in lowered
+        assert response.raw_result.get("context") == "jarvis_context"
     finally:
         app.stop()

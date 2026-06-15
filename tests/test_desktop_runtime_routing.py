@@ -134,7 +134,7 @@ def test_desktop_chat_detailed_request_uses_larger_generation_profile(tmp_path) 
         response = desktop.send_chat("explica detallado la historia de la inteligencia artificial paso a paso")
 
         assert "Soy Jarvis" in response.message.content
-        assert captured[0].max_tokens == 700
+        assert captured[0].max_tokens == 1200
         assert captured[0].metadata["context_profile"] == "detailed"
         assert captured[0].timeout_seconds == 120.0
     finally:
@@ -477,7 +477,8 @@ def test_desktop_chat_returns_clear_visual_runtime_error(tmp_path) -> None:
     app.runtime_service.vision_describe_active_window = _boom  # type: ignore[method-assign]
     try:
         response = desktop.send_chat("que hay en mi pantalla")
-        assert "Veo" in response.message.content
+        assert "veo la pantalla" in response.message.content.casefold()
+        assert "captura visual" in response.message.content.casefold()
         assert response.raw_result.get("status") == "completed"
         assert response.raw_result.get("plan", {}).get("strategy") == "grounded_screen_read"
     finally:
@@ -503,7 +504,8 @@ def test_desktop_chat_degrades_to_active_window_when_visual_capture_is_blocked(t
     app.runtime_service.vision_describe_active_window = _blocked  # type: ignore[method-assign]
     try:
         response = desktop.send_chat("que hay en mi pantalla")
-        assert "Veo" in response.message.content
+        assert "ventana" in response.message.content.casefold()
+        assert "sensible" in response.message.content.casefold() or "protegida" in response.message.content.casefold()
         assert response.raw_result.get("status") == "completed"
         assert response.raw_result.get("plan", {}).get("strategy") == "grounded_screen_read"
     finally:

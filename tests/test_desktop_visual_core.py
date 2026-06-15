@@ -145,3 +145,75 @@ def test_window_refresh_skips_full_repaint_when_state_is_unchanged(tmp_path) -> 
     finally:
         backend.stop()
         desktop.shutdown()
+
+
+def test_stitch_inspired_shell_maps_real_jarvis_surfaces(tmp_path) -> None:
+    from jarvis.config import Settings
+    from jarvis.desktop import build_desktop_runtime
+    from jarvis.desktop_runtime.window import JarvisDesktopWindow
+
+    app = create_qt_application()
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    backend, desktop = build_desktop_runtime(settings)
+    try:
+        window = JarvisDesktopWindow(desktop)
+        window.show()
+        app.processEvents()
+
+        assert set(window._nav_buttons) == {"chat", "agent", "web", "context", "memory", "code", "learning", "settings"}  # noqa: SLF001
+        assert window._mode_badge.text().startswith("MODE")  # noqa: SLF001
+        assert "gpt-oss" in window._model_badge.text()  # noqa: SLF001
+        assert "BLOCKED" in window._openai_badge.text()  # noqa: SLF001
+        assert "BLOCKED" in window._gemini_badge.text()  # noqa: SLF001
+        assert window._right_tabs.count() >= 7  # noqa: SLF001
+    finally:
+        window.close()
+        backend.stop()
+        desktop.shutdown()
+
+
+def test_agent_mode_is_visible_and_guided_controls_are_available(tmp_path) -> None:
+    from jarvis.config import Settings
+    from jarvis.desktop import build_desktop_runtime
+    from jarvis.desktop_runtime.window import JarvisDesktopWindow
+
+    app = create_qt_application()
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    backend, desktop = build_desktop_runtime(settings)
+    try:
+        window = JarvisDesktopWindow(desktop)
+        window.show()
+        window._navigate_shell("agent")  # noqa: SLF001
+        app.processEvents()
+
+        assert window._right_panel.isVisible()  # noqa: SLF001
+        assert window._right_tabs.tabText(window._right_tabs.currentIndex()) == "Agent Mode"  # noqa: SLF001
+        assert window._start_guided_agent_button.isEnabled()  # noqa: SLF001
+        assert not window._confirm_action_button.isEnabled()  # noqa: SLF001
+        assert not window._stop_agent_button.isEnabled()  # noqa: SLF001
+        assert "Guided Control" in window._agent_note.text()  # noqa: SLF001
+    finally:
+        window.close()
+        backend.stop()
+        desktop.shutdown()
+
+
+def test_reactor_accepts_future_visual_states() -> None:
+    from jarvis.desktop_runtime.widgets import ReactorCoreWidget
+
+    reactor = ReactorCoreWidget()
+    for state in ("idle", "listening", "thinking", "speaking", "web_search", "agent_preview"):
+        reactor.set_state(state, activity=0.5)
+    assert reactor.sizeHint().width() >= 200

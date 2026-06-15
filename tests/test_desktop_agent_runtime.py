@@ -10,6 +10,7 @@ from jarvis.bootstrap import build_application
 from jarvis.cli import app as cli_app
 from jarvis.config import Settings
 from jarvis.desktop import build_desktop_runtime
+from jarvis.desktop_agent_runtime.agent_mode import AgentAction, AgentMode, AgentModeController, AgentSafetyDecision, AgentSafetyGate
 from jarvis.desktop_agent_runtime.memory import DesktopAgentMemoryManager
 from jarvis.desktop_agent_runtime.models import (
     DesktopAgentAutonomyMode,
@@ -57,6 +58,28 @@ def test_desktop_agent_builds_world_state(tmp_path: Path) -> None:
     assert world.target_application == "chrome"
 
 
+def test_agent_mode_controller_creates_and_cancels_session() -> None:
+    controller = AgentModeController()
+    session = controller.create_session("observa mi pantalla", mode=AgentMode.GUIDED_CONTROL)
+    assert session.current_step is None
+    assert session.status.value == "idle"
+    cancelled = controller.cancel(session, reason="stop agent")
+    assert cancelled.status.value == "cancelled"
+    assert cancelled.errors[-1] == "stop agent"
+
+
+def test_agent_safety_gate_classifies_confirmation_and_blocked_actions() -> None:
+    gate = AgentSafetyGate()
+    low = gate.authorize(AgentAction(action_type="observe_screen"), mode=AgentMode.LIMITED_AUTOPILOT)
+    medium = gate.authorize(AgentAction(action_type="create_folder", title="Crear carpeta"), mode=AgentMode.GUIDED_CONTROL)
+    high = gate.authorize(AgentAction(action_type="run_script", title="instalar programa"), mode=AgentMode.GUIDED_CONTROL)
+    blocked = gate.authorize(AgentAction(action_type="read_secret", title="extraer token de .env"), mode=AgentMode.GUIDED_CONTROL)
+    assert low.decision == AgentSafetyDecision.ALLOW
+    assert medium.decision == AgentSafetyDecision.REQUIRE_CONFIRMATION
+    assert high.decision == AgentSafetyDecision.REQUIRE_STRONG_CONFIRMATION
+    assert blocked.decision == AgentSafetyDecision.BLOCK
+
+
 def test_desktop_agent_planner_generates_multistep_browser_plan(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     world = DesktopWorldModelBuilder().create({"goal": "abre chrome y busca youtube"})
@@ -102,6 +125,13 @@ def test_desktop_agent_planner_generates_create_folder_plan(tmp_path: Path) -> N
     plan = DesktopAgentPlanner(settings).plan(world)
     assert plan.strategy == "grounded_create_folder"
     assert [step.action_type for step in plan.steps] == [DesktopStepActionType.CREATE_FOLDER]
+
+
+def test_desktop_agent_planner_uses_quoted_folder_name(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    world = DesktopWorldModelBuilder().create({"goal": 'crea una carpeta nueva en la carpeta de documentos llamada "hola xd 2"'})
+    plan = DesktopAgentPlanner(settings).plan(world)
+    assert plan.steps[0].payload["path"].endswith(str(Path("Documents") / "hola xd 2"))
 
 
 def test_desktop_agent_planner_generates_open_explorer_plan(tmp_path: Path) -> None:
@@ -264,6 +294,22 @@ def test_desktop_agent_policy_blocks_blocklisted_hotkey(tmp_path: Path) -> None:
     assert result.decision.value == "deny"
 
 
+def test_desktop_agent_policy_requires_confirmation_for_file_changes(tmp_path: Path) -> None:
+    engine = DesktopAgentPolicyEngine(_settings(tmp_path))
+    step = DesktopAgentStep(
+        step_id="create-folder",
+        title="Crear carpeta",
+        action_type=DesktopStepActionType.CREATE_FOLDER,
+        precondition="ready",
+        action="Crear carpeta en Documentos",
+        payload={"path": str(tmp_path / "Documents" / "Nueva")},
+        risk_level=DesktopAgentRiskLevel.LOW,
+    )
+    result = engine.assess_step(step)
+    assert result.decision.value == "require_confirmation"
+    assert result.risk_level == DesktopAgentRiskLevel.MEDIUM
+
+
 def test_desktop_agent_run_executes_and_verifies_browser_search(tmp_path: Path) -> None:
     app = build_application(_settings(tmp_path))
     app.start()
@@ -421,7 +467,12 @@ def test_desktop_agent_run_creates_folder_and_file(tmp_path: Path) -> None:
     app.start()
     try:
         folder_receipt = app.runtime_service.desktop_agent_run({"goal": "crea una carpeta llamada Fisica en Documentos"})
-        file_receipt = app.runtime_service.desktop_agent_run({"goal": "crea un archivo llamado notas.txt en Documentos"})
+        assert folder_receipt.success is False
+        assert folder_receipt.status == DesktopAgentPhase.WAITING_CONFIRMATION
+        folder_receipt = app.runtime_service.desktop_agent_confirm(folder_receipt.mission_id)
+        file_receipt = app.runtime_service.desktop_agent_run(
+            {"goal": "crea un archivo llamado notas.txt en Documentos", "metadata": {"confirmed": True}}
+        )
         assert folder_receipt.success is True
         assert folder_receipt.world_state.active_path and Path(folder_receipt.world_state.active_path).exists()
         assert file_receipt.success is True
@@ -451,17 +502,17 @@ def test_desktop_agent_run_copies_moves_and_renames_file(tmp_path: Path) -> None
     app = build_application(settings)
     app.start()
     try:
-        copy_receipt = app.runtime_service.desktop_agent_run({"goal": "copia archivo notes.txt a Descargas"})
+        copy_receipt = app.runtime_service.desktop_agent_run({"goal": "copia archivo notes.txt a Descargas", "metadata": {"confirmed": True}})
         assert copy_receipt.success is True
         copied_path = Path(copy_receipt.world_state.active_path or "")
         assert copied_path.exists()
 
-        move_receipt = app.runtime_service.desktop_agent_run({"goal": f"mueve archivo {copied_path.name} a Documentos"})
+        move_receipt = app.runtime_service.desktop_agent_run({"goal": f"mueve archivo {copied_path.name} a Documentos", "metadata": {"confirmed": True}})
         assert move_receipt.success is True
         moved_path = Path(move_receipt.world_state.active_path or "")
         assert moved_path.exists()
 
-        rename_receipt = app.runtime_service.desktop_agent_run({"goal": f"renombra archivo {moved_path.name} a archive.txt"})
+        rename_receipt = app.runtime_service.desktop_agent_run({"goal": f"renombra archivo {moved_path.name} a archive.txt", "metadata": {"confirmed": True}})
         assert rename_receipt.success is True
         renamed_path = Path(rename_receipt.world_state.active_path or "")
         assert renamed_path.exists()

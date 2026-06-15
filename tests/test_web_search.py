@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from jarvis.cli import app
 from jarvis.web_search import BraveSearchProvider, WebSearchHit, WebSearchResponse, build_grounded_web_prompt, sanitize_web_query, should_use_web_search
+from jarvis.web_search.router import source_count_message
 
 
 class _FakeResponse:
@@ -118,6 +119,7 @@ def test_grounded_prompt_contains_sources_and_identity_policy() -> None:
 
     assert "Responde como Jarvis" in prompt
     assert "Fuente" in prompt
+    assert "Encontre 1 fuente." in prompt
 
 
 def test_grounded_prompt_limits_deduplicates_and_truncates_sources() -> None:
@@ -143,6 +145,14 @@ def test_grounded_prompt_limits_deduplicates_and_truncates_sources() -> None:
     assert "four.example" not in prompt
     assert "Uno duplicado" not in prompt
     assert long_snippet not in prompt
+    assert "Encontre 5 fuentes y use 3 para redactar la respuesta." in prompt
+
+
+def test_source_count_message_uses_real_counts() -> None:
+    assert source_count_message(0) == "No encontre fuentes confiables para esta busqueda."
+    assert source_count_message(1) == "Encontre 1 fuente."
+    assert source_count_message(2) == "Encontre 2 fuentes."
+    assert source_count_message(5, 3) == "Encontre 5 fuentes y use 3 para redactar la respuesta."
 
 
 def test_web_cli_status_and_search_without_key(monkeypatch) -> None:
