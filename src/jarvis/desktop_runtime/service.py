@@ -452,6 +452,82 @@ class DesktopRuntimeService:
     def execute_dev_action_async(self, action_id: str, *, payload: dict | None = None) -> Future:
         return self._executor.submit(self.execute_dev_action, action_id, payload=payload)
 
+    def confirm_latest_agent_action(self) -> dict[str, Any]:
+        self.start_backend()
+        self._set_busy_state(True, "AGENT CONFIRM")
+        started_at = perf_counter()
+        try:
+            mission_id = self._latest_desktop_agent_mission_id()
+            receipt = self._jarvis.runtime_service.desktop_agent_confirm(mission_id)
+            result = receipt.model_dump(mode="json")
+            summary = str(result.get("summary") or "Accion confirmada y ejecutada por Agent Mode.")
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning(
+                "desktop_agent_confirm_failed",
+                extra={"exception_type": type(exc).__name__, "exception_message": str(exc)},
+            )
+            result = {"status": "failed", "message": self._sanitize_dev_value(str(exc)), "error_type": type(exc).__name__}
+            summary = f"No pude confirmar la accion del agente: {self._sanitize_dev_value(str(exc))}"
+        elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+        result["elapsed_ms"] = elapsed_ms
+        with self._state_lock:
+            self._conversation.append(
+                DesktopChatMessage(
+                    message_id=str(uuid4()),
+                    role="assistant",
+                    content=summary,
+                    metadata={"agent_action": "confirm", "result": self._sanitize_dev_value(result)},
+                )
+            )
+            self._performance["last_quick_action_ms"] = elapsed_ms
+        self._invalidate_caches()
+        self._set_busy_state(False, "IDLE")
+        return result
+
+    def confirm_latest_agent_action_async(self) -> Future:
+        return self._executor.submit(self.confirm_latest_agent_action)
+
+    def stop_latest_agent(self) -> dict[str, Any]:
+        self.start_backend()
+        self._set_busy_state(True, "AGENT STOP")
+        started_at = perf_counter()
+        try:
+            mission_id = self._latest_desktop_agent_mission_id()
+            receipt = self._jarvis.runtime_service.desktop_agent_abort(mission_id, reason="stop agent requested from desktop UI")
+            result = receipt.model_dump(mode="json")
+            summary = str(result.get("summary") or "Agent Mode detenido.")
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning(
+                "desktop_agent_stop_failed",
+                extra={"exception_type": type(exc).__name__, "exception_message": str(exc)},
+            )
+            result = {"status": "failed", "message": self._sanitize_dev_value(str(exc)), "error_type": type(exc).__name__}
+            summary = f"No pude detener el agente: {self._sanitize_dev_value(str(exc))}"
+        elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+        result["elapsed_ms"] = elapsed_ms
+        with self._state_lock:
+            self._conversation.append(
+                DesktopChatMessage(
+                    message_id=str(uuid4()),
+                    role="assistant",
+                    content=summary,
+                    metadata={"agent_action": "stop", "result": self._sanitize_dev_value(result)},
+                )
+            )
+            self._performance["last_quick_action_ms"] = elapsed_ms
+        self._invalidate_caches()
+        self._set_busy_state(False, "IDLE")
+        return result
+
+    def stop_latest_agent_async(self) -> Future:
+        return self._executor.submit(self.stop_latest_agent)
+
+    def _latest_desktop_agent_mission_id(self) -> str:
+        missions = self._jarvis.runtime_service.desktop_agent_list()
+        if not missions:
+            raise RuntimeError("no hay misiones activas o recientes de Agent Mode")
+        return missions[-1].mission_id
+
     def bridge(self) -> DesktopRuntimeBridge:
         return self._bridge
 

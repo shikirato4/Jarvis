@@ -249,6 +249,9 @@ class DesktopIntentRouter:
         if decision.category == "desktop_agent_resume":
             result = runtime.desktop_agent_resume(decision.mission_id or self._latest_desktop_agent_mission_id()).model_dump(mode="json")
             return result, self._summarize_desktop_agent_control("reanudada", result), "desktop_agent_runtime.resume"
+        if decision.category == "desktop_agent_confirm":
+            result = runtime.desktop_agent_confirm(decision.mission_id or self._latest_desktop_agent_mission_id()).model_dump(mode="json")
+            return result, self._summarize_desktop_agent(result), "desktop_agent_runtime.confirm"
         if decision.category == "desktop_agent_abort":
             result = runtime.desktop_agent_abort(decision.mission_id or self._latest_desktop_agent_mission_id()).model_dump(mode="json")
             return result, self._summarize_desktop_agent_control("abortada", result), "desktop_agent_runtime.abort"
@@ -443,6 +446,9 @@ class DesktopIntentRouter:
         window = awareness.get("window") or {}
         title = window.get("title") or "la ventana activa"
         if result.get("degraded"):
+            reason = str(result.get("degradation_reason") or "").casefold()
+            if "sensitive" in reason or "sensible" in reason or "protected" in reason or "proteg" in reason:
+                return "No pude capturar esa ventana porque parece sensible o protegida."
             if window.get("title"):
                 return f"Veo {title}. No pude obtener una captura visual completa."
             return "Veo la pantalla, pero no pude obtener una captura visual completa ni detectar la ventana activa."
@@ -724,6 +730,14 @@ class DesktopIntentRouter:
 
     def _extract_mission_control(self, prompt: str, folded: str) -> DesktopIntentDecision | None:
         mission_id = self._extract_mission_id(prompt)
+        if folded in {"detente", "para", "stop", "no hagas nada"} or any(
+            phrase in folded for phrase in ("cancela el agente", "aborta el agente", "stop agent")
+        ):
+            return DesktopIntentDecision(category="desktop_agent_abort", prompt=prompt, mission_id=mission_id)
+        if folded in {"continua", "continuar", "confirmo"} or any(
+            phrase in folded for phrase in ("confirm action", "confirma la accion", "confirmar accion", "continua agente")
+        ):
+            return DesktopIntentDecision(category="desktop_agent_confirm", prompt=prompt, mission_id=mission_id)
         if "lista" in folded and "misiones" in folded:
             return DesktopIntentDecision(category="desktop_agent_list", prompt=prompt)
         if "estado" in folded and "mision" in folded:

@@ -73,9 +73,12 @@ if QWidget is not object:
         def _tick(self) -> None:
             speed = {
                 "idle": 0.012,
+                "listening": 0.018,
                 "thinking": 0.024,
                 "active": 0.038,
                 "speaking": 0.052,
+                "web_search": 0.046,
+                "agent_preview": 0.016,
                 "alert": 0.068,
             }.get(self._state, 0.02)
             self._phase += speed
@@ -133,9 +136,12 @@ if QWidget is not object:
 
             pulse_multiplier = {
                 "idle": 0.07,
+                "listening": 0.1,
                 "thinking": 0.12,
                 "active": 0.16,
                 "speaking": 0.22,
+                "web_search": 0.18,
+                "agent_preview": 0.08,
                 "alert": 0.18,
             }.get(self._state, 0.1)
             pulse = 0.56 + (math.sin(self._phase * 5.0) + 1.0) * pulse_multiplier * self._activity
@@ -180,6 +186,24 @@ if QWidget is not object:
             )
             painter.setPen(QPen(QColor(PALETTE.cyan_soft), 1.0))
             painter.drawEllipse(inner_ring)
+
+            if self._state == "web_search":
+                painter.setPen(QPen(QColor(PALETTE.warning), 1.4))
+                for offset in (0.0, 0.33, 0.66):
+                    sweep = int((0.13 + offset) * 5760)
+                    painter.drawArc(outer.adjusted(74, 74, -74, -74), int(self._phase * 880 + sweep), 420)
+            elif self._state == "listening":
+                painter.setPen(QPen(QColor(PALETTE.success), 1.6))
+                for index in range(5):
+                    wave = math.sin(self._phase * 8 + index)
+                    x = center.x() - 34 + index * 17
+                    painter.drawLine(QPointF(x, center.y() + 52 - wave * 10), QPointF(x, center.y() + 52 + wave * 10))
+            elif self._state == "agent_preview":
+                painter.setPen(QPen(QColor(PALETTE.warning), 1.2))
+                for index, label in enumerate(("OBS", "PLAN", "OK", "RUN", "VERIFY")):
+                    angle = -math.pi / 2 + index * (math.tau / 5)
+                    point = QPointF(center.x() + math.cos(angle) * radius * 0.72, center.y() + math.sin(angle) * radius * 0.72)
+                    painter.drawText(QRectF(point.x() - 20, point.y() - 8, 40, 16), Qt.AlignCenter, label)
 
             painter.setPen(QPen(QColor(PALETTE.text), 1))
             font = QFont("Segoe UI", 11)

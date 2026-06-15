@@ -17,7 +17,7 @@ from jarvis.voice_runtime.backends import InMemorySTTProvider, InMemoryTTSProvid
 from jarvis.voice_runtime.backends import TTSProviderRegistry
 from jarvis.voice_runtime.coqui_tts import CoquiXTTSProvider
 from jarvis.voice_runtime.base import CancellationToken, PlaybackHandle, SynthesisRequest, SynthesisResult, TranscriptionRequest
-from jarvis.voice_runtime.spoken import build_tts_segments, clean_tts_text, resolve_voice_profile, split_tts_text, spoken_response_normalization, standard_spoken_phrase
+from jarvis.voice_runtime.spoken import build_tts_segments, clean_tts_text, prepare_spoken_text, resolve_voice_profile, split_tts_text, spoken_response_normalization, standard_spoken_phrase
 from jarvis.voice_runtime.tts import TTSService
 from jarvis.voice_runtime.sample_validator import VoiceSampleValidator
 from jarvis.voice_runtime.audio_preprocessor import AudioPreprocessor
@@ -671,6 +671,19 @@ def test_tts_cleanup_converts_markdown_and_math_to_speech() -> None:
 def test_tts_cleanup_expands_technical_terms_for_premium_pronunciation() -> None:
     cleaned = clean_tts_text("GPT OSS usa OCR, UI, CPU, GPU, RAM, VSCode, pyttsx3 y Coqui XTTS")
     assert cleaned == "g p t o s s usa o c r, interfaz, c p u, g p u, memoria ram, Visual Studio Code, pi ti es equis tres y Coqui x t t s."
+
+
+def test_tts_does_not_read_code_blocks_or_stack_traces() -> None:
+    assert prepare_spoken_text("```python\nprint('hola')\n```") == "Te deje el codigo en el chat."
+    assert prepare_spoken_text("Traceback (most recent call last):\nValueError: boom") == "No pude completar la operacion. Te deje el detalle en el chat."
+
+
+def test_tts_uses_short_malware_and_research_timeout_messages() -> None:
+    malware = "No puedo ayudarte a operar, modificar, compilar, ejecutar o explicar ese RAT."
+    research = "Encontre fuentes con Brave, pero el modelo local tardo demasiado o no pudo redactar el informe completo."
+
+    assert prepare_spoken_text(malware) == "No puedo ayudar con uso de malware, pero te deje opciones defensivas en el chat."
+    assert prepare_spoken_text(research) == "No pude terminar la investigacion a tiempo. Te deje las fuentes y opciones en el chat."
 
 
 def test_tts_cleanup_summarizes_windows_paths_cleanly() -> None:

@@ -18,6 +18,7 @@ class DesktopAgentPhase(StrEnum):
     PENDING = "pending"
     OBSERVING = "observing"
     PLANNING = "planning"
+    WAITING_CONFIRMATION = "waiting_confirmation"
     ACTING = "executing"
     EXECUTING = "executing"
     VERIFYING = "verifying"

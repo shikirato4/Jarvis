@@ -1090,14 +1090,22 @@ class DesktopAgentPlanner:
         return None
 
     def _extract_create_folder_goal(self, goal: str) -> tuple[str, Path]:
-        name_match = re.search(r"carpeta(?:\s+llamada)?\s+(.+?)(?:\s+en\s+|$)", goal, flags=re.IGNORECASE)
-        folder_name = (name_match.group(1).strip(" .\"'") if name_match else "Nueva carpeta") or "Nueva carpeta"
+        quoted = re.findall(r"[\"'“”]([^\"'“”]+)[\"'“”]", goal)
+        if quoted:
+            folder_name = quoted[-1].strip(" .")
+        else:
+            name_match = re.search(r"carpeta(?:\s+nueva)?(?:\s+llamada)?\s+(.+?)(?:\s+en\s+|$)", goal, flags=re.IGNORECASE)
+            folder_name = (name_match.group(1).strip(" .\"'") if name_match else "Nueva carpeta") or "Nueva carpeta"
         location = self._extract_location_phrase(goal)
         return folder_name, self._resolve_location_phrase(location)
 
     def _extract_create_file_goal(self, goal: str) -> tuple[str, Path]:
-        name_match = re.search(r"archivo(?:\s+llamado)?\s+(.+?)(?:\s+en\s+|$)", goal, flags=re.IGNORECASE)
-        file_name = (name_match.group(1).strip(" .\"'") if name_match else "nuevo.txt") or "nuevo.txt"
+        quoted = re.findall(r"[\"'“”]([^\"'“”]+)[\"'“”]", goal)
+        if quoted:
+            file_name = quoted[-1].strip(" .")
+        else:
+            name_match = re.search(r"archivo(?:\s+nuevo)?(?:\s+llamado)?\s+(.+?)(?:\s+en\s+|$)", goal, flags=re.IGNORECASE)
+            file_name = (name_match.group(1).strip(" .\"'") if name_match else "nuevo.txt") or "nuevo.txt"
         location = self._extract_location_phrase(goal)
         return file_name, self._resolve_location_phrase(location)
 

@@ -150,11 +150,27 @@ def prepare_spoken_response(
 
 def prepare_spoken_text(text: str, *, profile: VoiceProfile | None = None) -> str:
     spoken_text = text or ""
+    special = _special_spoken_summary(spoken_text)
+    if special:
+        return special
     if profile is not None and profile.style_enabled:
         spoken_text = spoken_response_normalization(spoken_text, profile=profile)
     if profile is None or profile.cleanup_enabled:
         spoken_text = clean_tts_text(spoken_text)
     return spoken_text
+
+
+def _special_spoken_summary(text: str) -> str:
+    lowered = (text or "").casefold()
+    if "```" in text:
+        return "Te deje el codigo en el chat."
+    if "traceback (most recent call last)" in lowered or "stack trace" in lowered or "watchdog timeout" in lowered:
+        return "No pude completar la operacion. Te deje el detalle en el chat."
+    if "no puedo ayudarte a operar" in lowered and ("rat" in lowered or "malware" in lowered):
+        return "No puedo ayudar con uso de malware, pero te deje opciones defensivas en el chat."
+    if "encontre fuentes con brave" in lowered and ("tardo demasiado" in lowered or "no pudo redactar" in lowered):
+        return "No pude terminar la investigacion a tiempo. Te deje las fuentes y opciones en el chat."
+    return ""
 
 
 def clean_tts_text(text: str) -> str:

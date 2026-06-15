@@ -58,18 +58,37 @@ def should_use_web_search(text: str, *, mode: str = "auto") -> bool:
 
 
 def build_grounded_web_prompt(user_query: str, response: WebSearchResponse, *, max_sources: int = 3, snippet_chars: int = 500) -> str:
+    selected_hits = select_synthesis_hits(response.hits, max_sources=max_sources, snippet_chars=snippet_chars)
     sources = []
-    for index, hit in enumerate(select_synthesis_hits(response.hits, max_sources=max_sources, snippet_chars=snippet_chars), start=1):
+    for index, hit in enumerate(selected_hits, start=1):
         line = f"{index}. {hit.title} ({hit.source})\nURL: {hit.url}\nResumen: {hit.snippet}"
         sources.append(line)
     source_block = "\n\n".join(sources) if sources else "Sin fuentes disponibles."
+    source_count = len(response.hits)
+    used_count = len(selected_hits)
+    count_line = source_count_message(source_count, used_count)
     return (
         "Responde como Jarvis. Usa las fuentes web solo como contexto de referencia. "
         "No digas que eres ChatGPT, OpenAI ni Gemini. No inventes datos no cubiertos por las fuentes. "
-        "Formato requerido: 'Busque en la web.', luego 'Resumen:' y luego 'Fuentes:'.\n\n"
+        "Formato requerido: 'Busque en la web.', luego el conteo real de fuentes, luego 'Resumen:' y luego 'Fuentes:'. "
+        "No inventes conteos de fuentes.\n\n"
         f"Pregunta del usuario:\n{user_query}\n\n"
+        f"Conteo real:\n{count_line}\n\n"
         f"Fuentes encontradas por Brave Search:\n{source_block}"
     )
+
+
+def source_count_message(source_count: int, used_count: int | None = None) -> str:
+    source_count = max(0, int(source_count or 0))
+    if used_count is None:
+        used_count = source_count
+    used_count = max(0, min(int(used_count or 0), source_count))
+    if source_count == 0:
+        return "No encontre fuentes confiables para esta busqueda."
+    noun = "fuente" if source_count == 1 else "fuentes"
+    if used_count and used_count < source_count:
+        return f"Encontre {source_count} {noun} y use {used_count} para redactar la respuesta."
+    return f"Encontre {source_count} {noun}."
 
 
 def select_synthesis_hits(hits: list[WebSearchHit], *, max_sources: int = 3, snippet_chars: int = 500) -> list[WebSearchHit]:

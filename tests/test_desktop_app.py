@@ -8,6 +8,45 @@ from jarvis.config import Settings
 from jarvis.desktop_runtime.panels import DesktopPanelComposer
 
 
+class _PanelMission:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def model_dump(self, *, mode: str = "json") -> dict:  # noqa: ARG002
+        return dict(self._payload)
+
+
+class _PanelRuntime:
+    def __init__(self, *, latest_agent=None, missions=None) -> None:
+        self._latest_agent = latest_agent
+        self._missions = missions if missions is not None else []
+
+    def desktop_agent_status(self):
+        if self._latest_agent is None:
+            return {"latest_mission": None}
+        return {"latest_mission": self._latest_agent}
+
+    def desktop_agent_list(self):
+        return [_PanelMission(item) for item in self._missions]
+
+
+class _PanelBridge:
+    def __init__(self, *, latest_agent=None, missions=None, dashboard=None, health=None, timeline=None) -> None:
+        self.runtime = _PanelRuntime(latest_agent=latest_agent, missions=missions)
+        self._dashboard = dashboard if dashboard is not None else {}
+        self._health = health if health is not None else {}
+        self._timeline = timeline if timeline is not None else {}
+
+    def hud_dashboard(self):
+        return self._dashboard
+
+    def hud_health(self):
+        return self._health
+
+    def hud_timeline(self, *, limit: int):  # noqa: ARG002
+        return self._timeline
+
+
 def test_desktop_runtime_boot_and_panels(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
@@ -27,6 +66,66 @@ def test_desktop_runtime_boot_and_panels(tmp_path) -> None:
         assert "aggregate_status" in snapshot.health_summary
     finally:
         app.stop()
+
+
+def test_panel_composer_handles_missing_agent_state() -> None:
+    composer = DesktopPanelComposer(_PanelBridge(latest_agent=None, missions=[]))
+
+    snapshot = composer.compose()
+
+    assert snapshot.runtime_panels == []
+    assert snapshot.missions == []
+
+
+def test_panel_composer_handles_none_world_and_current_step() -> None:
+    completed = {
+        "mission_id": "mission-1",
+        "goal": "crear carpeta",
+        "status": "completed",
+        "success": True,
+        "world_state": {"current_step": None, "target_path": "C:/Users/GAMER/Documents/hola xd"},
+        "completed_steps": ["create-folder"],
+        "summary": "Mision completada",
+    }
+    composer = DesktopPanelComposer(_PanelBridge(latest_agent=completed, missions=[completed]))
+
+    snapshot = composer.compose()
+
+    assert snapshot.runtime_panels[0]["status"] == "completed"
+    assert snapshot.runtime_panels[0]["current_step"] == "Sin paso activo"
+    assert snapshot.missions[0].status == "completed"
+    assert snapshot.missions[0].metadata["current_step"] == "Sin paso activo"
+    assert snapshot.missions[0].metadata["completed_steps"] == ["create-folder"]
+
+
+def test_panel_composer_handles_empty_current_step_shapes() -> None:
+    for world_state in (None, {"current_step": {}}):
+        mission = {
+            "mission_id": "mission-shape",
+            "goal": "crear carpeta",
+            "status": "completed",
+            "success": True,
+            "world_state": world_state,
+        }
+        composer = DesktopPanelComposer(_PanelBridge(latest_agent=mission, missions=[mission]))
+
+        snapshot = composer.compose()
+
+        assert snapshot.runtime_panels[0]["current_step"] == "Sin paso activo"
+        assert snapshot.missions[0].metadata["current_step"] == "Sin paso activo"
+
+
+def test_panel_composer_degrades_to_safe_snapshot_on_bad_bridge(caplog) -> None:
+    class _BrokenBridge(_PanelBridge):
+        def hud_dashboard(self):
+            raise RuntimeError("panel backend failed")
+
+    composer = DesktopPanelComposer(_BrokenBridge())
+
+    snapshot = composer.compose()
+
+    assert snapshot.health_summary["aggregate_status"] == "degraded"
+    assert snapshot.alerts[0]["title"] == "Desktop panel degraded"
 
 
 def test_desktop_runtime_chat_panel_remains_functional(tmp_path) -> None:
