@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .checkpoints import build_checkpoint
 from .coordinator import DesktopAgentMissionCoordinator
+from .dry_run import DesktopAgentDryRunPlanner
 from .executor import DesktopAgentExecutor
 from .memory import DesktopAgentMemoryManager
 from .mission_store import DesktopAgentMissionStore
@@ -25,13 +26,16 @@ from .models import (
     DesktopVerificationStatus,
     DesktopWorldState,
 )
+from .observations import observation_summary_from_world
 from .observer import DesktopAgentObserver
 from .planner import DesktopAgentPlanner
 from .policies import DesktopAgentPolicyEngine
 from .progress import build_progress
 from .recovery import DesktopAgentRecoveryEngine
+from .rollback import RollbackPlanner
 from .state import DesktopAgentStateStore
 from .subtasks import build_subtasks, mark_subtask_started, mark_subtask_terminal
+from .task_queue import AgentTaskQueue
 from .verifier import DesktopAgentVerifier
 from .world_model import DesktopWorldModelBuilder
 
@@ -73,6 +77,9 @@ class DesktopAgentRuntimeService:
         self._verifier = DesktopAgentVerifier()
         self._recovery = DesktopAgentRecoveryEngine(self._memory)
         self._policy = DesktopAgentPolicyEngine(settings)
+        self._rollback = RollbackPlanner()
+        self._task_queue = AgentTaskQueue()
+        self._permission_mode = "normal"
         self._logger = logger or logging.getLogger("jarvis.desktop_agent")
         self._started = False
 
@@ -100,10 +107,16 @@ class DesktopAgentRuntimeService:
             "active_missions": len(active),
             "latest_mission": latest.model_dump(mode="json") if latest else None,
             "latest_observation": latest.world_state.last_observation_summary if latest else None,
-            "latest_step": latest.world_state.current_step_id if latest else None,
+            "latest_step": self._latest_step_label(latest) if latest else None,
             "latest_goal": latest.goal if latest else None,
             "latest_subtask": latest.current_subtask_label if latest else None,
             "latest_path": latest.world_state.active_path if latest else None,
+            "permission_mode": self._permission_mode,
+            "human_mission_log": self._human_mission_log(latest) if latest else [],
+            "task_queue": {
+                "pending_count": len(self._task_queue.list()),
+                "items": [item.to_dict() for item in self._task_queue.list(limit=5)],
+            },
             "metrics": latest.metrics if latest else {},
         }
 
@@ -124,6 +137,62 @@ class DesktopAgentRuntimeService:
         if payload.wait_for_completion:
             return future.result()
         return self.get_mission_status(mission.mission_id)
+
+    def dry_run(self, request: DesktopAgentMissionRequest | dict) -> dict[str, object]:
+        self._ensure_started()
+        payload = DesktopAgentMissionRequest.model_validate(request)
+        planner = DesktopAgentDryRunPlanner(settings=self._settings, permission_mode=self._permission_mode)
+        result = planner.plan(payload).to_dict()
+        self._logger.info(
+            "desktop_agent_dry_run_completed",
+            extra={"goal": payload.goal, "step_count": len(result.get("steps", [])), "permission_mode": self._permission_mode},
+        )
+        return result
+
+    def set_permission_mode(self, mode: str) -> dict[str, object]:
+        selected = str(mode or "").strip().casefold()
+        if selected not in {"lockdown", "safe", "normal", "pro"}:
+            raise ValueError("invalid Agent Mode permission mode")
+        self._permission_mode = selected
+        self._logger.info("desktop_agent_permission_mode_changed", extra={"permission_mode": selected})
+        return {"status": "ok", "permission_mode": selected}
+
+    def queue_add(self, request: dict[str, object]) -> dict[str, object]:
+        self._ensure_started()
+        title = str(request.get("title") or request.get("description") or "Tarea pendiente").strip()
+        item = self._task_queue.add(
+            title,
+            description=str(request.get("description") or ""),
+            task_type=str(request.get("type") or "agent"),
+            priority=int(request.get("priority") or 5),
+            source=str(request.get("source") or "desktop_chat"),
+            requires_confirmation=bool(request.get("requires_confirmation")),
+            next_action=str(request.get("next_action") or "") or None,
+        )
+        return {"status": "ok", "item": item.to_dict(), "message": "Tarea agregada a la cola."}
+
+    def queue_list(self) -> dict[str, object]:
+        self._ensure_started()
+        items = [item.to_dict() for item in self._task_queue.list(limit=20)]
+        return {"status": "ok", "pending_count": len(items), "items": items}
+
+    def queue_cancel(self, item_id: str | None = None) -> dict[str, object]:
+        self._ensure_started()
+        item = self._task_queue.next_pending() if not item_id else None
+        if item_id:
+            item = self._task_queue.cancel(item_id)
+        elif item is not None:
+            item = self._task_queue.cancel(item.id)
+        if item is None:
+            return {"status": "empty", "message": "No hay tareas pendientes para cancelar."}
+        return {"status": "ok", "item": item.to_dict(), "message": "Tarea cancelada."}
+
+    def queue_continue(self) -> dict[str, object]:
+        self._ensure_started()
+        item = self._task_queue.next_pending()
+        if item is None:
+            return {"status": "empty", "message": "No hay tareas pendientes."}
+        return {"status": "waiting_confirmation" if item.requires_confirmation else "ok", "item": item.to_dict(), "message": "Siguiente tarea pendiente lista para continuar."}
 
     def pause_mission(self, mission_id: str) -> DesktopAgentMissionReceipt:
         self._ensure_started()
@@ -369,7 +438,7 @@ class DesktopAgentRuntimeService:
             if self._should_stop(mission, control):
                 break
 
-            policy_result = self._policy.assess_step(step)
+            policy_result = self._policy.assess_step(step, permission_mode=self._permission_mode)
             world.risk_level = policy_result.risk_level
             world.policy_decision = policy_result.decision
             if policy_result.decision != DesktopPolicyDecision.ALLOW:
@@ -393,6 +462,7 @@ class DesktopAgentRuntimeService:
                     mission.current_phase = DesktopAgentPhase.WAITING_CONFIRMATION
                     mission.next_step_index = index
                     mission.summary = self._build_confirmation_summary(step, policy_result)
+                    rollback_plan = self._rollback.for_step(step).to_dict()
                     mission.final_result = {
                         "status": mission.status.value,
                         "success": False,
@@ -400,6 +470,8 @@ class DesktopAgentRuntimeService:
                         "step_id": step.step_id,
                         "risk_level": policy_result.risk_level.value,
                         "reason": policy_result.reason,
+                        "rollback": rollback_plan,
+                        "skill": self._skill_for_step(step),
                     }
                     self._append_timeline(
                         mission,
@@ -616,6 +688,8 @@ class DesktopAgentRuntimeService:
         mission.success = success
         if success:
             world.phase = DesktopAgentPhase.COMPLETED
+            world.current_step = None
+            world.current_step_id = None
             mission.status = DesktopAgentPhase.COMPLETED
             mission.current_phase = DesktopAgentPhase.COMPLETED
         elif mission.status not in {DesktopAgentPhase.PAUSED, DesktopAgentPhase.ABORTED, DesktopAgentPhase.BLOCKED}:
@@ -630,6 +704,7 @@ class DesktopAgentRuntimeService:
             "completed_steps": len(mission.completed_steps),
             "failed_step_id": mission.failed_step_id,
             "abort_reason": mission.abort_reason,
+            "human_mission_log": self._human_mission_log(mission),
         }
         mission.metrics["total_mission_latency"] = max((mission.updated_at - mission.created_at).total_seconds(), 0.0)
         if mission.status in {DesktopAgentPhase.FAILED, DesktopAgentPhase.BLOCKED}:
@@ -705,17 +780,19 @@ class DesktopAgentRuntimeService:
             return True
         return bool(step.payload.get("approved"))
 
-    @staticmethod
-    def _build_confirmation_summary(step: DesktopAgentStep, policy_result) -> str:
+    def _build_confirmation_summary(self, step: DesktopAgentStep, policy_result) -> str:
         target = step.payload.get("path") or step.payload.get("destination_path") or step.payload.get("application") or step.payload.get("target_window") or step.payload.get("label")
+        rollback = self._rollback.for_step(step)
         lines = [
             "Necesito confirmacion antes de actuar.",
             f"Accion: {step.title}",
             f"Riesgo: {policy_result.risk_level.value}",
             f"Motivo: {policy_result.reason}",
+            f"Skill: {self._skill_for_step(step)}",
         ]
         if target:
             lines.append(f"Afecta: {target}")
+        lines.append(f"Rollback: {rollback.rollback_description}")
         lines.append("Si confirmas, Jarvis ejecutara este paso y verificara el resultado.")
         return "\n".join(lines)
 
@@ -896,6 +973,89 @@ class DesktopAgentRuntimeService:
             "recovery_count": world.recovery_count,
             "abort_reason": mission.abort_reason,
             "metrics": mission.metrics,
+            "observation_summary": observation_summary_from_world(world).to_dict(),
+            "human_mission_log": DesktopAgentRuntimeService._human_mission_log(mission),
+            "serializable_agent_state": DesktopAgentRuntimeService._serializable_agent_state(mission),
+        }
+
+    @staticmethod
+    def _skill_for_step(step: DesktopAgentStep) -> str:
+        mapping = {
+            DesktopStepActionType.OBSERVE_SCREEN: "inspect_screen",
+            DesktopStepActionType.OPEN_APPLICATION: "open_application",
+            DesktopStepActionType.FOCUS_WINDOW: "inspect_active_window",
+            DesktopStepActionType.CLICK_TARGET: "controlled_input",
+            DesktopStepActionType.TYPE_IN_TARGET: "controlled_input",
+            DesktopStepActionType.SCROLL: "controlled_input",
+            DesktopStepActionType.SEARCH_FILE: "verify_file_exists",
+            DesktopStepActionType.OPEN_FILE: "open_url",
+            DesktopStepActionType.OPEN_FOLDER: "open_url",
+            DesktopStepActionType.OPEN_PATH: "open_url",
+            DesktopStepActionType.CREATE_FILE: "create_file",
+            DesktopStepActionType.CREATE_FOLDER: "create_folder",
+            DesktopStepActionType.COPY_FILE: "copy_file",
+            DesktopStepActionType.MOVE_FILE: "move_file",
+            DesktopStepActionType.RENAME_FILE: "rename_file",
+            DesktopStepActionType.WRITE_TEXT: "controlled_input",
+            DesktopStepActionType.HOTKEY: "controlled_input",
+            DesktopStepActionType.WRITING_CONTINUE: "controlled_input",
+            DesktopStepActionType.WRITING_ANALYZE: "inspect_active_window",
+        }
+        return mapping.get(step.action_type, "agent_action")
+
+    @staticmethod
+    def _latest_step_label(mission: DesktopAgentMissionReceipt | None) -> str | None:
+        if mission is None:
+            return None
+        return mission.world_state.current_step_id or mission.world_state.memory.last_completed_step or (mission.completed_steps[-1] if mission.completed_steps else None)
+
+    @staticmethod
+    def _human_mission_log(mission: DesktopAgentMissionReceipt | None) -> list[str]:
+        if mission is None:
+            return []
+        lines: list[str] = [f"Mision: {mission.goal}"]
+        title_map = {
+            "mission_created": "Entendi la solicitud.",
+            "observe": "Observe el estado inicial.",
+            "plan_built": "Prepare el plan.",
+            "observe_step": "Revise el estado antes del paso.",
+            "confirmation_required": "Pedi confirmacion antes de actuar.",
+            "confirmation_received": "Recibi confirmacion del usuario.",
+            "step_execute": "Ejecute el paso aprobado.",
+            "step_verified": "Verifique el resultado.",
+            "mission_finished": "Termine la mision.",
+            "mission_aborted": "Detuve la mision.",
+            "policy_blocked": "Bloquee la mision por politica.",
+        }
+        for entry in mission.timeline[-12:]:
+            label = title_map.get(entry.title, entry.detail)
+            if entry.step_id:
+                label = f"{label} ({entry.step_id})"
+            if label and label not in lines:
+                lines.append(label)
+        if mission.status == DesktopAgentPhase.COMPLETED:
+            lines.append("Resultado: completado.")
+        elif mission.status == DesktopAgentPhase.WAITING_CONFIRMATION:
+            lines.append("Resultado: esperando confirmacion.")
+        elif mission.status in {DesktopAgentPhase.FAILED, DesktopAgentPhase.BLOCKED, DesktopAgentPhase.ABORTED}:
+            lines.append(f"Resultado: {mission.status.value}.")
+        return lines[:16]
+
+    @staticmethod
+    def _serializable_agent_state(mission: DesktopAgentMissionReceipt | None) -> dict[str, object]:
+        if mission is None:
+            return {}
+        return {
+            "mission_id": mission.mission_id,
+            "status": mission.status.value,
+            "goal": mission.goal,
+            "current_step_id": mission.world_state.current_step_id,
+            "current_subtask": mission.current_subtask_label,
+            "pending_confirmation": mission.status == DesktopAgentPhase.WAITING_CONFIRMATION,
+            "can_confirm": mission.status == DesktopAgentPhase.WAITING_CONFIRMATION,
+            "can_stop": mission.status not in {DesktopAgentPhase.COMPLETED, DesktopAgentPhase.FAILED, DesktopAgentPhase.ABORTED},
+            "progress": mission.progress.model_dump(mode="json"),
+            "summary": mission.summary,
         }
 
     def _ensure_started(self) -> None:

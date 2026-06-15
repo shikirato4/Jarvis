@@ -33,6 +33,12 @@ desktop = [
   "mss>=10.0.0",
   "pywin32>=308",
 ]
+image = [
+  "accelerate>=1.1.0",
+  "diffusers>=0.31.0",
+  "safetensors>=0.4.5",
+  "transformers>=4.57,<4.58",
+]
 voice = [
   "faster-whisper>=1.1.1",
   "numpy>=2.1.0",

@@ -38,6 +38,13 @@ class AgentRisk(StrEnum):
     BLOCKED = "blocked"
 
 
+class AgentPermissionMode(StrEnum):
+    LOCKDOWN = "lockdown"
+    SAFE = "safe"
+    NORMAL = "normal"
+    PRO = "pro"
+
+
 class AgentSafetyDecision(StrEnum):
     ALLOW = "allow"
     REQUIRE_CONFIRMATION = "require_confirmation"
@@ -59,9 +66,26 @@ class AgentAction:
     description: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     risk: AgentRisk = AgentRisk.LOW
+    action_id: str = field(default_factory=lambda: f"action-{uuid4().hex[:10]}")
+    human_description: str = ""
+    target: str | None = None
+    parameters: dict[str, Any] = field(default_factory=dict)
+    requires_confirmation: bool = False
+    dry_run_supported: bool = True
+    verify_supported: bool = True
+    rollback_supported: bool = False
+    audit_log: list[dict[str, Any]] = field(default_factory=list)
 
     def searchable_text(self) -> str:
-        pieces = [self.action_type, self.title, self.description, str(self.payload)]
+        pieces = [
+            self.action_type,
+            self.title,
+            self.description,
+            self.human_description,
+            self.target or "",
+            str(self.payload),
+            str(self.parameters),
+        ]
         return " ".join(item for item in pieces if item).casefold()
 
 
@@ -180,6 +204,13 @@ class AgentSafetyGate:
         "search_file",
         "open_file",
         "open_folder",
+        "open_url",
+        "browser_search",
+        "inspect_screen",
+        "inspect_active_window",
+        "move_mouse",
+        "click",
+        "double_click",
         "scroll",
         "focus_window",
     }
@@ -203,14 +234,22 @@ class AgentSafetyGate:
         action: AgentAction,
         *,
         mode: AgentMode,
+        permission_mode: AgentPermissionMode | str = AgentPermissionMode.NORMAL,
         confirmed: bool = False,
         strong_confirmed: bool = False,
         pin_verified: bool = False,
     ) -> AgentSafetyResult:
         mode = AgentMode(str(mode))
+        permission_mode = AgentPermissionMode(str(permission_mode))
         risk = self.classify(action)
+        action.risk = risk
+        action.requires_confirmation = risk in {AgentRisk.MEDIUM, AgentRisk.HIGH}
         if risk == AgentRisk.BLOCKED:
             return AgentSafetyResult(AgentSafetyDecision.BLOCK, risk, "Accion bloqueada por la politica de Agent Mode.")
+        if permission_mode == AgentPermissionMode.LOCKDOWN:
+            return AgentSafetyResult(AgentSafetyDecision.BLOCK, risk, "Lockdown bloquea observacion y acciones.")
+        if permission_mode == AgentPermissionMode.SAFE and risk != AgentRisk.LOW:
+            return AgentSafetyResult(AgentSafetyDecision.BLOCK, risk, "Safe Mode solo permite observacion, planificacion y dry run.")
         if mode in {AgentMode.OBSERVE_ONLY, AgentMode.ASSIST} and action.action_type not in self._LOW_ACTIONS:
             return AgentSafetyResult(
                 AgentSafetyDecision.REQUIRE_CONFIRMATION,
@@ -245,10 +284,32 @@ class AgentModeController:
     def __init__(self, safety_gate: AgentSafetyGate | None = None) -> None:
         self.safety_gate = safety_gate or AgentSafetyGate()
         self.current_mode = AgentMode.GUIDED_CONTROL
+        self.permission_mode = AgentPermissionMode.NORMAL
 
     def set_mode(self, mode: AgentMode | str) -> AgentMode:
         self.current_mode = AgentMode(str(mode))
         return self.current_mode
+
+    def set_permission_mode(self, mode: AgentPermissionMode | str) -> AgentPermissionMode:
+        self.permission_mode = AgentPermissionMode(str(mode))
+        return self.permission_mode
+
+    def authorize_action(
+        self,
+        action: AgentAction,
+        *,
+        confirmed: bool = False,
+        strong_confirmed: bool = False,
+        pin_verified: bool = False,
+    ) -> AgentSafetyResult:
+        return self.safety_gate.authorize(
+            action,
+            mode=self.current_mode,
+            permission_mode=self.permission_mode,
+            confirmed=confirmed,
+            strong_confirmed=strong_confirmed,
+            pin_verified=pin_verified,
+        )
 
     def create_session(self, goal: str, *, mode: AgentMode | str | None = None) -> AgentSession:
         selected_mode = AgentMode(str(mode)) if mode is not None else self.current_mode

@@ -58,6 +58,7 @@ from jarvis.voice_runtime.base import VoiceSessionRequest
 from jarvis.voice_runtime.service import VoiceRuntimeService
 from jarvis.writing_runtime.models import WritingContinuationRequest
 from jarvis.writing_runtime.service import WritingRuntimeService
+from jarvis.image_runtime import ImageGenerationRequest
 
 
 class JarvisRuntimeService(RuntimeServiceContract):
@@ -96,6 +97,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
         automation_service: AutomationService,
         ops_runtime_service=None,
         desktop_agent_runtime_service=None,
+        image_runtime_service=None,
     ) -> None:
         self._settings = settings
         self._mode_manager = mode_manager
@@ -127,6 +129,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
         self._automation_service = automation_service
         self._ops_runtime_service = ops_runtime_service
         self._desktop_agent_runtime_service = desktop_agent_runtime_service
+        self._image_runtime_service = image_runtime_service
         self._started = False
 
     def start(self) -> None:
@@ -563,6 +566,42 @@ class JarvisRuntimeService(RuntimeServiceContract):
             raise ServiceUnavailableError("desktop agent runtime is not available")
         return self._desktop_agent_runtime_service.run(DesktopAgentMissionRequest.model_validate(request))
 
+    def desktop_agent_dry_run(self, request: DesktopAgentMissionRequest | dict[str, Any]):
+        self._ensure_started()
+        if self._desktop_agent_runtime_service is None:
+            raise ServiceUnavailableError("desktop agent runtime is not available")
+        return self._desktop_agent_runtime_service.dry_run(DesktopAgentMissionRequest.model_validate(request))
+
+    def desktop_agent_set_permission_mode(self, mode: str):
+        self._ensure_started()
+        if self._desktop_agent_runtime_service is None:
+            raise ServiceUnavailableError("desktop agent runtime is not available")
+        return self._desktop_agent_runtime_service.set_permission_mode(mode)
+
+    def desktop_agent_queue_add(self, request: dict[str, Any]):
+        self._ensure_started()
+        if self._desktop_agent_runtime_service is None:
+            raise ServiceUnavailableError("desktop agent runtime is not available")
+        return self._desktop_agent_runtime_service.queue_add(request)
+
+    def desktop_agent_queue_list(self):
+        self._ensure_started()
+        if self._desktop_agent_runtime_service is None:
+            raise ServiceUnavailableError("desktop agent runtime is not available")
+        return self._desktop_agent_runtime_service.queue_list()
+
+    def desktop_agent_queue_cancel(self, item_id: str | None = None):
+        self._ensure_started()
+        if self._desktop_agent_runtime_service is None:
+            raise ServiceUnavailableError("desktop agent runtime is not available")
+        return self._desktop_agent_runtime_service.queue_cancel(item_id)
+
+    def desktop_agent_queue_continue(self):
+        self._ensure_started()
+        if self._desktop_agent_runtime_service is None:
+            raise ServiceUnavailableError("desktop agent runtime is not available")
+        return self._desktop_agent_runtime_service.queue_continue()
+
     def desktop_agent_pause(self, mission_id: str):
         self._ensure_started()
         if self._desktop_agent_runtime_service is None:
@@ -586,6 +625,31 @@ class JarvisRuntimeService(RuntimeServiceContract):
         if self._desktop_agent_runtime_service is None:
             raise ServiceUnavailableError("desktop agent runtime is not available")
         return self._desktop_agent_runtime_service.abort_mission(mission_id, reason=reason)
+
+    def image_status(self) -> dict[str, Any]:
+        self._ensure_started()
+        if self._image_runtime_service is None:
+            return {"enabled": False, "status": "unavailable", "message": "image runtime is not available"}
+        return self._image_runtime_service.status()
+
+    def image_generate(self, request: ImageGenerationRequest | dict[str, Any], *, wait: bool = False):
+        self._ensure_started()
+        if self._image_runtime_service is None:
+            raise ServiceUnavailableError("image runtime is not available")
+        parsed = ImageGenerationRequest.model_validate(request)
+        return self._image_runtime_service.generate_sync(parsed) if wait else self._image_runtime_service.submit(parsed)
+
+    def image_cancel(self, job_id: str | None = None):
+        self._ensure_started()
+        if self._image_runtime_service is None:
+            raise ServiceUnavailableError("image runtime is not available")
+        return self._image_runtime_service.cancel(job_id)
+
+    def image_unload(self):
+        self._ensure_started()
+        if self._image_runtime_service is None:
+            raise ServiceUnavailableError("image runtime is not available")
+        return self._image_runtime_service.unload()
 
     def vision_status(self) -> dict[str, Any]:
         self._ensure_started()
@@ -726,6 +790,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
             "security_runtime": self._security_runtime_service.status(),
             "self_improvement_runtime": self._self_improvement_runtime_service.status(),
             "writing_runtime": self._writing_runtime_service.status(),
+            "image_runtime": self._image_runtime_service.status() if self._image_runtime_service is not None else {},
             "desktop_agent_runtime": self._desktop_agent_runtime_service.status() if self._desktop_agent_runtime_service is not None else {},
             "ops_runtime": self._ops_runtime_service.status() if self._ops_runtime_service is not None else {},
             "activity_count": self._memory_service.count_activity(),

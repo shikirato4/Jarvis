@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from time import perf_counter
 from typing import Callable, Iterable
 
@@ -107,6 +108,10 @@ class DesktopAgentObserver:
                 "awareness_mode": awareness_mode,
                 "awareness_errors": awareness_errors,
                 "awareness_summary": awareness.data.get("summary") or (awareness.awareness_result.summary if awareness.awareness_result else ""),
+                "observation_target": "active_window" if "active_window" in awareness_mode else "screen",
+                "observation_status": "degraded" if awareness_errors else "ok",
+                "sensitive_blocked": any(_looks_sensitive_error(str(error)) for error in awareness_errors),
+                "recoverable_error": " | ".join(str(error) for error in awareness_errors[:2]) if awareness_errors else None,
             },
         )
         world.phase = phase
@@ -148,6 +153,15 @@ class DesktopAgentObserver:
                 else:
                     errors.append(f"{mode}:{type(exc).__name__}:{exc}")
         joined = " | ".join(errors) if errors else "no capture backend available"
+        if any(_looks_sensitive_error(error) for error in errors):
+            return (
+                SimpleNamespace(
+                    data={"summary": "No pude capturar esa ventana porque parece sensible o protegida."},
+                    awareness_result=None,
+                ),
+                "degraded:sensitive_window",
+                errors,
+            )
         raise RuntimeError(f"desktop observation failed: {joined}")
 
     @staticmethod
@@ -230,3 +244,8 @@ class DesktopAgentObserver:
         if signal_preview:
             parts.append(f"senales={signal_preview}")
         return " | ".join(parts)
+
+
+def _looks_sensitive_error(text: str) -> bool:
+    folded = text.casefold()
+    return any(token in folded for token in ("sensitive", "sensible", "protected", "proteg", "blocked"))

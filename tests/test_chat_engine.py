@@ -727,7 +727,7 @@ def test_chat_engine_malware_rat_request_gets_useful_safe_refusal(tmp_path) -> N
         app.stop()
 
 
-def test_chat_engine_capability_query_uses_manifest_without_claiming_agent_mode(tmp_path) -> None:
+def test_chat_engine_capability_query_uses_manifest_with_guided_agent_mode(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
@@ -745,7 +745,8 @@ def test_chat_engine_capability_query_uses_manifest_without_claiming_agent_mode(
         assert "brave" in lowered
         assert "code agent" in lowered
         assert "agent mode real" in lowered
-        assert "todavia no esta habilitado" in lowered
+        assert "guided control" in lowered
+        assert "stop agent" in lowered
         assert "openai" in lowered and "bloqueado" in lowered
         assert response.raw_result.get("category") == "capabilities"
     finally:
@@ -771,7 +772,8 @@ def test_chat_engine_context_query_uses_visible_capabilities(tmp_path) -> None:
         assert "brave" in lowered
         assert "openai" in lowered and "bloqueado" in lowered
         assert "gemini" in lowered and "bloqueado" in lowered
-        assert "agent mode real todavia no esta habilitado" in lowered
+        assert "agent mode real esta disponible" in lowered
+        assert "confirmacion" in lowered
         assert response.raw_result.get("context") == "jarvis_context"
     finally:
         app.stop()

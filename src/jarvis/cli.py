@@ -16,10 +16,12 @@ from jarvis.automation.service import AutomationDefinition
 from jarvis.benchmark import format_benchmark, format_real_benchmark, format_streaming_benchmark, run_benchmark, run_real_benchmark, run_streaming_benchmark
 from jarvis.bootstrap import build_application
 from jarvis.code_agent_runtime import CodeAgentRuntimeService
+from jarvis.config import Settings
 from jarvis.cognition.models import OrchestrationRequest
 from jarvis.core.modes import ExecutionMode
 from jarvis.desktop_agent_runtime import DesktopAgentMissionRequest
 from jarvis.desktop_agent_runtime.models import DesktopAgentAutonomyMode, DesktopAgentSourceSurface
+from jarvis.image_runtime.prompting import build_image_request_from_text
 from jarvis.identity import jarvis_identity_prompt
 from jarvis.autonomy.base import MissionApprovalRequest, MissionControlActionRequest, MissionPlanRequest, MissionRequest
 from jarvis.indexing_runtime.models import IndexRunRequest, IndexSourceCreateRequest, IndexSourceKind, IndexingTrigger
@@ -78,6 +80,7 @@ code_change_app = typer.Typer(help="Controlled natural-language change generatio
 code_llm_app = typer.Typer(help="Safe optional LLM provider status and configuration.")
 web_app = typer.Typer(help="Safe web search status and Brave Search queries.")
 ollama_app = typer.Typer(help="Local Ollama diagnostics for Jarvis.")
+image_app = typer.Typer(help="Local image generation with JuggernautXL SDXL.")
 app.add_typer(semantic_app, name="semantic")
 app.add_typer(ui_app, name="ui")
 app.add_typer(voice_app, name="voice")
@@ -94,6 +97,7 @@ app.add_typer(desktop_agent_app, name="desktop-agent")
 app.add_typer(code_agent_app, name="code")
 app.add_typer(web_app, name="web")
 app.add_typer(ollama_app, name="ollama")
+app.add_typer(image_app, name="image")
 code_agent_app.add_typer(code_memory_app, name="memory")
 code_agent_app.add_typer(code_git_app, name="git")
 code_agent_app.add_typer(code_skills_app, name="skills")
@@ -126,10 +130,17 @@ def _parse_json(raw: str | None) -> dict[str, Any]:
 @app.command("doctor")
 def doctor() -> None:
     from jarvis.environment import detect_environment
+    from jarvis.image_runtime.service import ImageGenerationService
     from jarvis.persistent_config import load_persistent_config
     p_config = load_persistent_config()
     env = detect_environment(ollama_base_url=p_config.local_base_url, prefer_model=p_config.local_model)
     web_status = build_web_search_provider().status()
+    settings = Settings()
+    image_service = ImageGenerationService(settings=settings)
+    try:
+        image_status = image_service.status()
+    finally:
+        image_service.stop()
     typer.echo(json.dumps({
         "internet_available": env.internet_available,
         "ollama_available": env.ollama.available,
@@ -153,6 +164,17 @@ def doctor() -> None:
             "brave_key_configured": web_status.configured,
             "sends_private_context": web_status.sends_private_context,
             "message": web_status.message,
+        },
+        "image_runtime": {
+            "enabled": image_status["enabled"],
+            "backend": image_status["backend"],
+            "model": image_status["model"],
+            "model_path_exists": image_status["model_path_exists"],
+            "fooocus_required": image_status["fooocus_required"],
+            "internet_required": image_status["internet_required"],
+            "output_dir": image_status["output_dir"],
+            "model_status": image_status["model_status"],
+            "dependencies": image_status["dependencies"],
         },
         "policy": {
             "openai": "blocked",
@@ -352,6 +374,104 @@ def web_search(query: str, max_results: int = typer.Option(5, "--max-results"), 
             lines.append(f"{hit.rank}. {hit.title} — {hit.source}")
             lines.append(f"   {hit.url}")
     typer.echo("\n".join(lines))
+
+
+@image_app.command("status")
+def image_status(json_output: bool = typer.Option(False, "--json")) -> None:
+    jarvis = build_application()
+    jarvis.start()
+    try:
+        payload = jarvis.runtime_service.image_status()
+    finally:
+        jarvis.stop()
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+    deps = payload.get("dependencies") if isinstance(payload.get("dependencies"), dict) else {}
+    missing = [name for name in ("diffusers", "safetensors", "transformers") if deps.get(name) is False]
+    typer.echo(
+        "\n".join(
+            [
+                "Jarvis Image Runtime",
+                f"Enabled: {str(bool(payload.get('enabled'))).lower()}",
+                f"Backend: {payload.get('backend')}",
+                f"Model: {payload.get('model')}",
+                f"Model path exists: {str(bool(payload.get('model_path_exists'))).lower()}",
+                f"Fooocus required: {str(bool(payload.get('fooocus_required'))).lower()}",
+                f"Internet required: {str(bool(payload.get('internet_required'))).lower()}",
+                f"Model status: {payload.get('model_status')}",
+                f"CUDA available: {str(bool(deps.get('torch_cuda_available'))).lower()}",
+                f"Torch CUDA compiled: {str(bool(deps.get('torch_cuda_compiled'))).lower()}",
+                f"Missing dependencies: {', '.join(missing) if missing else 'none'}",
+                f"Output dir: {payload.get('output_dir')}",
+            ]
+        )
+    )
+
+
+@image_app.command("generate")
+def image_generate(
+    prompt: str = typer.Option(..., "--prompt"),
+    width: int | None = typer.Option(None, "--width"),
+    height: int | None = typer.Option(None, "--height"),
+    steps: int | None = typer.Option(None, "--steps"),
+    cfg: float | None = typer.Option(None, "--cfg"),
+    seed: int | None = typer.Option(None, "--seed"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    jarvis = build_application()
+    jarvis.start()
+    try:
+        built = build_image_request_from_text(prompt, defaults=jarvis.settings)
+        if not built.allowed or built.request is None:
+            payload = {"status": "blocked", "message": built.reason}
+        else:
+            request = built.request
+            updates = {}
+            if width is not None:
+                updates["width"] = width
+            if height is not None:
+                updates["height"] = height
+            if steps is not None:
+                updates["steps"] = steps
+            if cfg is not None:
+                updates["cfg"] = cfg
+            if seed is not None:
+                updates["seed"] = seed
+            if updates:
+                request = request.model_copy(update=updates)
+            job = jarvis.runtime_service.image_generate(request, wait=True)
+            payload = job.model_dump(mode="json") if hasattr(job, "model_dump") else dict(job)
+    finally:
+        jarvis.stop()
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+    typer.echo(payload.get("message") or payload.get("error") or f"Image job: {payload.get('status')}")
+    for path in payload.get("output_paths") or []:
+        typer.echo(str(path))
+
+
+@image_app.command("unload")
+def image_unload(json_output: bool = typer.Option(False, "--json")) -> None:
+    jarvis = build_application()
+    jarvis.start()
+    try:
+        payload = jarvis.runtime_service.image_unload()
+    finally:
+        jarvis.stop()
+    typer.echo(json.dumps(payload, indent=2, default=str) if json_output else str(payload.get("message") or payload))
+
+
+@image_app.command("cancel")
+def image_cancel(job_id: str | None = typer.Option(None, "--job-id"), json_output: bool = typer.Option(False, "--json")) -> None:
+    jarvis = build_application()
+    jarvis.start()
+    try:
+        payload = jarvis.runtime_service.image_cancel(job_id)
+    finally:
+        jarvis.stop()
+    typer.echo(json.dumps(payload, indent=2, default=str) if json_output else str(payload.get("message") or payload))
 
 
 @app.command("serve")
