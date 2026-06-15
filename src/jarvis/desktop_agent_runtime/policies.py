@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .agent_mode import AgentAction, AgentRisk, AgentSafetyDecision, AgentSafetyGate
+from .agent_mode import AgentAction, AgentPermissionMode, AgentRisk, AgentSafetyDecision, AgentSafetyGate
 from .models import DesktopAgentPolicyResult, DesktopAgentRiskLevel, DesktopAgentStep, DesktopPolicyDecision, DesktopStepActionType
 
 
@@ -11,7 +11,12 @@ class DesktopAgentPolicyEngine:
         self._allow_discovered = settings.ui_allow_discovered_applications
         self._safety_gate = AgentSafetyGate()
 
-    def assess_step(self, step: DesktopAgentStep) -> DesktopAgentPolicyResult:
+    def assess_step(
+        self,
+        step: DesktopAgentStep,
+        *,
+        permission_mode: AgentPermissionMode | str = AgentPermissionMode.NORMAL,
+    ) -> DesktopAgentPolicyResult:
         if step.action_type == DesktopStepActionType.HOTKEY:
             keys = "+".join(str(item).casefold() for item in step.payload.get("keys", ()))
             if keys in {item.casefold() for item in self._settings.ui_hotkey_blocklist}:
@@ -29,6 +34,7 @@ class DesktopAgentPolicyEngine:
                 risk=_agent_risk_from_desktop(step.risk_level),
             ),
             mode="guided_control",
+            permission_mode=permission_mode,
         )
         if gate_result.decision == AgentSafetyDecision.BLOCK:
             return DesktopAgentPolicyResult(

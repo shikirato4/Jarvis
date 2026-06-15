@@ -134,6 +134,35 @@ o su equivalente para el Code Agent:
 python -m jarvis code doctor
 ```
 
+## Local Image Runtime
+
+Jarvis can generate images locally with JuggernautXL SDXL through Diffusers. Fooocus is not used as the runtime; the Fooocus checkpoint can be copied into the Jarvis workspace and loaded directly by Diffusers.
+
+Expected local checkpoint path:
+
+```text
+models/image/checkpoints/juggernautXL_v8Rundiffusion.safetensors
+```
+
+Large model files are ignored by Git. Do not commit `.safetensors`, `.ckpt`, `.bin`, `.pt`, `.pth`, generated images, `.env`, API keys, or output folders.
+
+Useful commands:
+
+```powershell
+python -m jarvis image status
+python -m jarvis image generate --prompt "a futuristic blue Jarvis orb made of glowing particles"
+python -m jarvis image cancel
+python -m jarvis image unload
+```
+
+Optional image dependencies:
+
+```powershell
+python -m pip install -e .[image]
+```
+
+The first generation can take a long time because the SDXL checkpoint is loaded lazily. The model remains cached when possible and can be unloaded with `python -m jarvis image unload`.
+
 ## Example Commands
 
 ```bash

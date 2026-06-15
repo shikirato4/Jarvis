@@ -42,6 +42,8 @@ class DesktopPanelComposer:
             _as_dict(item.model_dump(mode="json")) for item in _as_list(runtime.desktop_agent_list())[:5]
         ]
         latest_agent = _as_dict(agent_status.get("latest_mission"))
+        task_queue = _as_dict(agent_status.get("task_queue"))
+        human_mission_log = _as_list(agent_status.get("human_mission_log"))
 
         missions = [
             DesktopMissionView(
@@ -64,6 +66,7 @@ class DesktopPanelComposer:
                     continue
                 world_state = _as_dict(mission.get("world_state"))
                 current_step = _as_dict(world_state.get("current_step")).get("title")
+                final_result = _as_dict(mission.get("final_result"))
                 pending_step_id = world_state.get("current_step_id") if str(mission.get("status") or "") == "waiting_confirmation" else None
                 missions.insert(
                     0,
@@ -83,6 +86,9 @@ class DesktopPanelComposer:
                             "summary": mission.get("summary"),
                             "last_verification_note": mission.get("last_verification_note"),
                             "last_recovery_note": mission.get("last_recovery_note"),
+                            "rollback": _as_dict(final_result.get("rollback")),
+                            "skill": final_result.get("skill"),
+                            "human_mission_log": _as_list(final_result.get("human_mission_log")) or human_mission_log,
                             "metrics": mission.get("metrics"),
                             **mission,
                         },
@@ -91,6 +97,7 @@ class DesktopPanelComposer:
                 known_mission_ids.add(mission_id)
 
         latest_world_state = _as_dict(latest_agent.get("world_state"))
+        latest_final_result = _as_dict(latest_agent.get("final_result"))
         latest_current_step = _as_dict(latest_world_state.get("current_step")).get("title")
         snapshot = DesktopPanelSnapshot(
             mode=_as_dict(dashboard.get("mode")),
@@ -131,8 +138,13 @@ class DesktopPanelComposer:
                             "summary": latest_agent.get("summary"),
                             "current_step": latest_current_step or "Sin paso activo",
                             "pending_approval_step_id": latest_world_state.get("current_step_id") if str(latest_agent.get("status") or "") == "waiting_confirmation" else None,
+                            "permission_mode": agent_status.get("permission_mode"),
                             "risk_level": latest_world_state.get("risk_level"),
                             "policy_decision": latest_world_state.get("policy_decision"),
+                            "skill": latest_final_result.get("skill"),
+                            "rollback": _as_dict(latest_final_result.get("rollback")),
+                            "human_mission_log": _as_list(latest_final_result.get("human_mission_log")) or human_mission_log,
+                            "task_queue": task_queue,
                             "current_subtask": latest_agent.get("current_subtask_label"),
                             "target_path": latest_world_state.get("target_path"),
                             "active_path": latest_world_state.get("active_path"),

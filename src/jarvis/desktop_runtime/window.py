@@ -422,6 +422,10 @@ if QApplication is not None:
             agent_layout.addWidget(self._section_header("Agent Mode", "Observe -> Plan -> Confirm -> Execute -> Verify"))
             self._agent_state = MetricCard("State", "Standby")
             agent_layout.addWidget(self._agent_state)
+            self._agent_trust = QLabel("Mode: normal | Risk: low | Skill: standby | Rollback: n/a")
+            self._agent_trust.setObjectName("SectionMeta")
+            self._agent_trust.setWordWrap(True)
+            agent_layout.addWidget(self._agent_trust)
             self._agent_timeline = QLabel("Observe -> Plan -> Confirm -> Execute -> Verify")
             self._agent_timeline.setObjectName("SectionMeta")
             self._agent_timeline.setWordWrap(True)
@@ -443,9 +447,20 @@ if QApplication is not None:
             self._agent_note.setObjectName("SectionMeta")
             self._agent_note.setWordWrap(True)
             agent_layout.addWidget(self._agent_note)
+            self._agent_queue = QLabel("Queue: sin tareas pendientes")
+            self._agent_queue.setObjectName("SectionMeta")
+            self._agent_queue.setWordWrap(True)
+            agent_layout.addWidget(self._agent_queue)
+            self._agent_mission_log = QLabel("Mission Log: sin mision activa")
+            self._agent_mission_log.setObjectName("SectionMeta")
+            self._agent_mission_log.setWordWrap(True)
+            agent_layout.addWidget(self._agent_mission_log)
             self._start_guided_agent_button = QPushButton("Start Guided Agent")
             self._start_guided_agent_button.setObjectName("PrimaryActionButton")
             self._start_guided_agent_button.clicked.connect(self._start_guided_agent)
+            self._dry_run_agent_button = QPushButton("Dry Run")
+            self._dry_run_agent_button.setObjectName("PrimaryActionButton")
+            self._dry_run_agent_button.clicked.connect(self._dry_run_agent_action)
             self._confirm_action_button = QPushButton("Confirm Action")
             self._confirm_action_button.setObjectName("PrimaryActionButton")
             self._confirm_action_button.setEnabled(False)
@@ -455,6 +470,7 @@ if QApplication is not None:
             self._stop_agent_button.setEnabled(False)
             self._stop_agent_button.clicked.connect(self._stop_agent)
             agent_layout.addWidget(self._start_guided_agent_button)
+            agent_layout.addWidget(self._dry_run_agent_button)
             agent_layout.addWidget(self._confirm_action_button)
             agent_layout.addWidget(self._stop_agent_button)
             agent_layout.addStretch(1)
@@ -469,6 +485,53 @@ if QApplication is not None:
             self._context_output.setObjectName("DevOutput")
             self._context_output.setPlaceholderText("Contexto seguro de Jarvis.")
             context_layout.addWidget(self._context_output, 1)
+
+            image_tab = QWidget()
+            image_layout = QVBoxLayout(image_tab)
+            image_layout.setContentsMargins(6, 10, 6, 6)
+            image_layout.setSpacing(8)
+            image_layout.addWidget(self._section_header("Image Studio", "JuggernautXL SDXL local · Diffusers · sin Fooocus"))
+            self._image_status = QLabel("Image Runtime standby")
+            self._image_status.setObjectName("SectionMeta")
+            self._image_status.setWordWrap(True)
+            image_layout.addWidget(self._image_status)
+            self._image_prompt = QPlainTextEdit()
+            self._image_prompt.setObjectName("DevOutput")
+            self._image_prompt.setPlaceholderText("Describe la imagen local a generar...")
+            self._image_prompt.setMaximumHeight(130)
+            image_layout.addWidget(self._image_prompt)
+            image_grid = QGridLayout()
+            image_grid.setHorizontalSpacing(8)
+            image_grid.setVerticalSpacing(8)
+            self._image_generate_button = QPushButton("Generate")
+            self._image_generate_button.setObjectName("PrimaryActionButton")
+            self._image_generate_button.clicked.connect(self._generate_image)
+            self._image_cancel_button = QPushButton("Cancel Generation")
+            self._image_cancel_button.setObjectName("DangerActionButton")
+            self._image_cancel_button.clicked.connect(self._cancel_image_generation)
+            self._image_open_folder_button = QPushButton("Open Output Folder")
+            self._image_open_folder_button.clicked.connect(self._open_image_output_folder)
+            self._image_unload_button = QPushButton("Unload Image Model")
+            self._image_unload_button.clicked.connect(self._unload_image_model)
+            self._image_variations_button = QPushButton("Variations")
+            self._image_variations_button.setEnabled(False)
+            self._image_variations_button.setToolTip("Coming soon: variaciones desde el ultimo prompt.")
+            for index, button in enumerate(
+                (
+                    self._image_generate_button,
+                    self._image_cancel_button,
+                    self._image_open_folder_button,
+                    self._image_unload_button,
+                    self._image_variations_button,
+                )
+            ):
+                image_grid.addWidget(button, index // 2, index % 2)
+            image_layout.addLayout(image_grid)
+            self._image_output = QTextEdit()
+            self._image_output.setReadOnly(True)
+            self._image_output.setObjectName("DevOutput")
+            self._image_output.setPlaceholderText("Estado, cola y rutas de salida.")
+            image_layout.addWidget(self._image_output, 1)
 
             code_tab = QWidget()
             code_layout = QVBoxLayout(code_tab)
@@ -541,6 +604,7 @@ if QApplication is not None:
             tabs.addTab(missions_tab, "Missions")
             tabs.addTab(timeline_tab, "Timeline")
             tabs.addTab(ops_tab, "Ops")
+            tabs.addTab(image_tab, "Image Studio")
             tabs.addTab(context_tab, "Context")
             tabs.addTab(code_tab, "Code Agent")
             layout.addWidget(tabs, 1)
@@ -677,12 +741,62 @@ if QApplication is not None:
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
 
+        def _dry_run_agent_action(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            text = self._input.text().strip()
+            self._sending = True
+            self._set_processing_state(True, "AGENT DRY RUN")
+            self._pending_future = self._desktop.dry_run_agent_action_async(text)
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
         def _stop_agent(self) -> None:
             if self._sending or self._has_pending_work():
                 return
             self._sending = True
             self._set_processing_state(True, "AGENT STOP")
             self._pending_future = self._desktop.stop_latest_agent_async()
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _generate_image(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            prompt = self._image_prompt.toPlainText().strip()
+            if not prompt:
+                self._image_output.setPlainText("Describe una imagen antes de generar.")
+                return
+            self._sending = True
+            self._set_processing_state(True, "IMAGE GENERATION")
+            self._pending_future = self._desktop.generate_image_async(prompt)
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _cancel_image_generation(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            self._sending = True
+            self._set_processing_state(True, "IMAGE CANCEL")
+            self._pending_future = self._desktop.cancel_image_generation_async()
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _open_image_output_folder(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            self._sending = True
+            self._set_processing_state(True, "OPEN IMAGE OUTPUT")
+            self._pending_future = self._desktop.open_image_output_folder_async()
+            if not self._refresh_timer.isActive():
+                self._refresh_timer.start()
+
+        def _unload_image_model(self) -> None:
+            if self._sending or self._has_pending_work():
+                return
+            self._sending = True
+            self._set_processing_state(True, "IMAGE UNLOAD")
+            self._pending_future = self._desktop.unload_image_model_async()
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
 
@@ -876,6 +990,7 @@ if QApplication is not None:
                 self._render_timeline(state)
                 self._render_ops(state)
                 self._render_dev_runtime(state)
+                self._render_image_runtime(state)
                 self._render_agent_mode(state)
                 self._render_header(state)
                 self._render_metrics(state)
@@ -1049,11 +1164,25 @@ if QApplication is not None:
             progress = latest.get("progress") if isinstance(latest.get("progress"), dict) else {}
             completed = progress.get("completed_steps", 0)
             total = progress.get("total_steps", 0)
+            rollback = latest.get("rollback") if isinstance(latest.get("rollback"), dict) else {}
+            task_queue = latest.get("task_queue") if isinstance(latest.get("task_queue"), dict) else {}
+            human_log = latest.get("human_mission_log") if isinstance(latest.get("human_mission_log"), list) else []
+            rollback_label = rollback.get("rollback_description") or "n/a"
             self._agent_state.set_value(status)
+            self._agent_trust.setText(
+                "Mode: "
+                f"{latest.get('permission_mode') or 'normal'} | "
+                f"Risk: {latest.get('risk_level') or 'low'} | "
+                f"Skill: {latest.get('skill') or 'standby'} | "
+                f"Rollback: {str(rollback_label)[:120]}"
+            )
             self._agent_timeline.setText(
                 f"Estado: {status} | Paso: {current_step} | Progreso: {completed}/{total}"
             )
             self._agent_note.setText(summary)
+            pending_count = task_queue.get("pending_count", 0)
+            self._agent_queue.setText(f"Queue: {pending_count} tareas pendientes")
+            self._agent_mission_log.setText("Mission Log: " + (" | ".join(str(item) for item in human_log[-5:]) if human_log else "sin mision activa"))
             labels = [
                 ("Observe", "Captura segura o contexto de ventana"),
                 ("Plan", str(latest.get("goal") or "Sin objetivo activo")[:120]),
@@ -1065,6 +1194,7 @@ if QApplication is not None:
                 step_label.setText(f"{label.upper()}  |  {detail}")
             active_statuses = {"pending", "observing", "planning", "waiting_confirmation", "executing", "verifying", "recovering", "paused"}
             self._start_guided_agent_button.setEnabled(not self._is_processing and not self._has_pending_work())
+            self._dry_run_agent_button.setEnabled(not self._is_processing and not self._has_pending_work())
             self._confirm_action_button.setEnabled(status == "waiting_confirmation" and not self._is_processing and not self._has_pending_work())
             self._stop_agent_button.setEnabled(status in active_statuses and not self._is_processing and not self._has_pending_work())
 
@@ -1102,9 +1232,53 @@ if QApplication is not None:
             if hasattr(self, "_context_output"):
                 self._context_output.setPlainText(self._format_context_state(dev))
 
+        def _render_image_runtime(self, state) -> None:
+            if not hasattr(self, "_image_output"):
+                return
+            dev = getattr(state, "dev_runtime", {}) or {}
+            image = dev.get("image_runtime") if isinstance(dev.get("image_runtime"), dict) else {}
+            deps = image.get("dependencies") if isinstance(image.get("dependencies"), dict) else {}
+            missing = [name for name in ("diffusers", "safetensors", "transformers") if deps.get(name) is False]
+            model_state = str(image.get("model_status") or image.get("status") or "unknown")
+            latest = image.get("latest_job") if isinstance(image.get("latest_job"), dict) else {}
+            paths = latest.get("output_paths") if isinstance(latest.get("output_paths"), list) else []
+            self._image_status.setText(
+                f"Model: JuggernautXL SDXL | Backend: {image.get('backend', 'diffusers')} | "
+                f"Status: {model_state} | Queue: {image.get('queue_length', 0)} | Fooocus: not required"
+            )
+            lines = [
+                "Local Image Generation",
+                f"Enabled: {str(bool(image.get('enabled'))).lower()}",
+                f"Model path exists: {str(bool(image.get('model_path_exists'))).lower()}",
+                f"Output dir: {image.get('output_dir', '')}",
+                f"CUDA available: {str(bool(deps.get('torch_cuda_available'))).lower()}",
+                f"Torch CUDA compiled: {str(bool(deps.get('torch_cuda_compiled'))).lower()}",
+                f"Dependencies missing: {', '.join(missing) if missing else 'none'}",
+            ]
+            if latest:
+                lines.extend(
+                    [
+                        "",
+                        f"Latest job: {latest.get('job_id')}",
+                        f"Status: {latest.get('status')}",
+                        f"Progress: {latest.get('progress')}",
+                        f"Message: {latest.get('message') or latest.get('error') or ''}",
+                    ]
+                )
+                if paths:
+                    lines.append("Outputs:")
+                    lines.extend(f"- {path}" for path in paths)
+            self._image_output.setPlainText("\n".join(lines))
+            busy = model_state in {"loading", "generating"} or bool(image.get("current_job"))
+            self._image_cancel_button.setEnabled(busy and not self._is_processing and not self._has_pending_work())
+            self._image_generate_button.setEnabled(not self._is_processing and not self._has_pending_work())
+            self._image_unload_button.setEnabled(not self._is_processing and not self._has_pending_work())
+            self._image_open_folder_button.setEnabled(not self._is_processing and not self._has_pending_work())
+
         def _format_context_state(self, dev: dict) -> str:
             web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
             policy = dev.get("policy") if isinstance(dev.get("policy"), dict) else {}
+            image = dev.get("image_runtime") if isinstance(dev.get("image_runtime"), dict) else {}
             return "\n".join(
                 [
                     "Contexto actual de Jarvis",
@@ -1135,6 +1309,13 @@ if QApplication is not None:
                     "Code Agent:",
                     "Patches revisables; nada se aplica automaticamente.",
                     "GitHub learning no clona repos sin confirmacion.",
+                    "",
+                    "Image Runtime:",
+                    f"Backend: {image.get('backend', 'diffusers')}",
+                    "Model: JuggernautXL SDXL",
+                    f"Model loaded/status: {image.get('model_status', 'unknown')}",
+                    f"Fooocus required: {str(bool(image.get('fooocus_required', False))).lower()}",
+                    f"Output dir: {image.get('output_dir', '')}",
                 ]
             )
 

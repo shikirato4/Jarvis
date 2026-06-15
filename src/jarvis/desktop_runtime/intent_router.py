@@ -6,6 +6,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from jarvis.core.errors import JarvisError
+from jarvis.image_runtime.prompting import build_image_request_from_text, is_image_generation_prompt
 from jarvis.routing.models import TaskRequest
 from jarvis.services import (
     summarize_ops_status,
@@ -74,9 +75,14 @@ class DesktopIntentRouter:
             return DesktopIntentDecision(category="ui_window", prompt=normalized)
         if self._is_screen_read_request(folded):
             return DesktopIntentDecision(category="screen_read", prompt=normalized)
+        if is_image_generation_prompt(normalized):
+            return DesktopIntentDecision(category="image_generate", prompt=normalized)
         mission_control = self._extract_mission_control(normalized, folded)
         if mission_control is not None:
             return mission_control
+        dry_run_goal = self._extract_dry_run_goal(normalized, folded)
+        if dry_run_goal is not None:
+            return DesktopIntentDecision(category="desktop_agent_dry_run", prompt=dry_run_goal)
         if self._is_desktop_agent_goal(folded):
             return DesktopIntentDecision(category="desktop_agent", prompt=normalized)
         open_and_search = self._extract_open_and_search(normalized, folded)
@@ -258,9 +264,58 @@ class DesktopIntentRouter:
         if decision.category == "desktop_agent_status":
             result = runtime.desktop_agent_get(decision.mission_id or self._latest_desktop_agent_mission_id()).model_dump(mode="json")
             return result, self._summarize_desktop_agent_status(result), "desktop_agent_runtime.status"
+        if decision.category == "desktop_agent_runtime_status":
+            result = runtime.desktop_agent_status()
+            return result, self._summarize_desktop_agent_runtime_status(result), "desktop_agent_runtime.status"
         if decision.category == "desktop_agent_list":
             missions = [mission.model_dump(mode="json") for mission in runtime.desktop_agent_list()]
             return {"missions": missions}, self._summarize_desktop_agent_list(missions), "desktop_agent_runtime.list"
+        if decision.category == "desktop_agent_dry_run":
+            result = runtime.desktop_agent_dry_run(
+                {
+                    "goal": decision.prompt,
+                    "metadata": {"source": "desktop_chat", "dry_run": True},
+                    "source_surface": "desktop_chat",
+                }
+            )
+            return result, self._summarize_desktop_agent_dry_run(result), "desktop_agent_runtime.dry_run"
+        if decision.category == "desktop_agent_queue_add":
+            result = runtime.desktop_agent_queue_add(
+                {
+                    "title": decision.prompt,
+                    "description": decision.prompt,
+                    "type": decision.action or "agent",
+                    "source": "desktop_chat",
+                    "requires_confirmation": True,
+                }
+            )
+            return result, str(result.get("message") or "Tarea agregada a la cola."), "desktop_agent_runtime.queue_add"
+        if decision.category == "desktop_agent_queue_list":
+            result = runtime.desktop_agent_queue_list()
+            return result, self._summarize_task_queue(result), "desktop_agent_runtime.queue_list"
+        if decision.category == "desktop_agent_queue_cancel":
+            result = runtime.desktop_agent_queue_cancel(decision.target)
+            return result, str(result.get("message") or "Tarea cancelada."), "desktop_agent_runtime.queue_cancel"
+        if decision.category == "desktop_agent_queue_continue":
+            result = runtime.desktop_agent_queue_continue()
+            return result, self._summarize_queue_continue(result), "desktop_agent_runtime.queue_continue"
+        if decision.category == "desktop_agent_permission_mode":
+            result = runtime.desktop_agent_set_permission_mode(decision.target or "normal")
+            return result, f"Modo de permisos de Agent Mode: {result.get('permission_mode')}.", "desktop_agent_runtime.permission_mode"
+        if decision.category == "image_generate":
+            built = build_image_request_from_text(decision.prompt, defaults=getattr(self._bridge, "settings", None) or runtime._settings)  # noqa: SLF001
+            if not built.allowed or built.request is None:
+                result = {"status": "blocked", "message": built.reason}
+                return result, built.reason, "image_runtime.blocked"
+            job = runtime.image_generate(built.request)
+            result = job.model_dump(mode="json") if hasattr(job, "model_dump") else dict(job)
+            return result, self._summarize_image_job(result), "image_runtime.generate"
+        if decision.category == "image_cancel":
+            result = runtime.image_cancel(decision.target)
+            return result, str(result.get("message") or "Cancelacion solicitada."), "image_runtime.cancel"
+        if decision.category == "image_status":
+            result = runtime.image_status()
+            return result, self._summarize_image_status(result), "image_runtime.status"
         if decision.category == "ui_click":
             self._ensure_operator_mode()
             result = runtime.ui_click_target(
@@ -581,6 +636,13 @@ class DesktopIntentRouter:
         )
 
     @staticmethod
+    def _summarize_desktop_agent_runtime_status(result: dict) -> str:
+        enabled = "activo" if result.get("enabled") else "inactivo"
+        mode = result.get("permission_mode") or "normal"
+        active = result.get("active_missions", 0)
+        return f"Agent Mode esta {enabled}. Modo de permisos: {mode}. Misiones activas: {active}."
+
+    @staticmethod
     def _summarize_desktop_agent_list(missions: list[dict]) -> str:
         if not missions:
             return "No hay misiones persistentes del desktop agent."
@@ -589,6 +651,49 @@ class DesktopIntentRouter:
             f"Hay {len(missions)} misiones persistentes. "
             f"La mas reciente esta en estado {latest.get('status')} y objetivo '{latest.get('goal')}'."
         )
+
+    @staticmethod
+    def _summarize_desktop_agent_dry_run(result: dict) -> str:
+        summary = str(result.get("summary") or "").strip()
+        if summary:
+            return summary
+        steps = result.get("steps") if isinstance(result.get("steps"), list) else []
+        return f"Dry run listo: {len(steps)} pasos planeados, sin ejecutar acciones."
+
+    @staticmethod
+    def _summarize_task_queue(result: dict) -> str:
+        items = result.get("items") if isinstance(result.get("items"), list) else []
+        if not items:
+            return "No hay tareas pendientes en la cola de Agent Mode."
+        preview = " | ".join(str(item.get("title") or item.get("id")) for item in items[:5] if isinstance(item, dict))
+        return f"Tareas pendientes: {len(items)}. {preview}"
+
+    @staticmethod
+    def _summarize_queue_continue(result: dict) -> str:
+        item = result.get("item") if isinstance(result.get("item"), dict) else {}
+        if not item:
+            return str(result.get("message") or "No hay tareas pendientes.")
+        return f"Siguiente tarea pendiente: {item.get('title')}. {result.get('message') or ''}".strip()
+
+    @staticmethod
+    def _summarize_image_job(result: dict) -> str:
+        status = result.get("status")
+        if status in {"failed", "cancelled"}:
+            return str(result.get("message") or result.get("error") or "La generacion de imagen no se completo.")
+        return (
+            "Estoy generando una imagen local con JuggernautXL. "
+            "La primera carga puede tardar varios minutos; no uso Fooocus ni internet para generar."
+        )
+
+    @staticmethod
+    def _summarize_image_status(result: dict) -> str:
+        deps = result.get("dependencies") if isinstance(result.get("dependencies"), dict) else {}
+        if not result.get("enabled"):
+            return "La generacion local de imagenes esta deshabilitada."
+        model = "encontrado" if result.get("model_path_exists") else "no encontrado"
+        missing = [name for name in ("diffusers", "safetensors", "transformers") if deps.get(name) is False]
+        suffix = f" Faltan dependencias: {', '.join(missing)}." if missing else ""
+        return f"Image Runtime: {result.get('model_status')}. Modelo {model}. Backend: {result.get('backend')}. Fooocus requerido: no.{suffix}"
 
     def _active_window_title(self) -> str | None:
         try:
@@ -730,6 +835,23 @@ class DesktopIntentRouter:
 
     def _extract_mission_control(self, prompt: str, folded: str) -> DesktopIntentDecision | None:
         mission_id = self._extract_mission_id(prompt)
+        permission_mode = self._extract_permission_mode(folded)
+        if permission_mode:
+            return DesktopIntentDecision(category="desktop_agent_permission_mode", prompt=prompt, target=permission_mode)
+        if folded in {"activa modo agente", "activar modo agente", "agent mode", "modo agente"}:
+            return DesktopIntentDecision(category="desktop_agent_runtime_status", prompt=prompt, mission_id=mission_id)
+        if self._is_task_queue_list_request(folded):
+            return DesktopIntentDecision(category="desktop_agent_queue_list", prompt=prompt)
+        if self._is_task_queue_continue_request(folded):
+            return DesktopIntentDecision(category="desktop_agent_queue_continue", prompt=prompt)
+        if self._is_task_queue_cancel_request(folded):
+            return DesktopIntentDecision(category="desktop_agent_queue_cancel", prompt=prompt)
+        if self._is_task_queue_add_request(folded):
+            return DesktopIntentDecision(category="desktop_agent_queue_add", prompt=prompt, action="learning")
+        if any(phrase in folded for phrase in ("cancela la generacion", "cancel image generation", "cancela imagen")):
+            return DesktopIntentDecision(category="image_cancel", prompt=prompt, mission_id=mission_id)
+        if any(phrase in folded for phrase in ("estado imagen", "estado de imagen", "modelo de imagen", "puedes generar imagenes", "usas fooocus")):
+            return DesktopIntentDecision(category="image_status", prompt=prompt, mission_id=mission_id)
         if folded in {"detente", "para", "stop", "no hagas nada"} or any(
             phrase in folded for phrase in ("cancela el agente", "aborta el agente", "stop agent")
         ):
@@ -749,6 +871,52 @@ class DesktopIntentRouter:
         if ("aborta" in folded or "cancela" in folded) and "mision" in folded:
             return DesktopIntentDecision(category="desktop_agent_abort", prompt=prompt, mission_id=mission_id)
         return None
+
+    @staticmethod
+    def _extract_dry_run_goal(prompt: str, folded: str) -> str | None:
+        prefixes = (
+            "simula ",
+            "dry run ",
+            "que harias ",
+            "que harías ",
+            "ensename el plan sin hacerlo ",
+            "enseñame el plan sin hacerlo ",
+            "ensename el plan ",
+            "enseñame el plan ",
+        )
+        for prefix in prefixes:
+            if folded.startswith(prefix):
+                return prompt[len(prefix) :].strip() or prompt
+        if "sin hacerlo" in folded or "sin ejecutarlo" in folded:
+            return prompt
+        return None
+
+    @staticmethod
+    def _extract_permission_mode(folded: str) -> str | None:
+        if "modo agente" not in folded and "agent mode" not in folded and "permission" not in folded:
+            return None
+        for mode in ("lockdown", "safe", "normal", "pro"):
+            if mode in folded:
+                return mode
+        if "seguro" in folded:
+            return "safe"
+        return None
+
+    @staticmethod
+    def _is_task_queue_list_request(folded: str) -> bool:
+        return any(phrase in folded for phrase in ("que tienes pendiente", "qué tienes pendiente", "lista tareas pendientes", "cola de tareas"))
+
+    @staticmethod
+    def _is_task_queue_continue_request(folded: str) -> bool:
+        return any(phrase in folded for phrase in ("continua la tarea pendiente", "continúa la tarea pendiente", "sigue la tarea pendiente"))
+
+    @staticmethod
+    def _is_task_queue_cancel_request(folded: str) -> bool:
+        return any(phrase in folded for phrase in ("cancela esa tarea", "cancela tarea pendiente", "cancel queue"))
+
+    @staticmethod
+    def _is_task_queue_add_request(folded: str) -> bool:
+        return any(phrase in folded for phrase in ("aprende esto despues", "aprende esto después", "ponlo en cola", "agrega a la cola"))
 
     @classmethod
     def _extract_literal_voice_text(cls, prompt: str, folded: str) -> str | None:

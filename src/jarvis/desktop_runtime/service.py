@@ -10,7 +10,7 @@ from uuid import uuid4
 from jarvis.code_agent_runtime import CodeAgentRuntimeService
 from jarvis.environment import detect_environment
 from .actions import DesktopQuickActionExecutor, build_quick_actions
-from .base import DesktopChatMessage, DesktopPanelSnapshot, DesktopShellState
+from .base import DesktopChatMessage, DesktopPanelSnapshot, DesktopShellState, DesktopVoiceState
 from .bridge import DesktopRuntimeBridge
 from .chat import DesktopChatEngine
 from .panels import DesktopPanelComposer
@@ -27,7 +27,8 @@ from jarvis.web_search import build_web_search_provider, should_use_web_search
 
 
 class DesktopRuntimeService:
-    _PANEL_CACHE_TTL_SECONDS = 1.0
+    _PANEL_CACHE_TTL_SECONDS = 60.0
+    _DEV_RUNTIME_CACHE_TTL_SECONDS = 1.0
     _VOICE_CACHE_TTL_SECONDS = 0.25
 
     def __init__(self, jarvis_app) -> None:
@@ -72,6 +73,8 @@ class DesktopRuntimeService:
         }
         self._panel_snapshot_cache: DesktopPanelSnapshot | None = None
         self._panel_snapshot_cached_at = 0.0
+        self._dev_runtime_cache: dict[str, Any] | None = None
+        self._dev_runtime_cached_at = 0.0
         self._voice_cache = None
         self._voice_cached_at = 0.0
         self._code_agent: CodeAgentRuntimeService | None = None
@@ -117,6 +120,8 @@ class DesktopRuntimeService:
             state = self._loading_shell_state()
         else:
             snapshot = self._jarvis.runtime_service.snapshot(include_history=True)
+            conversation = self._conversation_snapshot()
+            dev_runtime = self._dev_runtime_state()
             state = DesktopShellState(
                 app_name=snapshot.app_name,
                 environment=snapshot.environment,
@@ -125,11 +130,11 @@ class DesktopRuntimeService:
                 performance=dict(self._performance),
                 quick_actions=list(self._quick_actions),
                 panel_snapshot=self._panel_snapshot(force=force),
-                conversation=self._conversation_snapshot(),
+                conversation=conversation,
                 voice=self._voice_status(force=force),
                 llm_mode=getattr(self, "_env_status", None).recommended_mode if getattr(self, "_env_status", None) else "disabled",
                 llm_provider=getattr(self, "_env_status", None).recommended_local_provider or "none" if getattr(self, "_env_status", None) else "none",
-                dev_runtime=self._dev_runtime_state(),
+                dev_runtime=dev_runtime,
             )
         elapsed_ms = (perf_counter() - started_at) * 1000
         with self._state_lock:
@@ -487,6 +492,54 @@ class DesktopRuntimeService:
     def confirm_latest_agent_action_async(self) -> Future:
         return self._executor.submit(self.confirm_latest_agent_action)
 
+    def dry_run_agent_action(self, text: str | None = None) -> dict[str, Any]:
+        self.start_backend()
+        self._set_busy_state(True, "AGENT DRY RUN")
+        started_at = perf_counter()
+        goal = (text or "").strip()
+        if not goal:
+            with self._state_lock:
+                for message in reversed(self._conversation):
+                    if message.role == "user" and str(message.content or "").strip():
+                        goal = str(message.content).strip()
+                        break
+        try:
+            if not goal:
+                raise RuntimeError("escribe un objetivo antes de simular")
+            result = self._jarvis.runtime_service.desktop_agent_dry_run(
+                {
+                    "goal": goal,
+                    "metadata": {"source": "desktop_ui", "dry_run": True},
+                    "source_surface": "desktop_chat",
+                }
+            )
+            summary = str(result.get("summary") or "Dry run completado sin ejecutar acciones.")
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning(
+                "desktop_agent_dry_run_failed",
+                extra={"exception_type": type(exc).__name__, "exception_message": str(exc)},
+            )
+            result = {"status": "failed", "message": self._sanitize_dev_value(str(exc)), "error_type": type(exc).__name__}
+            summary = f"No pude simular la accion del agente: {self._sanitize_dev_value(str(exc))}"
+        elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+        result["elapsed_ms"] = elapsed_ms
+        with self._state_lock:
+            self._conversation.append(
+                DesktopChatMessage(
+                    message_id=str(uuid4()),
+                    role="assistant",
+                    content=summary,
+                    metadata={"agent_action": "dry_run", "result": self._sanitize_dev_value(result)},
+                )
+            )
+            self._performance["last_quick_action_ms"] = elapsed_ms
+        self._invalidate_caches()
+        self._set_busy_state(False, "IDLE")
+        return result
+
+    def dry_run_agent_action_async(self, text: str | None = None) -> Future:
+        return self._executor.submit(self.dry_run_agent_action, text)
+
     def stop_latest_agent(self) -> dict[str, Any]:
         self.start_backend()
         self._set_busy_state(True, "AGENT STOP")
@@ -521,6 +574,91 @@ class DesktopRuntimeService:
 
     def stop_latest_agent_async(self) -> Future:
         return self._executor.submit(self.stop_latest_agent)
+
+    def generate_image(self, prompt: str) -> dict[str, Any]:
+        self.start_backend()
+        self._set_busy_state(True, "IMAGE GENERATION")
+        started_at = perf_counter()
+        try:
+            from jarvis.image_runtime.prompting import build_image_request_from_text
+
+            built = build_image_request_from_text(prompt, defaults=self._jarvis.settings)
+            if not built.allowed or built.request is None:
+                raise RuntimeError(built.reason)
+            job = self._jarvis.runtime_service.image_generate(built.request)
+            result = job.model_dump(mode="json")
+            summary = (
+                "Estoy generando una imagen local con JuggernautXL. "
+                "La primera carga puede tardar varios minutos; no uso Fooocus ni internet para generar."
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning("desktop_image_generate_failed", extra={"exception_type": type(exc).__name__, "exception_message": str(exc)})
+            result = {"status": "failed", "message": self._sanitize_dev_value(str(exc)), "error_type": type(exc).__name__}
+            summary = f"No pude iniciar la generacion de imagen: {self._sanitize_dev_value(str(exc))}"
+        elapsed_ms = round((perf_counter() - started_at) * 1000, 2)
+        result["elapsed_ms"] = elapsed_ms
+        with self._state_lock:
+            self._conversation.append(
+                DesktopChatMessage(
+                    message_id=str(uuid4()),
+                    role="assistant",
+                    content=summary,
+                    metadata={"image_action": "generate", "result": self._sanitize_dev_value(result)},
+                )
+            )
+            self._performance["last_quick_action_ms"] = elapsed_ms
+        self._invalidate_caches()
+        self._set_busy_state(False, "IDLE")
+        return result
+
+    def generate_image_async(self, prompt: str) -> Future:
+        return self._executor.submit(self.generate_image, prompt)
+
+    def cancel_image_generation(self) -> dict[str, Any]:
+        self.start_backend()
+        result = self._jarvis.runtime_service.image_cancel()
+        with self._state_lock:
+            self._conversation.append(
+                DesktopChatMessage(
+                    message_id=str(uuid4()),
+                    role="assistant",
+                    content=str(result.get("message") or "Cancelacion solicitada."),
+                    metadata={"image_action": "cancel", "result": self._sanitize_dev_value(result)},
+                )
+            )
+        self._invalidate_caches()
+        return result
+
+    def cancel_image_generation_async(self) -> Future:
+        return self._executor.submit(self.cancel_image_generation)
+
+    def unload_image_model(self) -> dict[str, Any]:
+        self.start_backend()
+        result = self._jarvis.runtime_service.image_unload()
+        with self._state_lock:
+            self._conversation.append(
+                DesktopChatMessage(
+                    message_id=str(uuid4()),
+                    role="assistant",
+                    content=str(result.get("message") or "Modelo de imagen descargado de memoria."),
+                    metadata={"image_action": "unload", "result": self._sanitize_dev_value(result)},
+                )
+            )
+        self._invalidate_caches()
+        return result
+
+    def unload_image_model_async(self) -> Future:
+        return self._executor.submit(self.unload_image_model)
+
+    def open_image_output_folder_async(self) -> Future:
+        def _open() -> dict[str, Any]:
+            self.start_backend()
+            status = self._jarvis.runtime_service.image_status()
+            folder = str(status.get("output_dir") or self._jarvis.settings.resolved_image_output_dir)
+            receipt = self._jarvis.runtime_service.system_open({"query": folder, "metadata": {"source": "desktop_image_studio", "approved": True}})
+            return receipt.model_dump(mode="json") if hasattr(receipt, "model_dump") else dict(receipt)
+
+        return self._executor.submit(_open)
 
     def _latest_desktop_agent_mission_id(self) -> str:
         missions = self._jarvis.runtime_service.desktop_agent_list()
@@ -599,6 +737,10 @@ class DesktopRuntimeService:
                 and (now - self._panel_snapshot_cached_at) < self._PANEL_CACHE_TTL_SECONDS
             ):
                 return self._panel_snapshot_cache
+            if self._active_stream_id is not None or (self._busy and self._activity_label == "STREAMING"):
+                if self._panel_snapshot_cache is not None:
+                    return self._panel_snapshot_cache
+                return DesktopPanelSnapshot(health_summary={"aggregate_status": "streaming", "active_operations": 1})
         snapshot = self._panels.compose()
         cached_at = perf_counter()
         with self._state_lock:
@@ -611,6 +753,10 @@ class DesktopRuntimeService:
         with self._state_lock:
             if not force and self._voice_cache is not None and (now - self._voice_cached_at) < self._VOICE_CACHE_TTL_SECONDS:
                 return self._voice_cache
+            if self._active_stream_id is not None or (self._busy and self._activity_label == "STREAMING"):
+                if self._voice_cache is not None:
+                    return self._voice_cache
+                return DesktopVoiceState(enabled=True, speaking=False)
         status = self._voice.status(lightweight=True)
         cached_at = perf_counter()
         with self._state_lock:
@@ -622,6 +768,8 @@ class DesktopRuntimeService:
         with self._state_lock:
             self._panel_snapshot_cache = None
             self._panel_snapshot_cached_at = 0.0
+            self._dev_runtime_cache = None
+            self._dev_runtime_cached_at = 0.0
         self._invalidate_voice_cache()
 
     def _invalidate_voice_cache(self) -> None:
@@ -636,14 +784,32 @@ class DesktopRuntimeService:
             return self._code_agent
 
     def _dev_runtime_state(self) -> dict[str, Any]:
+        now = perf_counter()
+        with self._state_lock:
+            if self._dev_runtime_cache is not None and (now - self._dev_runtime_cached_at) < self._DEV_RUNTIME_CACHE_TTL_SECONDS:
+                return dict(self._dev_runtime_cache)
+            if self._active_stream_id is not None or (self._busy and self._activity_label == "STREAMING"):
+                return {
+                    "llm_mode": getattr(self, "_env_status", None).recommended_mode if getattr(self, "_env_status", None) else "disabled",
+                    "llm_provider": getattr(self, "_env_status", None).recommended_local_provider if getattr(self, "_env_status", None) else "none",
+                    "llm_model": getattr(self, "_env_status", None).recommended_local_model if getattr(self, "_env_status", None) else None,
+                    "ollama_available": bool(getattr(self, "_env_status", None).ollama.available) if getattr(self, "_env_status", None) else False,
+                    "status": "streaming",
+                    "last_result": dict(self._last_dev_result),
+                }
         env_status = getattr(self, "_env_status", None)
         web_status = build_web_search_provider().status()
+        try:
+            image_status = self._jarvis.runtime_service.image_status()
+        except Exception as exc:  # noqa: BLE001
+            image_status = {"enabled": False, "status": "unavailable", "message": str(exc)}
         state = {
             "llm_mode": env_status.recommended_mode if env_status else "disabled",
             "llm_provider": env_status.recommended_local_provider if env_status else "none",
             "llm_model": env_status.recommended_local_model if env_status else None,
             "ollama_available": bool(env_status.ollama.available) if env_status else False,
             "web_search": web_status.model_dump(mode="json"),
+            "image_runtime": image_status,
             "policy": {
                 "identity": "Jarvis",
                 "openai": "blocked",
@@ -653,7 +819,11 @@ class DesktopRuntimeService:
             },
             "last_result": dict(self._last_dev_result),
         }
-        return self._sanitize_dev_value(state)
+        sanitized = self._sanitize_dev_value(state)
+        with self._state_lock:
+            self._dev_runtime_cache = dict(sanitized)
+            self._dev_runtime_cached_at = perf_counter()
+        return sanitized
 
     def _run_dev_action(self, action_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         code = self._code_agent_service()

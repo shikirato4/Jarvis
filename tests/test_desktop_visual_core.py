@@ -210,6 +210,40 @@ def test_agent_mode_is_visible_and_guided_controls_are_available(tmp_path) -> No
         desktop.shutdown()
 
 
+def test_image_studio_is_visible_with_local_generation_controls(tmp_path) -> None:
+    from jarvis.config import Settings
+    from jarvis.desktop import build_desktop_runtime
+    from jarvis.desktop_runtime.window import JarvisDesktopWindow
+
+    app = create_qt_application()
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ollama_enabled=False,
+        ui_backend_kind="in_memory",
+        image_model_path=tmp_path / "model.safetensors",
+        image_output_dir=tmp_path / "outputs",
+    )
+    backend, desktop = build_desktop_runtime(settings)
+    try:
+        window = JarvisDesktopWindow(desktop)
+        window.show()
+        app.processEvents()
+
+        labels = [window._right_tabs.tabText(index) for index in range(window._right_tabs.count())]  # noqa: SLF001
+        assert "Image Studio" in labels
+        assert window._image_generate_button.text() == "Generate"  # noqa: SLF001
+        assert window._image_cancel_button.text() == "Cancel Generation"  # noqa: SLF001
+        assert window._image_open_folder_button.text() == "Open Output Folder"  # noqa: SLF001
+        assert window._image_unload_button.text() == "Unload Image Model"  # noqa: SLF001
+        assert not window._image_variations_button.isEnabled()  # noqa: SLF001
+    finally:
+        window.close()
+        backend.stop()
+        desktop.shutdown()
+
+
 def test_reactor_accepts_future_visual_states() -> None:
     from jarvis.desktop_runtime.widgets import ReactorCoreWidget
 

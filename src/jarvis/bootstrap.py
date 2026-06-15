@@ -44,6 +44,7 @@ from jarvis.memory.service import MemoryService
 from jarvis.indexing_runtime import IndexingRepository, IndexingRuntimeService
 from jarvis.integrations import WordCOMBackend
 from jarvis.hud_runtime.service import HudRuntimeService
+from jarvis.image_runtime import ImageGenerationService
 from jarvis.memory_semantic.embeddings import (
     EmbeddingProviderRegistry,
     EmbeddingRouter,
@@ -203,6 +204,7 @@ class JarvisApplication:
     self_improvement_runtime_service: SelfImprovementRuntimeService
     writing_runtime_service: WritingRuntimeService
     desktop_agent_runtime_service: DesktopAgentRuntimeService
+    image_runtime_service: ImageGenerationService
     meta_command_parser: MetaCommandParser
     task_router: TaskRouter
     memory_service: MemoryService
@@ -272,6 +274,8 @@ class JarvisApplication:
         self.state_manager.update_service("self_improvement_runtime", HealthStatus.READY, self._startup_service_details("self_improvement_runtime"))
         self.writing_runtime_service.start()
         self.state_manager.update_service("writing_runtime", HealthStatus.READY, self._startup_service_details("writing_runtime"))
+        self.image_runtime_service.start()
+        self.state_manager.update_service("image_runtime", HealthStatus.READY, self._startup_service_details("image_runtime", self.image_runtime_service.status()))
         self.desktop_agent_runtime_service.start()
         self.state_manager.update_service("desktop_agent_runtime", HealthStatus.READY, self._startup_service_details("desktop_agent_runtime"))
         self.indexing_runtime_service.start()
@@ -360,6 +364,8 @@ class JarvisApplication:
         self.state_manager.update_service("self_improvement_runtime", HealthStatus.STOPPED)
         self.writing_runtime_service.stop()
         self.state_manager.update_service("writing_runtime", HealthStatus.STOPPED)
+        self.image_runtime_service.stop()
+        self.state_manager.update_service("image_runtime", HealthStatus.STOPPED)
         self.desktop_agent_runtime_service.stop()
         self.state_manager.update_service("desktop_agent_runtime", HealthStatus.STOPPED)
         self.indexing_runtime_service.stop()
@@ -924,7 +930,9 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         automation_service=automation_service,
         ops_runtime_service=None,
         desktop_agent_runtime_service=None,
+        image_runtime_service=None,
     )
+    image_runtime_service = ImageGenerationService(settings=settings, logger=logger)
     desktop_agent_runtime_service = DesktopAgentRuntimeService(
         settings=settings,
         runtime=runtime_service,
@@ -932,6 +940,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         logger=logger,
     )
     runtime_service._desktop_agent_runtime_service = desktop_agent_runtime_service  # noqa: SLF001
+    runtime_service._image_runtime_service = image_runtime_service  # noqa: SLF001
     retention_manager = RetentionManager(
         state_manager=state_manager,
         event_bus=event_bus,
@@ -1053,6 +1062,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     state_manager.register_service("security_runtime")
     state_manager.register_service("self_improvement_runtime")
     state_manager.register_service("writing_runtime")
+    state_manager.register_service("image_runtime")
     state_manager.register_service("desktop_agent_runtime")
     return JarvisApplication(
         settings=settings,
@@ -1083,6 +1093,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         self_improvement_runtime_service=self_improvement_runtime_service,
         writing_runtime_service=writing_runtime_service,
         desktop_agent_runtime_service=desktop_agent_runtime_service,
+        image_runtime_service=image_runtime_service,
         meta_command_parser=meta_command_parser,
         task_router=task_router,
         memory_service=memory_service,

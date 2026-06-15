@@ -413,8 +413,29 @@ class Settings(BaseSettings):
     )
     hud_enabled: bool = True
     hud_poll_interval_ms: int = 5000
+    image_enabled: bool = True
+    image_backend: str = "diffusers"
+    image_model_path: Path = Path("models/image/checkpoints/juggernautXL_v8Rundiffusion.safetensors")
+    image_output_dir: Path | None = None
+    image_keep_model_loaded: bool = True
+    image_idle_unload_minutes: int = 20
+    image_default_width: int = 768
+    image_default_height: int = 768
+    image_default_steps: int = 25
+    image_default_cfg: float = 7.0
+    image_timeout_seconds: int = 1800
 
-    @field_validator("data_dir", "logs_dir", "workspace_root", "vision_capture_dir", "voice_coqui_speaker_wav", "voice_clone_sample_path", mode="before")
+    @field_validator(
+        "data_dir",
+        "logs_dir",
+        "workspace_root",
+        "vision_capture_dir",
+        "voice_coqui_speaker_wav",
+        "voice_clone_sample_path",
+        "image_model_path",
+        "image_output_dir",
+        mode="before",
+    )
     @classmethod
     def _coerce_path(cls, value: str | Path | None) -> Path | None:
         if value is None:
@@ -581,6 +602,18 @@ class Settings(BaseSettings):
         return self.voice_clone_sample_path.resolve()
 
     @property
+    def resolved_image_model_path(self) -> Path:
+        if self.image_model_path.is_absolute():
+            return self.image_model_path.resolve()
+        return (self.resolved_workspace_root / self.image_model_path).resolve()
+
+    @property
+    def resolved_image_output_dir(self) -> Path:
+        if self.image_output_dir is not None:
+            return self.image_output_dir.resolve()
+        return (self.resolved_workspace_root / "outputs" / "images").resolve()
+
+    @property
     def resolved_log_file(self) -> Path:
         return self.resolved_logs_dir / self.log_file_name
 
@@ -653,3 +686,4 @@ class Settings(BaseSettings):
     def prepare_environment(self) -> None:
         self.resolved_data_dir.mkdir(parents=True, exist_ok=True)
         self.resolved_logs_dir.mkdir(parents=True, exist_ok=True)
+        self.resolved_image_output_dir.mkdir(parents=True, exist_ok=True)

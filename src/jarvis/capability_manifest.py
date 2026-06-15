@@ -12,6 +12,7 @@ _REAL_CAPABILITIES = (
     "Parches revisables con confirmacion antes de aplicar.",
     "Git local seguro y GitHub/repo learning como referencia.",
     "Agent Mode real en Guided Control: observa, planea, pide confirmacion, ejecuta y verifica acciones aprobadas.",
+    "Generacion local de imagenes con JuggernautXL SDXL via Diffusers directo; Fooocus no requerido.",
     "Voz/TTS local con salida preparada para no leer codigo largo.",
     "Doctor, benchmark, web status y diagnosticos de Ollama.",
     "Politica de seguridad: OpenAI bloqueado, Gemini bloqueado, secretos protegidos.",
@@ -37,6 +38,9 @@ def is_capability_query(text: str) -> bool:
             "que sabes hacer",
             "quÃ© sabes hacer",
             "tienes agent mode",
+            "puedes generar imagenes",
+            "generas imagenes",
+            "usas fooocus",
             "puedes abrir navegador",
             "que modo estas usando",
             "quÃ© modo estas usando",
@@ -60,7 +64,8 @@ def get_capabilities_summary() -> str:
 def get_capabilities_for_context_tab() -> str:
     return (
         "Jarvis usa gpt-oss:20b local, Brave Search para web, memoria local, Code Agent seguro, "
-        "Git local seguro, repo learning y voz/TTS. OpenAI y Gemini estan bloqueados. "
+        "Git local seguro, repo learning, generacion local de imagenes con JuggernautXL via Diffusers "
+        "sin Fooocus y voz/TTS. OpenAI y Gemini estan bloqueados. "
         "Agent Mode real esta disponible con confirmacion para acciones sensibles y Stop Agent."
     )
 
