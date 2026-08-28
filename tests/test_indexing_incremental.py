@@ -33,7 +33,6 @@ def test_indexing_incremental_skips_unchanged_and_updates_changed(tmp_path: Path
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embedding_provider_default="indexing_incremental_provider",
         embedding_provider_fallback_order=("indexing_incremental_provider",),
         indexing_auto_sync_on_start=False,

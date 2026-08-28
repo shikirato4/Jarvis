@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from jarvis.actions.models import ActionResult, ActionStep
+from jarvis.actions.models import ActionResult, ActionRisk, ActionStep, ExecutionStatus
 from jarvis.actions.registry import ActionContext, ActionDefinition, ActionRegistry
 from jarvis.core.capabilities import CapabilityDescriptor, CapabilityRegistry
 from jarvis.core.modes import ExecutionMode
@@ -31,6 +31,8 @@ class DesktopAgentModule:
                 payload_model=DesktopAgentRunPayload,
                 handler=self._run_mission,
                 tags=("desktop-agent", "desktop", "automation"),
+                risk=ActionRisk.SENSITIVE,
+                idempotent=False,
             )
         )
 
@@ -77,9 +79,21 @@ class DesktopAgentModule:
                 "max_retries_per_step": payload.max_retries_per_step,
                 "verbose_trace": payload.verbose_trace,
                 "metadata": context.metadata,
+                "source_surface": context.metadata.get("source_surface") or "unknown",
             }
         )
-        return ActionResult(message=receipt.summary, data=receipt.model_dump(mode="json"))
+        data = receipt.model_dump(mode="json")
+        data["mission_status"] = receipt.status.value
+        data["mission_success"] = receipt.success
+        return ActionResult(
+            status=(
+                ExecutionStatus.SUCCESS
+                if receipt.success and receipt.status.value == "completed"
+                else ExecutionStatus.FAILED
+            ),
+            message=receipt.summary,
+            data=data,
+        )
 
     @staticmethod
     def _build_plan(request) -> list[ActionStep]:

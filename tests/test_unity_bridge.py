@@ -57,7 +57,6 @@ def test_unity_bridge_connect_ping_and_disconnect(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         unity_discovery_roots=(tmp_path,),
         unity_bridge_backend_default="http_local",

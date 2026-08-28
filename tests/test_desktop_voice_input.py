@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import array
 import time
+from threading import Event, Thread
 from types import SimpleNamespace
 
 import pytest
@@ -11,7 +12,9 @@ from jarvis.desktop import build_desktop_runtime
 from jarvis.desktop_runtime.base import DesktopVoiceState
 from jarvis.desktop_runtime.chat import PendingDesktopAction
 from jarvis.desktop_runtime.intent_router import DesktopIntentDecision
+from jarvis.desktop_runtime.voice_input import DesktopVoiceInputController
 from jarvis.desktop_runtime.window import JarvisDesktopWindow, create_qt_application, pyside_available
+from jarvis.models_runtime.base import ModelRequest, ModelResponse, ProviderKind
 from jarvis.voice_runtime.backends import InMemorySTTProvider
 from jarvis.voice_runtime.base import AudioChunk
 
@@ -26,7 +29,6 @@ def _settings(tmp_path) -> Settings:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
         voice_audio_input_backend_default="in_memory",
@@ -47,13 +49,61 @@ def _wait_for(predicate, *, timeout: float = 12.0) -> bool:
     return False
 
 
+def test_desktop_voice_input_admission_does_not_block_the_caller(tmp_path) -> None:
+    admission_entered = Event()
+    release_admission = Event()
+    caller_returned = Event()
+
+    class BlockingVoiceRuntime:
+        def set_command_callback(self, callback) -> None:
+            self.callback = callback
+
+        def start_session(self, request):
+            admission_entered.set()
+            release_admission.wait()
+            return SimpleNamespace(session_id="blocking-session")
+
+        def cancel(self, correlation_id):
+            return None
+
+        def get_session(self, session_id):
+            return None
+
+    controller = DesktopVoiceInputController(BlockingVoiceRuntime(), _settings(tmp_path), lambda *args, **kwargs: None)
+
+    def invoke_start() -> None:
+        controller.start()
+        caller_returned.set()
+
+    caller = Thread(target=invoke_start, daemon=True)
+    caller.start()
+    try:
+        assert admission_entered.wait(timeout=5.0)
+        assert caller_returned.wait(timeout=1.0), "start() waited for backend admission"
+    finally:
+        release_admission.set()
+        caller.join(timeout=5.0)
+
+
 def test_desktop_voice_input_routes_transcript_through_existing_chat_pipeline(tmp_path) -> None:
     app, desktop = build_desktop_runtime(_settings(tmp_path))
+    model_requests: list[ModelRequest] = []
+
+    def infer_model(request: ModelRequest) -> ModelResponse:
+        model_requests.append(request)
+        return ModelResponse(
+            provider_name="voice-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model=request.logical_model or "general_assistant",
+            model_name="nemotron-test",
+            content="La derivada es dos equis.",
+            latency_ms=1.0,
+        )
+
+    app.agent_controller._infer_model = infer_model  # noqa: SLF001
     try:
         app.voice_runtime_service._input_registry.get("in_memory").push_chunk(_chunk("calcula derivada de x^2"))  # noqa: SLF001
-        started = time.perf_counter()
         desktop.start_voice_listening()
-        assert (time.perf_counter() - started) < 0.2
         assert _wait_for(lambda: any(message.metadata.get("source") == "voice" for message in desktop.shell_state().conversation))
         assert _wait_for(lambda: desktop.shell_state().voice.input_state == "IDLE")
         state = desktop.shell_state()
@@ -61,6 +111,8 @@ def test_desktop_voice_input_routes_transcript_through_existing_chat_pipeline(tm
         assert state.voice.last_transcript == "calcula derivada de x^2"
         assert state.voice.input_state == "IDLE"
         assert "deriv" in state.conversation[-1].content.casefold() or "dos equis" in state.conversation[-1].content.casefold()
+        assert model_requests
+        assert model_requests[-1].messages[-1].content == "calcula derivada de x^2"
     finally:
         app.stop()
 

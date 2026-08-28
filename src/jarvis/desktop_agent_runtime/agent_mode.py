@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
@@ -217,9 +218,9 @@ class AgentSafetyGate:
 
     def classify(self, action: AgentAction) -> AgentRisk:
         text = action.searchable_text()
-        if any(term in text for term in self._BLOCKED_TERMS):
+        if any(_contains_policy_term(text, term) for term in self._BLOCKED_TERMS):
             return AgentRisk.BLOCKED
-        if any(term in text for term in self._HIGH_TERMS):
+        if any(_contains_policy_term(text, term) for term in self._HIGH_TERMS):
             return AgentRisk.HIGH
         if action.action_type == "open_path" and action.payload.get("result_from"):
             return AgentRisk.LOW
@@ -228,7 +229,6 @@ class AgentSafetyGate:
         if action.action_type in self._LOW_ACTIONS:
             return AgentRisk.LOW
         return action.risk
-
     def authorize(
         self,
         action: AgentAction,
@@ -268,6 +268,17 @@ class AgentSafetyGate:
         if risk == AgentRisk.MEDIUM and not confirmed:
             return AgentSafetyResult(AgentSafetyDecision.REQUIRE_CONFIRMATION, risk, "Accion sensible: requiere Confirm Action.")
         return AgentSafetyResult(AgentSafetyDecision.ALLOW, risk, "Accion permitida por Agent Mode.")
+
+
+def _contains_policy_term(text: str, term: str) -> bool:
+    """Match policy terms without treating short tokens as substrings.
+
+    In particular, the malware acronym ``rat`` must not match ordinary paths
+    containing words such as ``integration``.
+    """
+    if term.startswith("."):
+        return term in text
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text) is not None
 
 
 class AgentPlanner:

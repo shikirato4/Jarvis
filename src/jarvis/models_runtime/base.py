@@ -14,9 +14,27 @@ class ProviderKind(StrEnum):
     REMOTE = "remote"
 
 
+class ModelMedia(JarvisBaseModel):
+    file_id: str
+    category: str
+    mime_type: str
+    safe_name: str
+    data: bytes = Field(exclude=True, repr=False)
+
+
+class ModelToolCall(JarvisBaseModel):
+    id: str
+    name: str
+    arguments: dict[str, Any] | str = Field(default_factory=dict)
+
+
 class ModelMessage(JarvisBaseModel):
     role: str
-    content: str
+    content: str = ""
+    name: str | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[ModelToolCall] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict, exclude=True, repr=False)
 
 
 class ModelRequest(JarvisBaseModel):
@@ -24,6 +42,10 @@ class ModelRequest(JarvisBaseModel):
     logical_model: str | None = None
     required_capabilities: tuple[str, ...] = ()
     messages: list[ModelMessage] = Field(default_factory=list)
+    media: list[ModelMedia] = Field(default_factory=list, exclude=True, repr=False)
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    tool_choice: str | dict[str, Any] | None = None
+    response_format: dict[str, Any] | None = None
     prompt: str | None = None
     temperature: float | None = None
     timeout_seconds: float | None = None
@@ -44,7 +66,9 @@ class ModelResponse(JarvisBaseModel):
     provider_kind: ProviderKind
     logical_model: str
     model_name: str
-    content: str
+    # Tool-only assistant turns legitimately carry no textual content.
+    content: str = ""
+    tool_calls: list[ModelToolCall] = Field(default_factory=list)
     raw: dict[str, Any] = Field(default_factory=dict)
     latency_ms: float
     fallback_used: bool = False

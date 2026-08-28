@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
+from threading import RLock
 from uuid import uuid4
 
 from jarvis.core.errors import ServiceUnavailableError
@@ -63,21 +65,44 @@ class IndexingRuntimeService(RuntimeServiceContract):
         self._started = False
         self._last_reconcile_at = None
         self._subscribed = False
+        self._background_executor: ThreadPoolExecutor | None = None
+        self._background_futures: set[Future] = set()
+        self._background_lock = RLock()
+        self._paused = False
 
     def create_schema(self) -> None:
         self._repository.create_schema()
 
     def start(self) -> None:
         self._started = True
+        with self._background_lock:
+            if self._background_executor is None:
+                self._background_executor = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="jarvis-indexing-background",
+                )
         self._ensure_default_sources()
         if not self._subscribed:
             self._subscribe_events()
             self._subscribed = True
         if self._settings.indexing_auto_sync_on_start:
-            self.run(IndexRunRequest(trigger=IndexingTrigger.STARTUP, requested_by="startup"))
+            self.run_async(
+                IndexRunRequest(
+                    trigger=IndexingTrigger.STARTUP,
+                    requested_by="startup",
+                )
+            )
 
     def stop(self) -> None:
         self._started = False
+        with self._background_lock:
+            executor = self._background_executor
+            self._background_executor = None
+            futures = tuple(self._background_futures)
+        for future in futures:
+            future.cancel()
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
 
     def health(self) -> ServiceStatus:
         return ServiceStatus(name=self.service_name, status=HealthStatus.READY if self._started else HealthStatus.STOPPED, details=self.status())
@@ -93,6 +118,12 @@ class IndexingRuntimeService(RuntimeServiceContract):
         )
         data = status.model_dump(mode="json")
         data["system_runtime"] = self._system_runtime.status()
+        with self._background_lock:
+            data["background_active"] = sum(
+                1 for future in self._background_futures if not future.done()
+            )
+            data["background_paused"] = self._paused
+        data["chat_priority_policy"] = "foreground_requests_bypass_background_queue"
         return data
 
     def add_source(self, request: IndexSourceCreateRequest | dict) -> IndexSource:
@@ -138,6 +169,54 @@ class IndexingRuntimeService(RuntimeServiceContract):
         receipt = self._pipeline.run(job=job, sources=sources, force_reindex=payload.force_reindex)
         self._event_bus.publish("indexing.job.completed", {"job_id": job.job_id, "status": job.status.value, "source_ids": list(job.source_ids)})
         return receipt
+
+    def run_async(self, request: IndexRunRequest | dict) -> Future:
+        """Queue low-priority indexing without blocking startup or event publishers."""
+
+        self._ensure_started()
+        payload = IndexRunRequest.model_validate(request)
+        with self._background_lock:
+            if self._paused:
+                raise ServiceUnavailableError("background indexing is paused")
+            executor = self._background_executor
+            if executor is None:
+                raise ServiceUnavailableError("background indexing executor is stopped")
+            future = executor.submit(self.run, payload)
+            self._background_futures.add(future)
+            future.add_done_callback(self._background_done)
+            return future
+
+    def pause(self) -> dict[str, object]:
+        self._ensure_started()
+        with self._background_lock:
+            self._paused = True
+        return {"paused": True}
+
+    def resume(self) -> dict[str, object]:
+        self._ensure_started()
+        with self._background_lock:
+            self._paused = False
+        return {"paused": False}
+
+    def cancel_pending(self) -> dict[str, object]:
+        self._ensure_started()
+        with self._background_lock:
+            futures = tuple(self._background_futures)
+        cancelled = sum(1 for future in futures if future.cancel())
+        return {"cancelled": cancelled}
+
+    def _background_done(self, future: Future) -> None:
+        with self._background_lock:
+            self._background_futures.discard(future)
+        if future.cancelled():
+            return
+        try:
+            future.result()
+        except Exception as exc:
+            self._logger.error(
+                "indexing_background_failed",
+                extra={"error_type": type(exc).__name__},
+            )
 
     def reindex(self, request: IndexRunRequest | dict) -> IndexingRunReceipt:
         payload = IndexRunRequest.model_validate(request)
@@ -208,7 +287,7 @@ class IndexingRuntimeService(RuntimeServiceContract):
         if not self._started:
             return
         try:
-            self.run(IndexRunRequest(source_ids=(source_id,), trigger=IndexingTrigger.EVENT, requested_by=str(payload.get("task_id") or payload.get("mission_id") or "event")))
+            self.run_async(IndexRunRequest(source_ids=(source_id,), trigger=IndexingTrigger.EVENT, requested_by=str(payload.get("task_id") or payload.get("mission_id") or "event")))
         except Exception:
             self._logger.exception("indexing_event_sync_failed", extra={"source_id": source_id})
 
@@ -221,7 +300,7 @@ class IndexingRuntimeService(RuntimeServiceContract):
         if "index" not in goal and "indice" not in goal:
             return
         try:
-            self.run(IndexRunRequest(trigger=IndexingTrigger.AUTONOMY, requested_by=str(payload.get("mission_id") or "autonomy")))
+            self.run_async(IndexRunRequest(trigger=IndexingTrigger.AUTONOMY, requested_by=str(payload.get("mission_id") or "autonomy")))
         except Exception:
             self._logger.exception("indexing_autonomy_maintenance_failed")
 

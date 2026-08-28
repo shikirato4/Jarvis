@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
-from typing import Any
-
 from jarvis.code_agent_runtime.change_generator.models import ChangeOperation, GeneratedChangePlan, ResolvedTarget
 from jarvis.code_agent_runtime.llm.models import LLMChangeOperation, LLMChangeProposal
 from jarvis.code_agent_runtime.paths import is_sensitive_path, normalize_project_path, relative_to_root

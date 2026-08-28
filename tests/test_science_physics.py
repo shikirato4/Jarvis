@@ -12,7 +12,6 @@ def test_black_hole_escape_estimate(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     jarvis = build_application(settings)
@@ -42,7 +41,6 @@ def test_time_dilation_estimate(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     jarvis = build_application(settings)

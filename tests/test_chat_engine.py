@@ -4,17 +4,25 @@ import time
 
 from jarvis.bootstrap import build_application
 from jarvis.desktop import build_desktop_runtime
-from jarvis.desktop_runtime.chat import DesktopChatEngine
 from jarvis.desktop_runtime.intent_router import DesktopIntentRouter
 from jarvis.desktop_runtime.service import DesktopRuntimeService
 from jarvis.config import Settings
-from jarvis.models_runtime.base import ModelRequest, ModelResponse, ProviderHealth, ProviderKind
+from jarvis.models_runtime.base import ModelRequest, ModelResponse, ModelToolCall, ProviderHealth, ProviderKind
+from jarvis.modules.web_module import build_web_search_action
+from jarvis.models_runtime.hybrid import (
+    LLMMode,
+    ProviderCapabilities,
+    ProviderOperationalState,
+    ProviderStatus,
+)
 from jarvis.web_search import WebSearchHit, WebSearchProviderStatus, WebSearchResponse
 
 
 class MutableDesktopModelProvider:
-    provider_name = "gpt_oss"
-    provider_kind = ProviderKind.REMOTE
+    provider_name = "nemotron_omni_local"
+    provider_kind = ProviderKind.LOCAL
+    configured_model = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
+    capabilities = ProviderCapabilities(text=True, streaming=False, reasoning=True)
 
     def __init__(self, *, fail: bool = False, content: str = "Un agujero negro es una region del espacio-tiempo con gravedad extrema.") -> None:
         self.fail = fail
@@ -22,6 +30,18 @@ class MutableDesktopModelProvider:
 
     def health_check(self) -> ProviderHealth:
         return ProviderHealth(provider_name=self.provider_name, healthy=not self.fail, details={"fake": True})
+
+    def status_check(self) -> ProviderStatus:
+        return ProviderStatus(
+            provider_name=self.provider_name,
+            state=(
+                ProviderOperationalState.LOCAL_UNAVAILABLE
+                if self.fail
+                else ProviderOperationalState.LOCAL_ACTIVE
+            ),
+            healthy=not self.fail,
+            message="test provider unavailable" if self.fail else "test provider ready",
+        )
 
     def infer(self, request: ModelRequest, *, model_name: str, temperature: float | None, timeout_seconds: float | None) -> ModelResponse:
         if self.fail:
@@ -34,6 +54,12 @@ class MutableDesktopModelProvider:
             content=self.content,
             latency_ms=3.0,
         )
+
+
+def _install_local_provider(application, provider: MutableDesktopModelProvider) -> None:
+    application.provider_registry._providers[provider.provider_name] = provider  # noqa: SLF001
+    application.model_service._coordinator._local = provider  # noqa: SLF001
+    application.model_service._coordinator._selected_mode = LLMMode.LOCAL  # noqa: SLF001
 
 
 class FakeDesktopWebProvider:
@@ -62,12 +88,86 @@ class FakeDesktopWebProvider:
         )
 
 
+class WebToolDesktopModelProvider(MutableDesktopModelProvider):
+    def __init__(self, *, fail_after_tool: bool = False) -> None:
+        super().__init__()
+        self.fail_after_tool = fail_after_tool
+        self.requests: list[ModelRequest] = []
+
+    def infer(self, request: ModelRequest, *, model_name: str, temperature: float | None, timeout_seconds: float | None) -> ModelResponse:
+        self.requests.append(request)
+        if len(self.requests) == 1:
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                tool_calls=[
+                    ModelToolCall(
+                        id="web-desktop-1",
+                        name="web.search",
+                        arguments={
+                            "query": "noticias recientes de tecnologia",
+                            "max_results": 5,
+                        },
+                    )
+                ],
+                latency_ms=1.0,
+            )
+        if self.fail_after_tool:
+            raise RuntimeError("provider unavailable after tool")
+        return ModelResponse(
+            provider_name=self.provider_name,
+            provider_kind=self.provider_kind,
+            logical_model=request.logical_model or model_name,
+            model_name=model_name,
+            content=(
+                "Resumen verificado. Fuente: https://example.com/tech"
+            ),
+            latency_ms=1.0,
+        )
+
+
+class ScriptedToolDesktopModelProvider(MutableDesktopModelProvider):
+    def __init__(self, *, action: str, arguments: dict, final_content: str) -> None:
+        super().__init__(content=final_content)
+        self.action = action
+        self.arguments = arguments
+        self.final_content = final_content
+        self.requests: list[ModelRequest] = []
+
+    def infer(self, request: ModelRequest, *, model_name: str, temperature: float | None, timeout_seconds: float | None) -> ModelResponse:
+        self.requests.append(request)
+        if request.messages and request.messages[-1].role == "tool":
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content=self.final_content,
+                latency_ms=1.0,
+            )
+        return ModelResponse(
+            provider_name=self.provider_name,
+            provider_kind=self.provider_kind,
+            logical_model=request.logical_model or model_name,
+            model_name=model_name,
+            tool_calls=[
+                ModelToolCall(
+                    id=f"scripted-{len(self.requests)}",
+                    name=self.action,
+                    arguments=self.arguments,
+                )
+            ],
+            latency_ms=1.0,
+        )
+
+
 def test_chat_engine_routes_system_status(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
@@ -84,19 +184,17 @@ def test_chat_engine_uses_local_model_for_general_question(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        general_chat_model_fallback_order=(),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
-    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider()  # noqa: SLF001
+    _install_local_provider(app, MutableDesktopModelProvider())
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
         response = desktop.send_chat("explícame qué es un agujero negro")
         assert "agujero negro" in response.message.content.casefold()
-        assert response.raw_result.get("provider_name") == "gpt_oss"
+        assert response.raw_result.get("provider_name") == "nemotron_omni_local"
     finally:
         app.stop()
 
@@ -106,12 +204,14 @@ def test_chat_engine_uses_local_model_for_simple_greeting(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
-    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider(content="Hola. Estoy en linea y listo para ayudarte.")  # noqa: SLF001
+    _install_local_provider(
+        app,
+        MutableDesktopModelProvider(content="Hola. Estoy en linea y listo para ayudarte."),
+    )
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
@@ -127,7 +227,6 @@ def test_chat_engine_routes_literal_voice_without_general_model(tmp_path) -> Non
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
@@ -158,12 +257,16 @@ def test_chat_engine_uses_local_model_for_basic_definition(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
-    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider(content="Un telefono es un dispositivo de comunicacion que permite transmitir voz y datos.")  # noqa: SLF001
+    _install_local_provider(
+        app,
+        MutableDesktopModelProvider(
+            content="Un telefono es un dispositivo de comunicacion que permite transmitir voz y datos."
+        ),
+    )
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
@@ -184,12 +287,11 @@ def test_chat_engine_preserves_long_spoken_content_tail(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
-    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider(content=long_content)  # noqa: SLF001
+    _install_local_provider(app, MutableDesktopModelProvider(content=long_content))
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
@@ -206,17 +308,23 @@ def test_chat_engine_returns_visible_system_search_feedback(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
         system_search_roots=(tmp_path,),
     )
     app, desktop = build_desktop_runtime(settings)
+    provider = ScriptedToolDesktopModelProvider(
+        action="system.search_resources",
+        arguments={"query": "notes.txt en el sistema"},
+        final_content="Encontré una coincidencia para notes.txt.",
+    )
+    _install_local_provider(app, provider)
     try:
         response = desktop.send_chat("busca notes.txt en el sistema")
         assert "coincidencia" in response.message.content.casefold()
         assert "orchestrated" not in response.message.content
         assert (response.raw_result.get("query") or {}).get("query") == "notes.txt en el sistema"
+        assert [request.messages[-1].role for request in provider.requests] == ["user", "tool"]
     finally:
         app.stop()
 
@@ -226,16 +334,25 @@ def test_chat_engine_converts_system_resolution_errors_to_user_feedback(tmp_path
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
         system_search_roots=(tmp_path,),
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_local_provider(
+        app,
+        ScriptedToolDesktopModelProvider(
+            action="system.open_target",
+            arguments={"query": "inexistente.txt"},
+            final_content="No pude abrir el archivo solicitado.",
+        ),
+    )
     try:
-        response = desktop.send_chat("abre inexistente.txt")
+        pending = desktop.send_chat("abre inexistente.txt")
+        assert pending.raw_result.get("status") == "waiting_confirmation"
+        response = desktop.send_chat("sí")
         assert "no pude" in response.message.content.casefold()
-        assert response.raw_result.get("ok") is False
+        assert response.raw_result.get("tool_status") == "failed"
     finally:
         app.stop()
 
@@ -245,13 +362,22 @@ def test_chat_engine_opens_notepad_from_natural_language(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_local_provider(
+        app,
+        ScriptedToolDesktopModelProvider(
+            action="system.open_target",
+            arguments={"query": "notepad"},
+            final_content="He abierto Notepad.",
+        ),
+    )
     try:
-        response = desktop.send_chat("abre notepad")
+        pending = desktop.send_chat("abre notepad")
+        assert pending.raw_result.get("status") == "waiting_confirmation"
+        response = desktop.send_chat("sí")
         assert "he abierto notepad" in response.message.content.casefold()
         assert response.raw_result.get("operation_name") == "system.open"
     finally:
@@ -263,13 +389,22 @@ def test_chat_engine_opens_word_from_natural_language(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_local_provider(
+        app,
+        ScriptedToolDesktopModelProvider(
+            action="system.open_target",
+            arguments={"query": "word"},
+            final_content="He abierto Word.",
+        ),
+    )
     try:
-        response = desktop.send_chat("abre word")
+        pending = desktop.send_chat("abre word")
+        assert pending.raw_result.get("status") == "waiting_confirmation"
+        response = desktop.send_chat("sí")
         assert "he abierto" in response.message.content.casefold()
         assert "word" in response.message.content.casefold()
         assert response.raw_result.get("operation_name") == "system.open"
@@ -277,22 +412,31 @@ def test_chat_engine_opens_word_from_natural_language(tmp_path) -> None:
         app.stop()
 
 
-def test_chat_engine_opens_vscode_from_natural_language_without_confirmation(tmp_path) -> None:
+def test_chat_engine_opens_vscode_from_natural_language_with_confirmation(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_local_provider(
+        app,
+        ScriptedToolDesktopModelProvider(
+            action="system.open_target",
+            arguments={"query": "vscode"},
+            final_content="He abierto Visual Studio Code.",
+        ),
+    )
     try:
-        response = desktop.send_chat("abre vscode")
+        pending = desktop.send_chat("abre vscode")
+        assert pending.raw_result.get("status") == "waiting_confirmation"
+        response = desktop.send_chat("sí")
         assert "he abierto" in response.message.content.casefold()
         assert ("vscode" in response.message.content.casefold() or "visual studio code" in response.message.content.casefold())
-        assert desktop._chat.awaiting_confirmation is False  # noqa: SLF001
-        assert response.raw_result.get("confirmation_required") is False
+        assert desktop._chat._pending_agent_confirmation is None  # noqa: SLF001
+        assert response.raw_result.get("tool_status") == "success"
     finally:
         app.stop()
 
@@ -302,32 +446,39 @@ def test_chat_engine_reports_clear_error_for_missing_application(tmp_path) -> No
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_local_provider(
+        app,
+        ScriptedToolDesktopModelProvider(
+            action="system.open_target",
+            arguments={"query": "appinventada123"},
+            final_content="No pude encontrar esa aplicación.",
+        ),
+    )
     try:
-        response = desktop.send_chat("abre appinventada123")
+        pending = desktop.send_chat("abre appinventada123")
+        assert pending.raw_result.get("status") == "waiting_confirmation"
+        response = desktop.send_chat("sí")
         assert response.message.content.casefold() in {"no pude encontrar esa aplicacion.", "no pude encontrar esa aplicación."}
-        assert response.raw_result.get("ok") is False
+        assert response.raw_result.get("tool_status") == "failed"
     finally:
         app.stop()
 
 
-def test_chat_engine_reports_model_breaker_and_recovers_after_reset(tmp_path) -> None:
+def test_chat_engine_reports_local_unavailability_and_recovers_next_request(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        general_chat_model_fallback_order=(),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     provider = MutableDesktopModelProvider(fail=True)
     app = build_application(settings)
-    app.provider_registry._providers["gpt_oss"] = provider  # noqa: SLF001
+    _install_local_provider(app, provider)
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
@@ -344,12 +495,10 @@ def test_chat_engine_reports_model_breaker_and_recovers_after_reset(tmp_path) ->
             except Exception:
                 pass
         blocked = desktop.send_chat("explícame qué es un agujero negro")
-        assert "bloqueado" in blocked.message.content.casefold() or "fallos recientes" in blocked.message.content.casefold()
+        assert "estado: failed" in blocked.message.content.casefold()
+        assert blocked.raw_result.get("status") == "failed"
 
         provider.fail = False
-        reset = app.runtime_service.ops_reset_breaker("models_runtime", "gpt_oss")
-        assert reset["reset"] >= 1
-
         recovered = desktop.send_chat("explícame qué es un agujero negro")
         assert "agujero negro" in recovered.message.content.casefold()
     finally:
@@ -361,16 +510,22 @@ def test_chat_engine_routes_security_queries_away_from_general_model(tmp_path) -
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    provider = ScriptedToolDesktopModelProvider(
+        action="security.check_password",
+        arguments={"password": "hunter2"},
+        final_content="Análisis de seguridad de Password completado.",
+    )
+    _install_local_provider(app, provider)
     try:
         response = desktop.send_chat("analiza la seguridad de la contrasena hunter2")
         assert "Password" in response.message.content or "seguridad" in response.message.content
         assert response.raw_result.get("category") == "password"
-        assert response.raw_result.get("logical_model") is None
+        assert response.raw_result.get("tool_action") == "security.check_password"
+        assert [request.messages[-1].role for request in provider.requests] == ["user", "tool"]
     finally:
         app.stop()
 
@@ -380,7 +535,6 @@ def test_chat_engine_never_uses_chat_fallback_for_writing_prompt(tmp_path) -> No
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -402,13 +556,16 @@ def test_chat_engine_never_uses_chat_fallback_for_writing_prompt(tmp_path) -> No
 def test_desktop_intent_router_classifies_operational_prompts() -> None:
     router = DesktopIntentRouter(bridge=None, action_executor=None)  # type: ignore[arg-type]
     assert router.classify("hola").category == "chat"
-    assert router.classify("calcula la derivada de x**2").category == "science"
-    assert router.classify("abre notepad").category == "system_open"
+    assert router.classify("calcula la derivada de x**2").category == "chat"
+    assert router.classify("investiga noticias recientes de tecnologia").category == "chat"
+    assert router.classify("abre notepad").category == "chat"
     assert router.classify("continua mi libro").category == "writing_continue"
     assert router.classify("ves la historia que tengo abierta en Word?").category == "writing_inspect"
-    assert router.classify("puedes ver lo que hay en mi escritorio?").category == "window_context"
-    assert router.classify("que ves en la ventana actual?").category == "window_context"
-    assert router.classify("lee lo que hay en pantalla").category == "screen_read"
+    assert router.classify("puedes ver lo que hay en mi escritorio?").category == "chat"
+    assert router.classify("que ves en la ventana actual?").category == "chat"
+    assert router.classify("lee lo que hay en pantalla").category == "chat"
+    assert router.classify("haz click en Guardar").category == "chat"
+    assert router.classify("analiza la seguridad de este codigo").category == "chat"
     assert router.classify("ves lo que digo?").category == "chat"
     decision = router.classify("Di: hola")
     assert decision.category == "voice_speak_literal"
@@ -420,7 +577,6 @@ def test_chat_engine_routes_writing_continue_to_runtime(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -452,7 +608,6 @@ def test_chat_engine_routes_writing_continue_in_assist_mode_for_word(tmp_path) -
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -478,7 +633,6 @@ def test_chat_engine_inspects_word_context_in_assist_mode_without_mode_error(tmp
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -504,7 +658,6 @@ def test_chat_engine_requests_confirmation_for_non_whitelisted_window_then_execu
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -534,7 +687,6 @@ def test_chat_engine_cancels_pending_action_when_user_rejects_confirmation(tmp_p
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -579,7 +731,6 @@ def test_chat_engine_routes_self_improvement_request(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=workspace,
         research_allowed_roots=(workspace,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -601,7 +752,6 @@ def test_chat_engine_inspects_word_context_instead_of_falling_back_to_chat(tmp_p
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -629,7 +779,6 @@ def test_chat_engine_reports_clear_writing_error_when_word_has_no_context(tmp_pa
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -651,56 +800,56 @@ def test_chat_engine_reports_clear_writing_error_when_word_has_no_context(tmp_pa
         app.stop()
 
 
-def test_chat_engine_research_current_news_uses_brave_first(monkeypatch, tmp_path) -> None:
+def test_chat_engine_research_current_news_uses_nemotron_web_tool(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        general_chat_model_fallback_order=(),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     fake_web = FakeDesktopWebProvider()
-    monkeypatch.setattr("jarvis.desktop_runtime.chat.build_web_search_provider", lambda: fake_web)
     app = build_application(settings)
-    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider(content="Busque en la web.\n\nResumen:\nHay informacion reciente disponible.")  # noqa: SLF001
+    web_action = build_web_search_action(fake_web)
+    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
+    provider = WebToolDesktopModelProvider()
+    _install_local_provider(app, provider)
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
         response = desktop.send_chat("investiga noticias recientes de tecnologia")
 
-        assert fake_web.calls
-        assert "semantic_retrieval_degraded" not in response.message.content
-        assert "Fuente sobre tecnologia" in response.message.content
-        assert response.raw_result.get("web_search", {}).get("provider") == "brave"
+        assert fake_web.calls == ["noticias recientes de tecnologia"]
+        assert len(provider.requests) == 2
+        assert provider.requests[0].messages[-1].role == "user"
+        assert provider.requests[1].messages[-1].role == "tool"
+        assert "Fuente sobre tecnologia" in provider.requests[1].messages[-1].content
+        assert "https://example.com/tech" in response.message.content
     finally:
         app.stop()
 
 
-def test_chat_engine_research_returns_partial_sources_when_synthesis_fails(monkeypatch, tmp_path) -> None:
+def test_chat_engine_research_preserves_sources_when_nemotron_fails_after_tool(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        general_chat_model_fallback_order=(),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     fake_web = FakeDesktopWebProvider()
-    monkeypatch.setattr("jarvis.desktop_runtime.chat.build_web_search_provider", lambda: fake_web)
     app = build_application(settings)
-    app.provider_registry._providers["gpt_oss"] = MutableDesktopModelProvider(fail=True)  # noqa: SLF001
+    web_action = build_web_search_action(fake_web)
+    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
+    _install_local_provider(app, WebToolDesktopModelProvider(fail_after_tool=True))
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
         response = desktop.send_chat("investiga noticias recientes de tecnologia")
 
-        assert "Encontre fuentes con Brave" in response.message.content
-        assert "Fuente sobre tecnologia" in response.message.content
-        assert "watchdog timeout" not in response.message.content.casefold()
-        assert response.raw_result.get("status") == "partial"
+        assert "https://example.com/tech" in response.message.content
+        assert "provider unavailable" not in response.message.content.casefold()
+        assert response.raw_result.get("status") == "failed"
     finally:
         app.stop()
 
@@ -710,7 +859,6 @@ def test_chat_engine_malware_rat_request_gets_useful_safe_refusal(tmp_path) -> N
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -732,7 +880,6 @@ def test_chat_engine_capability_query_uses_manifest_with_guided_agent_mode(tmp_p
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -741,13 +888,15 @@ def test_chat_engine_capability_query_uses_manifest_with_guided_agent_mode(tmp_p
         response = desktop.send_chat("que puedes hacer?")
 
         lowered = response.message.content.casefold()
-        assert "gpt-oss:20b" in lowered
+        assert "nemotron 3 nano omni" in lowered
+        assert "nvidia api" in lowered
+        assert "nvfp4" in lowered
         assert "brave" in lowered
         assert "code agent" in lowered
         assert "agent mode real" in lowered
         assert "guided control" in lowered
         assert "stop agent" in lowered
-        assert "openai" in lowered and "bloqueado" in lowered
+        assert "nvidia" in lowered
         assert response.raw_result.get("category") == "capabilities"
     finally:
         app.stop()
@@ -758,7 +907,6 @@ def test_chat_engine_context_query_uses_visible_capabilities(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -768,10 +916,10 @@ def test_chat_engine_context_query_uses_visible_capabilities(tmp_path) -> None:
 
         lowered = response.message.content.casefold()
         assert "contexto actual de jarvis" in lowered
-        assert "gpt-oss:20b" in lowered
+        assert "nemotron" in lowered
+        assert "nvfp4" in lowered
         assert "brave" in lowered
-        assert "openai" in lowered and "bloqueado" in lowered
-        assert "gemini" in lowered and "bloqueado" in lowered
+        assert "nvidia api" in lowered
         assert "agent mode real esta disponible" in lowered
         assert "confirmacion" in lowered
         assert response.raw_result.get("context") == "jarvis_context"

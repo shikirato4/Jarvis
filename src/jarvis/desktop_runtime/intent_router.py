@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from jarvis.core.errors import JarvisError
 from jarvis.image_runtime.prompting import build_image_request_from_text, is_image_generation_prompt
+from jarvis.image_runtime.presentation import image_job_content
 from jarvis.routing.models import TaskRequest
 from jarvis.services import (
     summarize_ops_status,
@@ -69,84 +70,11 @@ class DesktopIntentRouter:
             )
         if self._is_self_improvement_request(folded):
             return DesktopIntentDecision(category="self_improvement", prompt=normalized)
-        if self._is_window_context_request(folded):
-            return DesktopIntentDecision(category="window_context", prompt=normalized)
-        if self._is_ui_window_question(folded):
-            return DesktopIntentDecision(category="ui_window", prompt=normalized)
-        if self._is_screen_read_request(folded):
-            return DesktopIntentDecision(category="screen_read", prompt=normalized)
         if is_image_generation_prompt(normalized):
             return DesktopIntentDecision(category="image_generate", prompt=normalized)
         mission_control = self._extract_mission_control(normalized, folded)
         if mission_control is not None:
             return mission_control
-        dry_run_goal = self._extract_dry_run_goal(normalized, folded)
-        if dry_run_goal is not None:
-            return DesktopIntentDecision(category="desktop_agent_dry_run", prompt=dry_run_goal)
-        if self._is_desktop_agent_goal(folded):
-            return DesktopIntentDecision(category="desktop_agent", prompt=normalized)
-        open_and_search = self._extract_open_and_search(normalized, folded)
-        if open_and_search is not None:
-            return DesktopIntentDecision(
-                category="ui_navigate",
-                prompt=normalized,
-                action="browser_search",
-                launch_target=open_and_search["application"],
-                target_window=open_and_search["application"],
-                search_query=open_and_search["query"],
-            )
-        open_and_type = self._extract_open_and_type(normalized, folded)
-        if open_and_type is not None:
-            return DesktopIntentDecision(
-                category="ui_type",
-                prompt=normalized,
-                launch_target=open_and_type["application"],
-                target_window=open_and_type["application"],
-                text_value=open_and_type["text"],
-            )
-        click_target = self._extract_click_target(normalized, folded)
-        if click_target is not None:
-            return DesktopIntentDecision(
-                category="ui_click",
-                prompt=normalized,
-                ui_label=click_target["label"],
-                ui_kind=click_target.get("kind"),
-                action=click_target["action"],
-                target_window=self._detect_target_window(normalized, folded),
-            )
-        if self._is_close_window_request(folded):
-            return DesktopIntentDecision(
-                category="ui_navigate",
-                prompt=normalized,
-                action="close_window",
-                target_window=self._detect_target_window(normalized, folded),
-            )
-        focus_target = self._extract_focus_window_target(normalized, folded)
-        if focus_target is not None:
-            return DesktopIntentDecision(
-                category="ui_navigate",
-                prompt=normalized,
-                action="focus_window",
-                target_window=focus_target,
-            )
-        type_request = self._extract_type_request(normalized, folded)
-        if type_request is not None:
-            return DesktopIntentDecision(
-                category="ui_type",
-                prompt=normalized,
-                text_value=type_request["text"],
-                target_window=type_request.get("target_window"),
-            )
-        if self._is_system_open_request(folded):
-            return DesktopIntentDecision(category="system_open", prompt=normalized, target=self._strip_command(normalized, folded))
-        if self._is_system_search_request(folded):
-            return DesktopIntentDecision(category="system_search", prompt=normalized, target=self._strip_command(normalized, folded))
-        if self._is_explicit_research_request(folded):
-            return DesktopIntentDecision(category="research", prompt=normalized)
-        if self._is_security_query(folded):
-            return DesktopIntentDecision(category="security", prompt=normalized)
-        if self._is_science_query(folded):
-            return DesktopIntentDecision(category="science", prompt=normalized)
         return DesktopIntentDecision(category="chat", prompt=normalized)
 
     def execute(self, decision: DesktopIntentDecision) -> tuple[dict, str, str]:
@@ -214,7 +142,7 @@ class DesktopIntentRouter:
                 active_window = active_result.get("active_window")
                 result = {
                     "ok": True,
-                    "status": "completed",
+                    "status": "partial",
                     "plan": {"strategy": "grounded_screen_read"},
                     "operation_name": "vision.describe_active_window",
                     "degraded": True,
@@ -229,7 +157,7 @@ class DesktopIntentRouter:
             except Exception as exc:  # noqa: BLE001
                 result = {
                     "ok": False,
-                    "status": "completed",
+                    "status": "failed",
                     "plan": {"strategy": "grounded_screen_read"},
                     "operation_name": "vision.describe_active_window",
                     "error": {"message": str(exc), "type": type(exc).__name__},
@@ -677,13 +605,7 @@ class DesktopIntentRouter:
 
     @staticmethod
     def _summarize_image_job(result: dict) -> str:
-        status = result.get("status")
-        if status in {"failed", "cancelled"}:
-            return str(result.get("message") or result.get("error") or "La generacion de imagen no se completo.")
-        return (
-            "Estoy generando una imagen local con JuggernautXL. "
-            "La primera carga puede tardar varios minutos; no uso Fooocus ni internet para generar."
-        )
+        return image_job_content(result)
 
     @staticmethod
     def _summarize_image_status(result: dict) -> str:
@@ -835,6 +757,12 @@ class DesktopIntentRouter:
 
     def _extract_mission_control(self, prompt: str, folded: str) -> DesktopIntentDecision | None:
         mission_id = self._extract_mission_id(prompt)
+        if self._extract_dry_run_goal(prompt, folded) is not None:
+            return DesktopIntentDecision(
+                category="desktop_agent_dry_run",
+                prompt=prompt,
+                mission_id=mission_id,
+            )
         permission_mode = self._extract_permission_mode(folded)
         if permission_mode:
             return DesktopIntentDecision(category="desktop_agent_permission_mode", prompt=prompt, target=permission_mode)

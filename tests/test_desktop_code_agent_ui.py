@@ -8,6 +8,7 @@ import pytest
 from jarvis.config import Settings
 from jarvis.desktop import build_desktop_runtime
 from jarvis.desktop_runtime.window import create_qt_application, pyside_available
+from jarvis.environment import LocalEndpointStatus
 
 
 class FakeReceipt:
@@ -99,7 +100,6 @@ def _settings(tmp_path) -> Settings:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
@@ -220,12 +220,16 @@ def test_desktop_doctor_result_redacts_secrets(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         desktop_service,
         "detect_environment",
-        lambda: SimpleNamespace(
+        lambda **_kwargs: SimpleNamespace(
             internet_available=True,
-            ollama=SimpleNamespace(available=True, models=["gpt-oss:20b"]),
+            local_endpoint=LocalEndpointStatus(
+                available=True,
+                reachable=True,
+                models=["nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"],
+            ),
             recommended_mode="auto",
-            recommended_local_provider="ollama",
-            recommended_local_model="gpt-oss:20b",
+            recommended_local_provider="nemotron_omni_local",
+            recommended_local_model="nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4",
             warnings=[],
         ),
     )
@@ -293,12 +297,12 @@ def test_desktop_selector_mode_is_sent_to_generate_patch(tmp_path) -> None:
 
         window._desktop.execute_dev_action_async = _capture  # type: ignore[method-assign]  # noqa: SLF001
         window._dev_task_input.setText("arregla tests")  # noqa: SLF001
-        window._dev_mode.setCurrentText("offline")  # noqa: SLF001
+        window._dev_mode.setCurrentText("local")  # noqa: SLF001
         window._run_dev_action("generate_patch")  # noqa: SLF001
         window.refresh_view()
         app.processEvents()
         assert calls[-1][0] == "generate_patch"
-        assert calls[-1][1]["llm_mode"] == "offline"
+        assert calls[-1][1]["llm_mode"] == "local"
     finally:
         window.close()
         backend.stop()

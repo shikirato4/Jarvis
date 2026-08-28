@@ -11,7 +11,6 @@ def test_ops_health_returns_probes(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -22,4 +21,3 @@ def test_ops_health_returns_probes(tmp_path: Path) -> None:
         assert any(probe.service_name == "unity_runtime" for probe in probes)
     finally:
         app.stop()
-

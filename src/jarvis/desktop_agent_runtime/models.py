@@ -24,6 +24,7 @@ class DesktopAgentPhase(StrEnum):
     VERIFYING = "verifying"
     RECOVERING = "recovering"
     PAUSED = "paused"
+    PARTIAL = "partial"
     FAILED = "failed"
     BLOCKED = "blocked"
     DONE = "completed"

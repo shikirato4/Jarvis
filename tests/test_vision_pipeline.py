@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from jarvis.bootstrap import build_application
 from jarvis.config import Settings
+from jarvis.core.errors import JarvisError
 from jarvis.vision_runtime.backends import InMemoryOCRProvider
 from jarvis.vision_runtime.base import (
     CaptureTargetType,
@@ -28,7 +31,6 @@ def test_ocr_fallback_between_providers(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         vision_ocr_provider_default="failing_ocr",
         vision_ocr_provider_fallback_order=("in_memory_ocr",),
@@ -43,6 +45,29 @@ def test_ocr_fallback_between_providers(tmp_path: Path) -> None:
         assert receipt.ocr_result is not None
         assert receipt.ocr_result.fallback_used is True
         assert "Guardar" in receipt.ocr_result.text
+    finally:
+        app.stop()
+
+
+def test_strict_attachment_ocr_never_falls_back_to_in_memory_placeholder(tmp_path: Path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    app.vision_runtime_service._ocr_registry.register(FailingOCRProvider())  # noqa: SLF001
+    app.start()
+    try:
+        with pytest.raises(JarvisError, match="in-memory ocr provider forced failure"):
+            app.vision_runtime_service.extract_text(
+                OCRRequest(
+                    provider_name="failing_ocr",
+                    image_bytes=b"not-used-by-failing-provider",
+                    metadata={"strict_provider": True},
+                )
+            )
     finally:
         app.stop()
 

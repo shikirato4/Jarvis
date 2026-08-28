@@ -76,14 +76,19 @@ class ActionRouter:
 
         self._event_bus.publish(
             "action.validated",
-            {"action": action_name, "correlation_id": correlation_id, "payload": validated_payload.model_dump(mode="json")},
+            {
+                "action": action_name,
+                "correlation_id": correlation_id,
+                "payload_field_names": sorted(validated_payload.model_fields_set),
+                "payload_field_count": len(validated_payload.model_fields_set),
+            },
         )
 
         try:
             result = definition.handler(context, validated_payload)
             receipt = self._build_receipt(correlation_id, action_name, result, started_at)
             self._record_execution(action_name, validated_payload.model_dump(mode="json"), receipt)
-            self._event_bus.publish("action.executed", receipt.model_dump(mode="json"))
+            self._event_bus.publish("action.executed", self._safe_receipt_event(receipt))
             return receipt
         except Exception as exc:
             failure_receipt = ActionExecutionReceipt(
@@ -97,7 +102,7 @@ class ActionRouter:
                 finished_at=datetime.now(timezone.utc),
             )
             self._record_execution(action_name, validated_payload.model_dump(mode="json"), failure_receipt)
-            self._event_bus.publish("action.failed", failure_receipt.model_dump(mode="json"))
+            self._event_bus.publish("action.failed", self._safe_receipt_event(failure_receipt))
             raise ActionExecutionError(str(exc)) from exc
 
     def execute_plan(
@@ -177,10 +182,43 @@ class ActionRouter:
         payload: dict[str, Any],
         receipt: ActionExecutionReceipt,
     ) -> None:
-        self._memory.record_activity(
-            correlation_id=receipt.correlation_id,
-            action_name=action_name,
-            status=receipt.status.value,
-            payload=payload,
-            result=receipt.model_dump(mode="json"),
-        )
+        try:
+            self._memory.record_activity(
+                correlation_id=receipt.correlation_id,
+                action_name=action_name,
+                status=receipt.status.value,
+                payload={
+                    "field_names": sorted(payload),
+                    "field_count": len(payload),
+                },
+                result={
+                    "status": receipt.status.value,
+                    "artifact_count": len(receipt.artifacts),
+                    "data_field_names": sorted(receipt.data),
+                    "rollback_attempted": receipt.rollback_attempted,
+                    "rollback_succeeded": receipt.rollback_succeeded,
+                },
+            )
+        except Exception as exc:
+            # Activity persistence is observability. It must not change the
+            # outcome of the real action or mask the original tool failure.
+            diagnostic = {
+                "action": action_name,
+                "correlation_id": receipt.correlation_id,
+                "status": receipt.status.value,
+                "error_type": type(exc).__name__,
+            }
+            self._logger.warning("action_audit_persistence_failed", extra=diagnostic)
+            self._event_bus.publish("action.audit_persistence_failed", diagnostic)
+
+    @staticmethod
+    def _safe_receipt_event(receipt: ActionExecutionReceipt) -> dict[str, Any]:
+        return {
+            "correlation_id": receipt.correlation_id,
+            "action": receipt.action,
+            "status": receipt.status.value,
+            "artifact_count": len(receipt.artifacts),
+            "data_field_names": sorted(receipt.data),
+            "rollback_attempted": receipt.rollback_attempted,
+            "rollback_succeeded": receipt.rollback_succeeded,
+        }

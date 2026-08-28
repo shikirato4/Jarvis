@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from .base import AutonomousMission, MissionState, MissionStatus, StopReason
+from .base import AutonomousMission, MissionStatus, StopReason
 
 
 class MissionStateManager:

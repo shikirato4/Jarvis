@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from queue import Empty, Queue
+from threading import Thread
 from time import perf_counter
 from typing import Any
 
@@ -8,6 +10,7 @@ from jarvis.config import Settings
 from jarvis.core.errors import CapabilityUnavailableError, JarvisError
 from jarvis.core.events import EventBus
 from jarvis.core.modes import ModeManager
+from jarvis.core.resilience import ResiliencePolicy, RetryBudgetPolicy
 
 from .backends import TTSProviderRegistry
 from .base import SynthesisRequest, SynthesisResult, TTSProvider
@@ -42,6 +45,12 @@ class TTSService:
         failure_details: list[dict[str, str]] = []
         metadata = request.metadata or {}
         selected_names = [provider.provider_name for provider in candidates]
+        total_timeout_ms = self._resolve_timeout_ms(request)
+        provider_timeout_ms = (
+            max(int(total_timeout_ms / max(len(candidates), 1)), 1)
+            if total_timeout_ms is not None
+            else None
+        )
         self._logger.info(
             "tts_provider_selected",
             extra={
@@ -73,16 +82,24 @@ class TTSService:
                         "rate": request.rate,
                     },
                 )
+                call = lambda provider=provider: self._synthesize_with_deadline(
+                    provider,
+                    request,
+                    timeout_ms=provider_timeout_ms,
+                )
                 if self._resilience is not None:
                     result, _ = self._resilience.execute(
                         service_name="voice_runtime",
                         dependency_name=provider.provider_name,
                         operation_name="tts.synthesize",
-                        timeout_ms=self._resolve_timeout_ms(request),
-                        func=lambda provider=provider: provider.synthesize(request),
+                        timeout_ms=provider_timeout_ms,
+                        policy=ResiliencePolicy(
+                            retry_budget=RetryBudgetPolicy(max_attempts=1)
+                        ),
+                        func=call,
                     )
                 else:
-                    result = provider.synthesize(request)
+                    result = call()
                 result.fallback_used = index > 0
                 result.metadata["requested_provider"] = self._coalesce_metadata_value(
                     result.metadata.get("requested_provider"),
@@ -154,6 +171,42 @@ class TTSService:
         raise JarvisError(str(last_error), component="voice_runtime", code="tts_failed", recoverable=True)
 
     @staticmethod
+    def _synthesize_with_deadline(
+        provider: TTSProvider,
+        request: SynthesisRequest,
+        *,
+        timeout_ms: int | None,
+    ) -> SynthesisResult:
+        if timeout_ms is None:
+            return provider.synthesize(request)
+        outcome: Queue[tuple[bool, object]] = Queue(maxsize=1)
+
+        def run() -> None:
+            try:
+                outcome.put((True, provider.synthesize(request)))
+            except Exception as exc:  # noqa: BLE001
+                outcome.put((False, exc))
+
+        worker = Thread(
+            target=run,
+            name=f"jarvis-tts-{provider.provider_name}",
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=max(timeout_ms, 0) / 1000)
+        if worker.is_alive():
+            raise TimeoutError(
+                f"tts provider deadline exceeded ({timeout_ms}ms)"
+            )
+        try:
+            success, value = outcome.get_nowait()
+        except Empty as exc:
+            raise RuntimeError("tts provider returned no result") from exc
+        if success:
+            return value  # type: ignore[return-value]
+        raise value  # type: ignore[misc]
+
+    @staticmethod
     def _coalesce_metadata_value(current: object, fallback: object) -> object:
         if current not in (None, ""):
             return current
@@ -203,5 +256,6 @@ class TTSService:
                 "no module named",
                 "unavailable",
                 "missing speaker_wav",
+                "cuda requested but unavailable",
             )
         )

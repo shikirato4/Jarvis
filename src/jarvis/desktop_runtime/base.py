@@ -125,4 +125,7 @@ class DesktopShellState(JarvisBaseModel):
     voice: DesktopVoiceState = Field(default_factory=DesktopVoiceState)
     llm_mode: str = "disabled"
     llm_provider: str = "none"
+    llm_model: str | None = None
+    llm_status: dict[str, Any] = Field(default_factory=dict)
+    pending_attachments: list[dict[str, Any]] = Field(default_factory=list)
     dev_runtime: dict[str, Any] = Field(default_factory=dict)

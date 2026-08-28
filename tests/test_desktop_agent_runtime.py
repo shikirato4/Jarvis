@@ -30,6 +30,7 @@ from jarvis.desktop_agent_runtime.policies import DesktopAgentPolicyEngine
 from jarvis.desktop_agent_runtime.recovery import DesktopAgentRecoveryEngine
 from jarvis.desktop_agent_runtime.verifier import DesktopAgentVerifier
 from jarvis.desktop_agent_runtime.world_model import DesktopWorldModelBuilder
+from jarvis.models_runtime.base import ModelResponse, ModelToolCall, ProviderKind
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -37,7 +38,6 @@ def _settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -48,6 +48,35 @@ def _settings(tmp_path: Path) -> Settings:
             "desktop": str(tmp_path / "Desktop"),
         },
     )
+
+
+def _install_desktop_tool_model(app, *, goal: str, final_content: str) -> None:
+    def infer(request):
+        if request.messages[-1].role == "tool":
+            return ModelResponse(
+                provider_name="nemotron-test",
+                provider_kind=ProviderKind.LOCAL,
+                logical_model=request.logical_model or "general_assistant",
+                model_name="nemotron-test",
+                content=final_content,
+                latency_ms=1.0,
+            )
+        return ModelResponse(
+            provider_name="nemotron-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model=request.logical_model or "general_assistant",
+            model_name="nemotron-test",
+            tool_calls=[
+                ModelToolCall(
+                    id="desktop-agent-1",
+                    name="desktop_agent.run_mission",
+                    arguments={"goal": goal},
+                )
+            ],
+            latency_ms=1.0,
+        )
+
+    app.agent_controller._infer_model = infer  # noqa: SLF001
 
 
 def test_desktop_agent_builds_world_state(tmp_path: Path) -> None:
@@ -488,7 +517,6 @@ def test_desktop_agent_run_copies_moves_and_renames_file(tmp_path: Path) -> None
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -617,8 +645,15 @@ def test_desktop_agent_runtime_status_exposes_latest_goal_and_observation(tmp_pa
 
 def test_desktop_chat_routes_goal_to_desktop_agent(tmp_path: Path) -> None:
     app, desktop = build_desktop_runtime(_settings(tmp_path))
+    _install_desktop_tool_model(
+        app,
+        goal="abre chrome y busca youtube",
+        final_content="Navegando a YouTube.",
+    )
     try:
-        response = desktop.send_chat("abre chrome y busca youtube")
+        pending = desktop.send_chat("abre chrome y busca youtube")
+        assert pending.raw_result.get("status") == "waiting_confirmation"
+        response = desktop.send_chat("sí")
         assert "Navegando" in response.message.content
         assert response.raw_result.get("status") == "completed"
         assert response.panel_snapshot is not None
@@ -629,8 +664,15 @@ def test_desktop_chat_routes_goal_to_desktop_agent(tmp_path: Path) -> None:
 
 def test_desktop_chat_routes_visual_click_to_desktop_agent(tmp_path: Path) -> None:
     app, desktop = build_desktop_runtime(_settings(tmp_path))
+    _install_desktop_tool_model(
+        app,
+        goal="haz click en el boton guardar en word",
+        final_content="Acción visual completada.",
+    )
     try:
-        response = desktop.send_chat("haz click en el boton guardar en word")
+        pending = desktop.send_chat("haz click en el boton guardar en word")
+        assert pending.raw_result.get("status") == "waiting_confirmation"
+        response = desktop.send_chat("sí")
         assert response.raw_result.get("status") == "completed"
         assert response.raw_result.get("mission_snapshot", {}).get("source_surface") == "desktop_chat"
     finally:

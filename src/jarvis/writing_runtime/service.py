@@ -20,7 +20,6 @@ from .models import (
     WritingAnalysisResult,
     WritingBudget,
     WritingContinuationRequest,
-    WritingGeneratedBlock,
     WritingMode,
     WritingOperationReceipt,
     WritingTask,
@@ -318,7 +317,7 @@ class WritingRuntimeService(RuntimeServiceContract):
 
     def _persist_context(self, task: WritingTask) -> None:
         settings = getattr(self._semantic_memory, "_settings", None)
-        if settings is not None and (not getattr(settings, "ollama_enabled", True) or not getattr(settings, "embeddings_enabled", True)):
+        if settings is not None and not getattr(settings, "embeddings_enabled", True):
             return
         try:
             self._semantic_memory.ingest_document(

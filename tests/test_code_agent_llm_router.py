@@ -17,93 +17,106 @@ def _make_project(root: Path) -> None:
 
 
 def _response(text: str = "hola", file: str = "src/app.py") -> str:
-    return json.dumps(
-        {
-            "status": "proposed",
-            "summary": "Replace greeting",
-            "confidence": 0.8,
-            "target_files": [file],
-            "operations": [{"type": "replace", "file": file, "old_text": "hello", "new_text": text, "reason": "test"}],
-            "warnings": [],
-            "tests_suggested": [],
-        }
-    )
+    return json.dumps({
+        "status": "proposed",
+        "summary": "Replace greeting",
+        "confidence": 0.8,
+        "target_files": [file],
+        "operations": [{
+            "type": "replace", "file": file, "old_text": "hello",
+            "new_text": text, "reason": "test",
+        }],
+        "warnings": [],
+        "tests_suggested": [],
+    })
 
 
-def _set_dual_env(monkeypatch, *, mode: str = "auto", allow_online: bool = False, local: str | None = None, online: str | None = None) -> None:
+def _set_dual_env(monkeypatch, *, mode: str = "auto", local: str | None = None, remote: str | None = None) -> None:
     monkeypatch.setenv("JARVIS_LLM_MODE", mode)
-    monkeypatch.setenv("JARVIS_LOCAL_PROVIDER", "fake")
-    monkeypatch.setenv("JARVIS_ONLINE_PROVIDER", "fake-online")
-    monkeypatch.setenv("JARVIS_ALLOW_ONLINE_FOR_CODE", "true" if allow_online else "false")
-    monkeypatch.setenv("JARVIS_LLM_PREFER_LOCAL", "true")
+    monkeypatch.setenv("JARVIS_LOCAL_PROVIDER", "fake-local")
+    monkeypatch.setenv("JARVIS_ONLINE_PROVIDER", "fake-remote")
     if local is None:
         monkeypatch.delenv("JARVIS_LOCAL_LLM_FAKE_RESPONSE", raising=False)
     else:
         monkeypatch.setenv("JARVIS_LOCAL_LLM_FAKE_RESPONSE", local)
-    if online is None:
+    if remote is None:
         monkeypatch.delenv("JARVIS_ONLINE_LLM_FAKE_RESPONSE", raising=False)
     else:
-        monkeypatch.setenv("JARVIS_ONLINE_LLM_FAKE_RESPONSE", online)
+        monkeypatch.setenv("JARVIS_ONLINE_LLM_FAKE_RESPONSE", remote)
     monkeypatch.delenv("JARVIS_LLM_FAKE_RESPONSE", raising=False)
 
 
-def test_offline_mode_uses_local_provider(tmp_path: Path, monkeypatch) -> None:
+def test_local_mode_uses_only_local_provider(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="offline", local=_response("local"), online=_response("online"))
+    _set_dual_env(monkeypatch, mode="local", local=_response("local"), remote=_response("remote"))
     service = CodeAgentRuntimeService(tmp_path)
 
-    route = service.llm_route("cambia hello por local en src/app.py", llm_mode="offline")
-    result = service.change_propose("cambia hello por local en src/app.py", llm_assisted=True, llm_mode="offline")
+    route = service.llm_route("cambia hello por local en src/app.py", llm_mode="local")
+    result = service.change_propose(
+        "cambia hello por local en src/app.py", llm_assisted=True, llm_mode="local"
+    )
 
     assert route["provider_kind"] == "local"
+    assert route["provider_name"] == "fake-local"
     assert result["status"] == "proposed"
     assert "+    return 'local'" in result["patch"]["unified_diff"]
 
 
-def test_online_mode_uses_local_ollama_not_external_llm(tmp_path: Path, monkeypatch) -> None:
+def test_nvidia_api_mode_uses_only_remote_provider(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="online", allow_online=True, local=_response("local"), online=_response("online"))
+    _set_dual_env(monkeypatch, mode="nvidia_api", local=_response("local"), remote=_response("remote"))
     service = CodeAgentRuntimeService(tmp_path)
 
-    route = service.llm_route("cambia hello por online en src/app.py", llm_mode="online", allow_online=True)
-    result = service.change_propose("cambia hello por online en src/app.py", llm_assisted=True, llm_mode="online", allow_online=True)
+    route = service.llm_route("cambia hello por remote en src/app.py", llm_mode="nvidia_api")
+    result = service.change_propose(
+        "cambia hello por remote en src/app.py", llm_assisted=True, llm_mode="nvidia_api"
+    )
 
-    assert route["provider_kind"] == "local"
-    assert result["status"] == "proposed"
-    assert "+    return 'local'" in result["patch"]["unified_diff"]
+    assert route["provider_kind"] == "remote"
+    assert route["provider_name"] == "fake-online"
+    assert "+    return 'remote'" in result["patch"]["unified_diff"]
 
 
-def test_auto_prefers_local_for_private_code(tmp_path: Path, monkeypatch) -> None:
+def test_auto_prefers_remote_then_falls_back_to_local(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="auto", allow_online=True, local=_response("local"), online=_response("online"))
+    _set_dual_env(monkeypatch, local=_response("local"), remote=_response("remote"))
+    preferred_service = CodeAgentRuntimeService(tmp_path)
+    preferred = preferred_service.llm_route("cambia hello por remote en src/app.py", llm_mode="auto")
+
+    assert preferred["provider_kind"] == "remote"
+    assert preferred["fallback_used"] is False
+
+    _set_dual_env(monkeypatch, local=_response("local"), remote=None)
+    fallback_service = CodeAgentRuntimeService(tmp_path)
+    fallback = fallback_service.llm_route("cambia hello por local en src/app.py", llm_mode="auto")
+
+    assert fallback["provider_kind"] == "local"
+    assert fallback["fallback_used"] is True
+
+
+def test_strict_modes_never_cross_fallback_boundary(tmp_path: Path, monkeypatch) -> None:
+    _make_project(tmp_path)
+    _set_dual_env(monkeypatch, mode="local", local=None, remote=_response("remote"))
+    local_route = CodeAgentRuntimeService(tmp_path).llm_route("actualiza src/app.py", llm_mode="local")
+
+    _set_dual_env(monkeypatch, mode="nvidia_api", local=_response("local"), remote=None)
+    remote_route = CodeAgentRuntimeService(tmp_path).llm_route(
+        "actualiza src/app.py", llm_mode="nvidia_api"
+    )
+
+    assert local_route["provider_kind"] == "local"
+    assert local_route["allowed"] is False
+    assert remote_route["provider_kind"] == "remote"
+    assert remote_route["allowed"] is False
+
+
+def test_secret_context_blocks_every_provider_and_is_redacted(tmp_path: Path, monkeypatch) -> None:
+    _make_project(tmp_path)
+    _set_dual_env(monkeypatch, mode="nvidia_api", local=_response("local"), remote=_response("remote"))
     service = CodeAgentRuntimeService(tmp_path)
 
-    route = service.llm_route("cambia hello por local en src/app.py", llm_mode="auto", allow_online=True)
-    result = service.change_propose("cambia hello por local en src/app.py", llm_assisted=True, llm_mode="auto", allow_online=True)
-
-    assert route["provider_kind"] == "local"
-    assert "project code" in route["reason"]
-    assert "+    return 'local'" in result["patch"]["unified_diff"]
-
-
-def test_auto_does_not_use_external_online_llm_for_public_task(tmp_path: Path, monkeypatch) -> None:
-    _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="auto", allow_online=True, local=None, online=_response("online", file="README.md"))
-    service = CodeAgentRuntimeService(tmp_path)
-
-    route = service.llm_route("agrega nota publica al README", llm_mode="auto", allow_online=True)
-
-    assert route["provider_kind"] == "none"
-    assert route["allowed"] is False
-
-
-def test_secret_context_blocks_online_and_env_never_sent(tmp_path: Path, monkeypatch) -> None:
-    _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="online", allow_online=True, local=_response("local"), online=_response("online"))
-    service = CodeAgentRuntimeService(tmp_path)
-
-    route = service.llm_route("cambia TOKEN en .env", llm_mode="online", allow_online=True)
-    result = service.change_propose("cambia TOKEN en .env", llm_assisted=True, llm_mode="online", allow_online=True)
+    route = service.llm_route("cambia TOKEN en .env", llm_mode="nvidia_api")
+    result = service.change_propose("cambia TOKEN en .env", llm_assisted=True, llm_mode="nvidia_api")
     memory = str(service.memory_show()).casefold()
 
     assert route["allowed"] is False
@@ -113,85 +126,51 @@ def test_secret_context_blocks_online_and_env_never_sent(tmp_path: Path, monkeyp
     assert "secret-value" not in memory
 
 
-def test_offline_local_unavailable_does_not_use_online(tmp_path: Path, monkeypatch) -> None:
+def test_invalid_mode_is_rejected_as_migrated_auto(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="offline", local=None, online=_response("online"))
-    service = CodeAgentRuntimeService(tmp_path)
+    _set_dual_env(monkeypatch, mode="deprecated", local=_response("local"), remote=_response("remote"))
+    route = CodeAgentRuntimeService(tmp_path).llm_route("actualiza src/app.py", llm_mode="deprecated")
 
-    route = service.llm_route("cambia hello por hola en src/app.py", llm_mode="offline")
-    result = service.change_propose("cambia hello por hola en src/app.py", llm_assisted=True, llm_mode="offline")
-
+    assert route["mode"] == "auto"
     assert route["allowed"] is False
-    assert route["provider_kind"] == "local"
-    assert "fallback" in str(result).casefold()
+    assert route["provider_kind"] == "none"
 
 
-def test_auto_local_unavailable_does_not_use_online_llm(tmp_path: Path, monkeypatch) -> None:
+def test_cli_route_and_change_accept_exact_local_mode(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="auto", allow_online=False, local=None, online=_response("online", file="README.md"))
-    service = CodeAgentRuntimeService(tmp_path)
-
-    public_route = service.llm_route("explica buenas practicas publicas", llm_mode="auto", allow_online=True)
-    private_route = service.llm_route("cambia hello por online en src/app.py", llm_mode="auto")
-
-    assert public_route["provider_kind"] == "none"
-    assert public_route["allowed"] is False
-    assert private_route["allowed"] is False
-
-
-def test_auto_online_unavailable_falls_back_to_local(tmp_path: Path, monkeypatch) -> None:
-    _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="auto", allow_online=True, local=_response("local", file="README.md"), online=None)
-    service = CodeAgentRuntimeService(tmp_path)
-
-    route = service.llm_route("explica buenas practicas publicas", llm_mode="auto", allow_online=True)
-
-    assert route["provider_kind"] == "local"
-    assert route["fallback_used"] is True
-
-
-def test_disabled_uses_deterministic(tmp_path: Path, monkeypatch) -> None:
-    _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="disabled", local=_response("local"), online=_response("online"))
-    service = CodeAgentRuntimeService(tmp_path)
-
-    result = service.change_propose("cambia hello por deterministic en src/app.py", llm_assisted=True, llm_mode="disabled")
-
-    assert result["status"] == "proposed"
-    assert "+    return 'deterministic'" in result["patch"]["unified_diff"]
-    assert "llm route unavailable" in str(result).casefold()
-
-
-def test_cli_llm_route_mode_and_offline_change_agent(tmp_path: Path, monkeypatch) -> None:
-    _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="offline", local=_response("local"), online=_response("online"))
+    _set_dual_env(monkeypatch, mode="local", local=_response("local"))
     runner = CliRunner()
 
-    route = runner.invoke(app, ["code", "llm", "route", "cambia hello por local en src/app.py", "--root", str(tmp_path), "--mode", "offline"])
+    route = runner.invoke(app, [
+        "code", "llm", "route", "cambia hello por local en src/app.py",
+        "--root", str(tmp_path), "--mode", "local",
+    ])
     mode = runner.invoke(app, ["code", "llm", "mode", "--root", str(tmp_path)])
-    change = runner.invoke(app, ["code", "change", "propose", "cambia hello por local en src/app.py", "--root", str(tmp_path), "--llm-assisted", "--mode", "offline"])
-    agent = runner.invoke(app, ["code", "agent", "run", "cambia hello por local en src/app.py", "--root", str(tmp_path), "--dry-run", "--generate-patch", "--llm-assisted", "--mode", "offline"])
+    change = runner.invoke(app, [
+        "code", "change", "propose", "cambia hello por local en src/app.py",
+        "--root", str(tmp_path), "--llm-assisted", "--mode", "local",
+    ])
 
     assert route.exit_code == 0
     assert '"provider_kind": "local"' in route.stdout
     assert mode.exit_code == 0
-    assert '"mode": "offline"' in mode.stdout
+    assert '"mode": "local"' in mode.stdout
     assert change.exit_code == 0
     assert '"proposed"' in change.stdout
-    assert agent.exit_code == 0
-    assert '"commands": []' in agent.stdout
 
 
-def test_router_memory_without_secrets_and_provider_recorded(tmp_path: Path, monkeypatch) -> None:
+def test_router_memory_records_provider_without_secrets(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    _set_dual_env(monkeypatch, mode="offline", local=_response("local"), online=_response("online"))
-    monkeypatch.setenv("JARVIS_LLM_API_KEY", "sk-secret")
+    _set_dual_env(monkeypatch, mode="local", local=_response("local"))
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-secret")
     service = CodeAgentRuntimeService(tmp_path)
 
-    service.change_propose("cambia hello por local en src/app.py", llm_assisted=True, llm_mode="offline")
+    service.change_propose(
+        "cambia hello por local en src/app.py", llm_assisted=True, llm_mode="local"
+    )
     raw = str(service.memory_show()).casefold()
 
     assert "llm_events" in raw
     assert "fake-local" in raw
-    assert "sk-secret" not in raw
+    assert "nvapi-secret" not in raw
     assert ".env" not in raw

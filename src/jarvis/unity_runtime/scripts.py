@@ -5,7 +5,7 @@ from pathlib import Path
 
 from jarvis.core.errors import UnityEditorOperationError
 
-from .base import UnityAssetKind, UnityOperationReceipt, UnityScriptDescriptor
+from .base import UnityScriptDescriptor
 
 
 class UnityScriptService:

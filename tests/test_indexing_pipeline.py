@@ -35,7 +35,6 @@ def test_indexing_pipeline_indexes_workspace_file(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embedding_provider_default="indexing_deterministic",
         embedding_provider_fallback_order=("indexing_deterministic",),
         embedding_model_default="indexing-test",

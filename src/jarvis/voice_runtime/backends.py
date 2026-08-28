@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import array
 import io
 import logging
 import tempfile
@@ -8,6 +7,7 @@ import threading
 import time
 import uuid
 import wave
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -305,8 +305,7 @@ class Pyttsx3AudioOutputBackend:
     backend_name = "pyttsx3"
 
     def __init__(self) -> None:
-        self._engine = None
-        self._engine_lock = threading.Lock()
+        self._engines = _WindowsSpeechEngineManager()
 
     def health_check(self) -> dict[str, Any]:
         try:
@@ -333,18 +332,15 @@ class Pyttsx3AudioOutputBackend:
                     break
         if cancellation is not None and cancellation.cancelled():
             return LocalPlaybackHandle(playback_id=str(uuid.uuid4()), cancellation=cancellation)
-        engine.say(text)
-        engine.runAndWait()
+        if isinstance(engine, _DirectWindowsSapiEngine):
+            engine.speak(text, cancellation=cancellation)
+        else:
+            engine.say(text)
+            engine.runAndWait()
         return LocalPlaybackHandle(playback_id=str(uuid.uuid4()), cancellation=cancellation, duration_seconds=result.duration_seconds)
 
     def _ensure_engine(self):
-        with self._engine_lock:
-            if self._engine is not None:
-                return self._engine
-            import pyttsx3  # type: ignore
-
-            self._engine = pyttsx3.init()
-            return self._engine
+        return self._engines.current()
 
 
 class FasterWhisperSTTProvider:
@@ -457,8 +453,7 @@ class Pyttsx3TTSProvider:
     provider_kind = "local"
 
     def __init__(self) -> None:
-        self._engine = None
-        self._engine_lock = threading.Lock()
+        self._engines = _WindowsSpeechEngineManager()
 
     def health_check(self) -> dict[str, Any]:
         try:
@@ -496,13 +491,120 @@ class Pyttsx3TTSProvider:
         )
 
     def _ensure_engine(self):
-        with self._engine_lock:
-            if self._engine is not None:
-                return self._engine
+        return self._engines.current()
+
+
+class _SapiVoice:
+    def __init__(self, token) -> None:
+        self.id = str(token.Id)
+        self.name = str(token.GetDescription())
+
+
+class _DirectWindowsSapiEngine:
+    """Small pyttsx3-compatible facade over native Windows SAPI."""
+
+    def __init__(self) -> None:
+        import win32com.client  # type: ignore
+
+        self._voice = win32com.client.Dispatch("SAPI.SpVoice")
+        self._pending_text = ""
+        self._rate_wpm = 200
+
+    def getProperty(self, name: str):  # noqa: N802 - pyttsx3 compatibility.
+        if name == "voices":
+            tokens = self._voice.GetVoices()
+            return [_SapiVoice(tokens.Item(index)) for index in range(tokens.Count)]
+        if name == "voice":
+            return str(self._voice.Voice.Id)
+        if name == "rate":
+            return self._rate_wpm
+        raise KeyError(name)
+
+    def setProperty(self, name: str, value) -> None:  # noqa: N802
+        if name == "rate":
+            self._rate_wpm = int(value)
+            self._voice.Rate = max(-10, min(10, round((self._rate_wpm - 200) / 20)))
+            return
+        if name == "voice":
+            tokens = self._voice.GetVoices()
+            for index in range(tokens.Count):
+                token = tokens.Item(index)
+                if str(token.Id) == str(value):
+                    self._voice.Voice = token
+                    return
+            raise ValueError("unknown SAPI voice")
+        raise KeyError(name)
+
+    def say(self, text: str) -> None:
+        self._pending_text = text
+
+    def runAndWait(self) -> None:  # noqa: N802
+        self.speak(self._pending_text)
+        self._pending_text = ""
+
+    def stop(self) -> None:
+        self._voice.Speak("", 3)
+
+    def speak(
+        self,
+        text: str,
+        *,
+        cancellation: CancellationToken | None = None,
+    ) -> None:
+        self._voice.Speak(str(text), 1)
+        while not self._voice.WaitUntilDone(50):
+            if cancellation is not None and cancellation.cancelled():
+                self.stop()
+                return
+
+
+class _WindowsSpeechEngineManager:
+    """Creates one COM speech engine per thread and never shares apartments."""
+
+    def __init__(self) -> None:
+        self._local = threading.local()
+
+    def current(self):
+        engine = getattr(self._local, "engine", None)
+        if engine is not None:
+            return engine
+        if sys.platform == "win32":
+            self._initialize_com_apartment()
+            try:
+                self._prepare_speech_typelib_in_memory()
+                import pyttsx3  # type: ignore
+
+                engine = pyttsx3.init(driverName="sapi5")
+                engine.getProperty("voice")
+            except Exception as pyttsx3_error:  # noqa: BLE001
+                try:
+                    engine = _DirectWindowsSapiEngine()
+                except Exception as sapi_error:  # noqa: BLE001
+                    raise UIAutomationError(
+                        "Windows SAPI initialization failed after pyttsx3 recovery"
+                    ) from sapi_error
+                setattr(engine, "pyttsx3_fallback_reason", type(pyttsx3_error).__name__)
+        else:
             import pyttsx3  # type: ignore
 
-            self._engine = pyttsx3.init()
-            return self._engine
+            engine = pyttsx3.init()
+        self._local.engine = engine
+        return engine
+
+    @staticmethod
+    def _initialize_com_apartment() -> None:
+        import pythoncom  # type: ignore
+
+        pythoncom.CoInitialize()
+
+    @staticmethod
+    def _prepare_speech_typelib_in_memory() -> None:
+        import comtypes.client  # type: ignore
+
+        comtypes.client.gen_dir = None
+        comtypes.client.GetModule(
+            ("{C866CA3A-32F7-11D2-9602-00C04F8EE628}", 5, 4)
+        )
 
 
 def _chunks_to_wav_bytes(chunks: list[AudioChunk]) -> io.BytesIO:

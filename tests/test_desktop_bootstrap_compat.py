@@ -10,7 +10,6 @@ def test_desktop_service_uses_existing_bootstrap_runtime(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)

@@ -73,34 +73,22 @@ class LLMRouter:
     def route(self, task: str, targets: list[ResolvedTarget], *, mode: str | None = None, allow_online_override: bool = False, prompt: str = "") -> tuple[LLMProvider | None, RouteDecision]:
         selected_mode = (mode or self._config.mode).strip().casefold()
         sensitivity = self.classify(task, targets, prompt=prompt)
-        if selected_mode == "disabled":
-            return None, self._decision(selected_mode, "none", None, sensitivity, "LLM disabled by mode", False)
         if sensitivity.level == "secret":
             return None, self._decision(selected_mode, "none", None, sensitivity, "secret context is never sent to an LLM", False, warning="deterministic fallback required")
-        if selected_mode == "offline":
+        if selected_mode == "local":
             if self._local_provider.is_available():
-                return self._local_provider, self._decision(selected_mode, "local", self._local_provider, sensitivity, "offline mode uses only local provider", True)
-            return None, self._decision(selected_mode, "local", self._local_provider, sensitivity, "offline local provider unavailable", False, warning="deterministic fallback required")
-        if selected_mode == "online":
-            if self._local_provider.is_available():
-                return self._local_provider, self._decision(
-                    selected_mode,
-                    "local",
-                    self._local_provider,
-                    sensitivity,
-                    "online mode uses Brave Search for web and local Ollama for generation; external online LLMs are blocked",
-                    True,
-                )
-            return None, self._decision(selected_mode, "local", self._local_provider, sensitivity, "online mode requires local Ollama generation, but local provider is unavailable", False, warning="deterministic fallback required")
+                return self._local_provider, self._decision(selected_mode, "local", self._local_provider, sensitivity, "LOCAL uses only the configured Nemotron endpoint", True)
+            return None, self._decision(selected_mode, "local", self._local_provider, sensitivity, "LOCAL endpoint unavailable", False, warning="deterministic fallback required")
+        if selected_mode == "nvidia_api":
+            if self._online_provider.is_available():
+                return self._online_provider, self._decision(selected_mode, "remote", self._online_provider, sensitivity, "NVIDIA API mode is strict", True)
+            return None, self._decision(selected_mode, "remote", self._online_provider, sensitivity, "NVIDIA API unavailable", False, warning="deterministic fallback required")
         if selected_mode != "auto":
-            return None, self._decision("disabled", "none", None, sensitivity, "invalid LLM mode", False)
-        if sensitivity.level in {"sensitive", "internal"} and self._config.prefer_local:
-            if self._local_provider.is_available():
-                return self._local_provider, self._decision("auto", "local", self._local_provider, sensitivity, "auto prefers local for project code context", True)
-            if sensitivity.level == "sensitive" and not (self._config.allow_online_for_code or allow_online_override):
-                return None, self._decision("auto", "local", self._local_provider, sensitivity, "local unavailable and online blocked for sensitive context", False, fallback_used=True)
+            return None, self._decision("auto", "none", None, sensitivity, "invalid LLM mode migrated to AUTO", False)
+        if self._online_provider.is_available():
+            return self._online_provider, self._decision("auto", "remote", self._online_provider, sensitivity, "AUTO selected NVIDIA API", True)
         if self._local_provider.is_available():
-            return self._local_provider, self._decision("auto", "local", self._local_provider, sensitivity, "auto selected local fallback", True, fallback_used=True)
+            return self._local_provider, self._decision("auto", "local", self._local_provider, sensitivity, "AUTO selected local Nemotron fallback", True, fallback_used=True)
         return None, self._decision("auto", "none", None, sensitivity, "no LLM provider available", False, fallback_used=True, warning="deterministic fallback required")
 
     @staticmethod

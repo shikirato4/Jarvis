@@ -29,7 +29,6 @@ def test_writing_api_returns_summary(monkeypatch, tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)

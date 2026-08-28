@@ -187,7 +187,6 @@ class UIAutomationService:
 
         if request.focus_target:
             self._backend.focus_window(request.focus_target, timeout_seconds=self._settings.ui_focus_timeout_seconds)
-        started_at = datetime.now(timezone.utc)
         awareness_request = UIAwarenessRequest(
             capture=ScreenCaptureRequest(target_type=CaptureTargetType.ACTIVE_WINDOW),
             include_ocr=True,
@@ -710,7 +709,10 @@ class UIAutomationService:
         names: list[str] = []
         seen: set[str] = set()
         for provider in self._application_registry.list_providers():
-            for target in provider.list_applications():
+            cached_lister = getattr(provider, "list_cached_applications", None)
+            if not callable(cached_lister):
+                continue
+            for target in cached_lister():
                 display_name = (target.display_name or "").strip()
                 if display_name and display_name.casefold() not in seen:
                     seen.add(display_name.casefold())

@@ -5,6 +5,7 @@ from threading import Thread
 
 import pytest
 
+from jarvis.bootstrap import build_application
 from jarvis.cognition.models import OrchestrationRequest
 from jarvis.config import Settings
 from jarvis.core.errors import UIValidationError
@@ -134,6 +135,34 @@ def test_ui_unknown_window_requires_confirmation_and_logs_decision(jarvis_app) -
     )
 
 
+def test_ui_unknown_window_does_not_trigger_native_catalog_discovery(tmp_path: Path, monkeypatch) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+        system_backend_kind="native",
+    )
+    app = build_application(settings)
+    app.start()
+    try:
+        provider = app.ui_automation_service._application_registry.list_providers()[0]  # noqa: SLF001
+
+        def fail_discovery():
+            raise AssertionError("interactive security checks must not scan the native application catalog")
+
+        monkeypatch.setattr(provider, "_discover_applications", fail_discovery)
+        app.runtime_service.switch_mode("operator", reason="ui confirmation without discovery")
+
+        receipt = app.runtime_service.ui_write_text({"text": "Hola", "mode": "copilot"})
+
+        assert receipt.confirmation_required is True
+        assert receipt.security_decision == "confirmation_required"
+    finally:
+        app.stop()
+
+
 def test_ui_unknown_window_executes_after_confirmation(jarvis_app) -> None:
     jarvis_app.runtime_service.switch_mode("operator", reason="ui confirmation approved")
     first = jarvis_app.runtime_service.ui_write_text({"text": "Hola", "mode": "copilot"})
@@ -150,7 +179,6 @@ def test_contextual_writing_can_deliver_to_editor(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         embedding_provider_default="ui_semantic",
         embedding_provider_fallback_order=("ui_semantic",),

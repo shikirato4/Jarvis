@@ -1,6 +1,43 @@
 # Jarvis Cognitive OS
 
-Jarvis is the Phase 1 core of a local cognitive operating system. The codebase is organized as a runtime kernel, not as a toy chatbot, and is ready to grow into a desktop application, a local daemon, or an embedded service.
+Jarvis is a local cognitive operating system organized around a shared runtime kernel. The same services back its desktop interface, CLI, HTTP API, automation, memory, model routing, voice, vision, system, Unity, research, writing, science, security, indexing, autonomy, and code-agent capabilities.
+
+## Cambios recientes
+
+### 2026-08-16 — Nemotron híbrido, adjuntos multimodales y estabilización
+
+- El modelo principal se migró desde los proveedores anteriores a `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` mediante NVIDIA API y al objetivo local exacto `nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4` mediante un endpoint OpenAI-compatible. Las integraciones de modelo anteriores se retiraron del código activo, UI, CLI, configuración y pruebas; no existe un fallback oculto fuera de los dos proveedores Nemotron.
+- Se añadieron los modos persistentes `AUTO`, `NVIDIA API` y `LOCAL`. AUTO comprueba el endpoint NVIDIA con autenticación, usa el proveedor local ante clave ausente/inválida, `429`, timeout, red o `5xx`, y vuelve a probar NVIDIA después del enfriamiento. Los modos forzados nunca cambian silenciosamente de proveedor.
+- Se implementó un circuit breaker de tres fallos, respeto de `Retry-After`, estados observables, proveedor fijo por solicitud y recuperación de streaming sin repetir efectos externos ni llamadas de herramientas.
+- La interfaz muestra modo, proveedor, modelo, salud, latencia, motivo de fallback, estado de clave y capacidades. Ajustes permite guardar, reemplazar, eliminar y probar la clave mediante el almacén seguro del sistema; el frontend solo recibe estados redactados.
+- El compositor incorpora un botón `+`, selección múltiple, arrastrar y soltar, pegado, navegación de teclado, chips de vista previa, cancelación, eliminación y reintento. Los adjuntos pendientes sobreviven al cambio de modo.
+- Se creó un pipeline neutral y acotado por solicitud para imágenes, audio, video, PDF, DOCX, TXT, Markdown, CSV, JSON y código. Valida magic bytes, MIME, nombres, tamaño, corrupción, rutas de archivo y contenido sensible; almacena referencias protegidas en lugar de Base64 en el historial.
+- Se conectaron OCR local, transcripción con segmentos, extracción de fotogramas/audio de video y extracción fragmentada de documentos. `pypdf` es ahora una dependencia base para PDF y `keyring` pertenece al extra desktop.
+- Se añadió diagnóstico de RAM, GPU/VRAM, driver, CUDA, backend, NVFP4, contexto y paralelismo. El launcher vLLM conserva el checkpoint y la cuantización exactos y solo pasa offload/límites que el backend declara soportar.
+- El chequeo local de `/models` ahora exige que el endpoint anuncie el identificador NVFP4 exacto; una respuesta JSON válida que sirve otro modelo se rechaza con diagnóstico de incompatibilidad, sin sustitución silenciosa.
+- El extra `dev` incluye ahora `build` y `wheel`, además de pytest y Ruff, para que el comando de construcción documentado sea reproducible en un entorno nuevo.
+- Se corrigió el cierre de logging: Jarvis ya no llama `logging.shutdown()` global ni cierra handlers del host/pytest; solo descarga y cierra sus propios handlers, tolerando errores de cierre independientes.
+- El estado de voz dejó de cargar `pyttsx3` durante cada refresco y la síntesis/reproducción queda serializada para evitar carreras entre respuestas. El watchdog renueva el deadline de operaciones que emiten heartbeat real, pero sigue cancelando tareas estancadas.
+- El indexado de arranque/eventos/autonomía se ejecuta en una cola de fondo de un trabajador; se añadieron pausa, reanudación y cancelación pendiente mediante API y `jarvis index`, mientras las consultas de chat evitan esperar detrás de esa cola.
+- La investigación registra etapas separadas de memoria semántica, memoria, workspace y web. Una colección vacía finaliza explícitamente y un fallo de síntesis entrega un informe parcial con las fuentes recuperadas en vez de perder la evidencia.
+- La aplicación desktop muestra una superficie de inicio antes de construir el runtime pesado. Los benchmarks rápidos se identifican como simulados y ya no inventan throughput; los benchmarks reales conservan proveedor, modelo, TTFT, streaming y errores observables.
+- Se corrigieron rutas de request que perdían adjuntos, contratos HTTP que descartaban `tools`, `tool_choice` o `response_format`, estados de clave que no reflejaban validación y textos de UI que anunciaban un modelo retirado.
+- Se corrigieron estados híbridos que quedaban obsoletos al cambiar de modo, timestamps inestables en snapshots inactivos y lecturas de modo que creaban configuración incidentalmente y contaminaban el indexado.
+- Se conservó la compatibilidad con handlers de chat que aceptan únicamente el argumento histórico, el envío de UI se agenda en el siguiente ciclo de eventos sin una demora artificial de 25 ms y cada stream conserva sus IDs de request/turno para impedir repeticiones.
+- La configuración persistente pasó a rutas de usuario mediante `platformdirs`, escritura atómica y redacción de campos sensibles; la primera lectura puede migrar una configuración de workspace existente sin reescribirla ni crear archivos incidentalmente.
+- `python -m jarvis doctor` ahora incluye modo híbrido persistido, ambos modelos exactos, capacidades, diagnóstico de hardware local y estado redactado de la clave; ya no informa falsamente que todo LLM en línea está desactivado.
+- Se añadieron pruebas de regresión para selección/failover/recuperación, secreto, proveedor local/remoto, streaming, tool calling, salida estructurada, adjuntos y seguridad multimodal, UI, logging, diagnóstico y migración. La prueba NVIDIA real es opt-in mediante `RUN_NVIDIA_LIVE_TESTS=true`.
+- La compatibilidad del protocolo local se probó además contra un servidor HTTP OpenAI-compatible real en `127.0.0.1` (salud, inferencia, streaming, herramientas y salida estructurada); las pruebas normales no necesitan red externa.
+
+### 2026-08-15 — Auditoría técnica y estabilización
+
+- La validación de seguridad para una ventana desconocida ahora consulta únicamente el catálogo de aplicaciones ya almacenado en memoria. Ya no inicia un escaneo recursivo del sistema durante una confirmación interactiva, evitando bloqueos de varios minutos sin debilitar la confirmación obligatoria.
+- Coqui XTTS valida la muestra `speaker_wav` antes de cargar el modelo. Una solicitud inválida degrada inmediatamente al siguiente proveedor configurado y no reserva memoria para un modelo que no podrá sintetizar.
+- Una preferencia explícita por CUDA se rechaza cuando `torch.cuda.is_available()` es falso. El proveedor XTTS se declara no saludable y el enrutador utiliza el orden de fallback en vez de intentar ejecutar una compilación CPU de PyTorch sobre CUDA.
+- La reproducción de voz prueba backends compatibles en orden. Si el backend preferido falla, utiliza el siguiente disponible y conserva `playback_fallback_from` y `playback_fallback_reason` en los metadatos del resultado.
+- Las pruebas automatizadas aíslan los backends opcionales de audio mediante proveedores `in_memory`; las pruebas específicas de voz siguen activando explícitamente XTTS y otros proveedores cuando corresponde. Esto evita depender del hardware o de la `.env` personal durante la batería general.
+- Se añadieron regresiones para el catálogo de aplicaciones, la validación temprana de XTTS, CUDA no disponible y el fallback del backend de reproducción.
+- Se incorporó Ruff al extra `dev` con una configuración reproducible para errores de sintaxis, imports y nombres. La limpieza inicial eliminó importaciones y variables muertas sin alterar las API públicas reexportadas desde los paquetes.
 
 ## Source Tree
 
@@ -10,7 +47,7 @@ src/jarvis/
   bootstrap.py
   cli.py
   config.py
-  logging.py
+  jarvis_logging.py
   actions/
     base.py
     models.py
@@ -45,10 +82,26 @@ src/jarvis/
   models_runtime/
     base.py
     catalog.py
-    ollama.py
+    coordinator.py
+    hybrid.py
+    nemotron_local.py
+    nvidia_nim.py
+    openai_compatible.py
     registry.py
     router.py
     service.py
+  attachments/
+    models.py
+    pipeline.py
+    processors.py
+    registry.py
+    service.py
+    storage.py
+  local_runtime/
+    diagnostics.py
+    registry.py
+    service.py
+    vllm_backend.py
   modules/
     memory_module.py
     operations_module.py
@@ -75,6 +128,8 @@ src/jarvis/
 - `FastAPI`: local HTTP service surface for a future desktop shell or local agents.
 - `Typer`: operational CLI on top of the same runtime service facade.
 - `Pillow`: base image inspection capability for the vision layer.
+- `pypdf`: extracción de texto y referencias de página de documentos PDF.
+- `keyring` (extra `desktop`): almacenamiento de la clave NVIDIA en el almacén seguro del sistema operativo.
 
 ## Runtime Layers
 
@@ -83,7 +138,9 @@ src/jarvis/
 - `models/`: common strict Pydantic base models.
 - `actions/`: executable action contracts, validation, receipts, and rollback-aware routing.
 - `tools/`: lower-level tool calling layer for direct capability access.
-- `models_runtime/`: provider abstraction, model catalog, model routing and Ollama integration.
+- `models_runtime/`: contratos neutrales, los dos proveedores Nemotron, coordinación híbrida y circuit breaker.
+- `attachments/`: detección segura, almacenamiento opaco y procesamiento multimodal limitado a la solicitud.
+- `local_runtime/`: diagnóstico de hardware y adaptadores de lanzamiento extensibles para backends NVFP4 compatibles.
 - `routing/`: top-level task router that decides between metacommands, tools, actions, and orchestration.
 - `cognition/`: orchestration kernel for intent-to-plan resolution.
 - `memory/`: persistence backbone for memories, activity, and automations.
@@ -97,7 +154,7 @@ src/jarvis/
 3. Logging is configured with structured console output plus a rotating file handler.
 4. Registries are created for actions, tools, modules, capabilities, providers, modes, runtime state, and services.
 5. Capability modules register actions and capability descriptors, while builtin tools register tool-call adapters.
-6. `ModelService` sits behind `ProviderRegistry` and `ModelRouter`, so neither tools, actions, nor orchestration call Ollama directly.
+6. `ModelService` sits behind `ProviderRegistry`, `ModelRouter` and the hybrid coordinator, so UI, memory, tools, actions and orchestration never couple themselves to NVIDIA, vLLM or another backend.
 7. `JarvisApplication.start()` creates the persistence schema, starts modules, starts automation, and brings the runtime service online.
 8. The top-level request path goes through `TaskRouter`, which can:
    - parse a metacommand such as `/mode operator`
@@ -122,7 +179,7 @@ JARVIS incluye una interfaz de control desktop oficial. Inicia la aplicación de
 python -m jarvis.desktop
 ```
 
-El arranque es autoconfigurable: detecta tu conexión a internet y tu proveedor local de modelos (por defecto Ollama en `http://127.0.0.1:11434`), y ajusta la interfaz automáticamente en modo `auto`, `offline` o `disabled`.
+El selector del encabezado permite `AUTO`, `NVIDIA API` y `LOCAL`. El cambio se guarda en la configuración persistente, se aplica a la siguiente solicitud y no interrumpe el turno que ya está en curso. La UI muestra qué proveedor atendió cada respuesta; no confunde conectividad general con disponibilidad autenticada de NVIDIA.
 
 Si deseas diagnosticar el estado del entorno de red y los modelos detectados, usa el comando de diagnóstico:
 
@@ -132,6 +189,183 @@ python -m jarvis doctor
 o su equivalente para el Code Agent:
 ```powershell
 python -m jarvis code doctor
+```
+
+## Modelo principal híbrido
+
+Los dos proveedores nuevos entregan el mismo `ModelResponse` interno:
+
+- `NvidiaNimProvider`: endpoint NVIDIA NIM autenticado, modelo remoto fijo `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning`.
+- `NemotronOmniLocalProvider`: endpoint OpenAI-compatible configurable, modelo fijo `nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4`.
+
+`selectedMode` conserva la elección del usuario; `requestProvider` queda fijado al comenzar el turno; `activeProvider` identifica el último proveedor efectivo; `providerStatus`, `capabilities` y `fallbackReason` explican la decisión sin exponer secretos.
+
+| Modo | Comportamiento |
+| --- | --- |
+| `AUTO` | Prefiere NVIDIA si la clave existe y `/models` responde autenticado. Ante `401/403`, `429`, timeout, red o `5xx`, usa Nemotron local cuando la modalidad tenga una ruta segura. Reevalúa NVIDIA en la siguiente solicitud después del enfriamiento. |
+| `NVIDIA API` | Fuerza NVIDIA. Si falla, devuelve un error claro y no cambia al modelo local. |
+| `LOCAL` | Usa exclusivamente `LOCAL_LLM_BASE_URL`; no realiza solicitudes a NVIDIA. Si el endpoint se aloja en otra máquina, solo se contacta esa URL configurada. |
+
+El circuit breaker abre aproximadamente tras tres fallos consecutivos. Un `429` respeta `Retry-After`. Si un stream remoto falla antes de una acción externa, AUTO puede reintentarlo localmente una sola vez; si ya hubo un efecto, el turno se marca incompleto y requiere confirmación para repetirlo. Los identificadores de turno, request, archivo y tool call evitan duplicados.
+
+### Configuración y ubicación de la clave
+
+Copia `.env.example` a un archivo local `.env`, que ya está ignorado por Git:
+
+```dotenv
+JARVIS_LLM_MODE=auto
+NVIDIA_API_KEY=TU_CLAVE_REAL
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=nvidia/nemotron-3-nano-omni-30b-a3b-reasoning
+
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1
+LOCAL_LLM_MODEL=nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4
+LOCAL_CPU_OFFLOAD_GB=auto
+LOCAL_GPU_MEMORY_UTILIZATION=auto
+LOCAL_MAX_MODEL_LEN=auto
+LOCAL_TENSOR_PARALLEL_SIZE=auto
+JARVIS_LOCAL_LOAD_TIMEOUT_SECONDS=900
+JARVIS_LOCAL_PERFORMANCE_PROFILE=stable
+```
+
+La clave real va exactamente en `NVIDIA_API_KEY` dentro de `.env`, o en **Ajustes → NVIDIA → API key**. El campo es enmascarado y guarda mediante el keyring del sistema cuando está disponible. No se conserva en `localStorage`, logs, conversación, telemetría, archivos del frontend ni respuestas HTTP. El endpoint `/llm/status` solo indica `configured`, `source` y `validity`; `/llm/nvidia-key` nunca devuelve el valor. Si no existe un keyring utilizable, la UI indica que debe usarse `.env`.
+
+### Iniciar Nemotron NVFP4 local
+
+Instala un backend que soporte realmente este formato en hardware compatible y sirve el checkpoint exacto. El adaptador incluido genera una orden equivalente a:
+
+```powershell
+vllm serve nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 `
+  --served-model-name nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4 `
+  --host 127.0.0.1 --port 8000 `
+  --trust-remote-code `
+  --reasoning-parser nemotron_v3 `
+  --enable-auto-tool-choice `
+  --tool-call-parser qwen3_coder `
+  --kv-cache-dtype fp8
+```
+
+Si `LOCAL_TENSOR_PARALLEL_SIZE` es mayor que uno, el adaptador añade el backend MoE indicado por la receta oficial. La orden solo se construye cuando el diagnóstico confirma vLLM 0.20.0 o superior, CUDA 12.9 o superior y una GPU Blackwell compatible; no se descarga ni intenta cargar el checkpoint en un host incompatible.
+
+Después selecciona `LOCAL` o deja `AUTO`. También puedes establecer `LOCAL_LLM_BASE_URL=http://servidor-compatible:8000/v1` para alojarlo en otra máquina. Jarvis no cambia automáticamente a otro modelo ni a otra cuantización.
+
+Los valores `auto` delegan los límites al backend, evitando inventar una configuración segura. Para un perfil explícito, establece `JARVIS_LOCAL_PERFORMANCE_PROFILE=custom` y solo los límites que el backend soporte, por ejemplo:
+
+```dotenv
+LOCAL_CPU_OFFLOAD_GB=12
+LOCAL_GPU_MEMORY_UTILIZATION=0.82
+LOCAL_MAX_MODEL_LEN=32768
+LOCAL_TENSOR_PARALLEL_SIZE=2
+JARVIS_LOCAL_LOAD_TIMEOUT_SECONDS=1200
+JARVIS_LOCAL_PERFORMANCE_PROFILE=custom
+```
+
+vLLM declara soporte para esas cuatro opciones; un adaptador futuro que no soporte alguna es rechazado con el campo exacto, no ignorado. Los perfiles `stable`, `balanced` y `performance` sirven como etiqueta operativa configurable; los límites numéricos siguen siendo explícitos o `auto`, de modo que el nombre del perfil nunca inventa VRAM/RAM disponible.
+
+### Compatibilidad del equipo auditado
+
+El equipo usado para esta auditoría tiene aproximadamente 13.9 GiB de RAM, PyTorch 2.11 CPU-only, CUDA no disponible, ningún GPU NVFP4 verificable y vLLM ausente. El diagnóstico local rechaza el lanzamiento porque NVFP4 requiere NVIDIA Blackwell con compute capability 10.0 o superior, CUDA/backend compatible y memoria suficiente; el repositorio oficial del checkpoint publica aproximadamente 22.4 GB de archivos. Por tanto, **NVFP4 no fue ejecutado en este equipo**. La arquitectura, endpoint, launcher y failover sí se verifican con mocks y un servidor HTTP OpenAI-compatible real, y quedan listos para hardware compatible o un host externo.
+
+## Adjuntos multimodales (`+`)
+
+El botón `+` está junto al campo de chat y abre categorías para imágenes, video, audio, documentos, texto, código y otros archivos seguros. Admite selección múltiple, arrastrar/soltar, pegar desde el portapapeles, teclado (`Enter`/`Space` para abrir y `Esc` para cerrar), vista previa, nombre/formato/tamaño/estado, cancelar, eliminar y reintentar. Puedes enviar texto junto con varios archivos; cambiar de modo no borra la cola.
+
+Cada archivo se representa mediante ID, nombre saneado, categoría, MIME detectado, tamaño, SHA-256, token local opaco, estado, modalidad y contenido derivado. El historial no recibe Base64 ni rutas reales. Por defecto se permiten 16 archivos, 50 MiB por archivo y 200 MiB por request; se configuran con `JARVIS_ATTACHMENT_MAX_FILES_PER_REQUEST`, `JARVIS_ATTACHMENT_MAX_FILE_BYTES` y `JARVIS_ATTACHMENT_MAX_REQUEST_BYTES`.
+
+Rutas de procesamiento:
+
+- Imágenes: transporte nativo cuando el proveedor y su protocolo lo verifican; en los demás casos OCR/visión local. Se conserva el original protegido.
+- Audio: transporte nativo solo si está verificado; de lo contrario FFmpeg normaliza y el STT local devuelve texto y segmentos temporales.
+- Video: FFprobe/FFmpeg extraen fotogramas acotados, audio y timestamps; el pipeline transcribe y construye contenido derivado sin enviar el video completo innecesariamente.
+- Documentos: TXT, Markdown, CSV, JSON, código, DOCX y PDF se extraen localmente, se fragmentan con presupuesto de contexto y conservan referencias de página cuando existen. Un PDF escaneado puede continuar por OCR local.
+
+Se rechazan path traversal, nombres absolutos, archivos ejecutables, HTML/SVG activo, MIME falso, PDF/DOCX/JSON corruptos, archivos excesivos y patrones de secretos. El almacenamiento queda limitado al request actual. `LOCAL` procesa todo mediante rutas locales y garantiza cero tráfico a NVIDIA; NVIDIA API recibe solo el archivo adjunto o contenido derivado mínimo que la modalidad requiera. Los adjuntos no entran en memoria permanente sin una política explícita.
+
+## Capacidades conservadas y adaptadas
+
+La migración es aditiva respecto de las capacidades del sistema. Se mantienen memoria SQL/local, conversación, voz/STT/TTS, visión/OCR, generación de imágenes, automatizaciones, razonamiento, lectura/ingesta de documentos, búsqueda Brave, Code Agent, Git/repo learning, Guided Control, herramientas y confirmaciones de seguridad. Las herramientas se ejecutan localmente bajo las mismas políticas: Nemotron puede proponer una llamada, pero no saltarse permisos ni confirmaciones.
+
+Nemotron se aprovecha mediante streaming, razonamiento, tool calling y salida JSON normalizada. La ficha oficial declara texto, imagen, audio y video como entradas y un contexto de hasta 256K, pero el transporte NVIDIA implementado solo marca imagen como modalidad binaria nativa verificada. Audio/video usan el pipeline local derivado hasta verificar un contrato de transporte estable; documentos crudos no se anuncian como modalidad nativa.
+
+## Diagnóstico y solución de problemas
+
+- `cloud_invalid_key`: guarda una clave nueva en Ajustes o corrige `NVIDIA_API_KEY`; AUTO puede continuar localmente, NVIDIA API no.
+- `cloud_rate_limited`: se muestra el enfriamiento de `Retry-After`; AUTO usa local temporalmente.
+- `cloud_unavailable` o timeout/`5xx`: verifica `NVIDIA_BASE_URL`; AUTO abre el circuito tras fallos repetidos.
+- `local_active` con error de conexión: inicia el endpoint exacto o corrige `LOCAL_LLM_BASE_URL`. Ajustes muestra el diagnóstico y la orden de lanzamiento solo cuando el host es compatible.
+- `both_unavailable`: revisa conjuntamente la clave/servicio NVIDIA y el endpoint local; Jarvis muestra el diagnóstico combinado y no cambia a un tercer proveedor.
+- OCR, audio o video no disponibles: instala/configura Tesseract, FFmpeg/FFprobe y el STT local. El adjunto queda en error reintentable con el requisito faltante.
+- El archivo se rechaza antes de subir: revisa tamaño, extensión/contenido, integridad y que no incluya credenciales. El mensaje identifica la validación que falló.
+
+### Control del indexado en segundo plano
+
+```powershell
+python -m jarvis index status
+python -m jarvis index pause
+python -m jarvis index resume
+python -m jarvis index cancel-pending
+python -m jarvis index run
+```
+
+`pause` impide que comiencen nuevos trabajos de fondo sin interrumpir una consulta de chat en primer plano; `cancel-pending` cancela solo los trabajos que aún no empezaron. El estado expone `background_active`, `background_paused` y la política de prioridad de chat.
+
+## Verificación
+
+Comandos reproducibles usados durante esta migración:
+
+```powershell
+python -m pip check
+python -m ruff check --no-cache .
+python -m ruff format --check --no-cache <archivos Python nuevos de esta migración>
+$env:QT_QPA_PLATFORM='windows'
+python -m pytest -p no:cacheprovider -q
+python -m build --no-isolation
+python -m jarvis doctor
+python -m jarvis serve
+python -m jarvis.desktop
+```
+
+Resultados verificados el 2026-08-16:
+
+- Línea base anterior a la migración: `632 passed, 2 skipped`.
+- Primera batería completa de cierre: `720 passed, 3 failed, 3 skipped` en 1171.55 s. Los tres fallos reprodujeron contaminación del modo persistido en dos pruebas y la pérdida del encabezado/política del benchmark; sus causas se corrigieron y las cuatro regresiones focalizadas pasaron.
+- Regresión dirigida del núcleo híbrido final: `72 passed` en 39.80 s.
+- Batería completa final: `724 passed, 3 skipped` en 1869.88 s. Los omitidos son la prueba NVIDIA live (requiere `RUN_NVIDIA_LIVE_TESTS=true`) y dos pruebas de seguridad de symlinks que Windows no permite crear en este entorno.
+- Ruff lint: `All checks passed`; los 43 archivos Python nuevos pasaron `ruff format --check`. No se reformatearon masivamente archivos heredados.
+- Dependencias: `python -m pip check` no detectó requisitos rotos.
+- Build: wheel `jarvis_cognitive_os-0.1.0-py3-none-any.whl` y `sdist` construidos correctamente con `python -m build --no-isolation` desde una copia limpia del mismo árbol fuente.
+- Instalación del artefacto: el wheel se instaló con `pip --target` en un directorio aislado, importó `jarvis` y conservó los dos nombres exactos de modelo.
+- Smoke API: startup y shutdown limpios; `/health`, `/llm/status` y `/llm/local-diagnostic` respondieron HTTP 200.
+- Smoke CLI: `python -m jarvis smoke-test` completó una operación de memoria sobre datos temporales y cerró limpiamente.
+- Smoke desktop Qt sobre la plataforma Windows: `3 passed`; mostró la ventana y verificó selector, botón `+`, teclado, multiarchivo, chips, cambio de modo, drop y portapapeles.
+
+El proyecto no define actualmente configuración ni dependencia oficial para mypy o pyright, por lo que no existe un comando de tipos estático reproducible que ejecutar. `compileall` sí aprobó todo `src/jarvis`; los contratos nuevos usan Pydantic estricto y están cubiertos por las pruebas. Añadir un type checker global requeriría una migración separada del código heredado y no se simuló como verificación aprobada.
+
+El workspace de esta sesión impide que procesos secundarios creen o actualicen ciertos archivos dentro del árbol: el build directo no pudo tocar `src/jarvis_cognitive_os.egg-info` y Ruff no pudo reescribir algunos archivos aunque sí pudo verificarlos. El mismo código se construyó y arrancó sin errores al dirigir build/datos a un directorio temporal escribible. La caché de pytest se desactiva por la misma restricción; `-p no:cacheprovider` no omite pruebas. La inspección visual asistida de Windows tampoco estuvo disponible porque el plugin instalado solicita un submódulo no exportado por su runtime; las pruebas Qt nativas con ventana mostrada sí pasaron. Una instalación normal del repositorio debe ejecutarse desde un directorio donde el usuario tenga escritura efectiva.
+
+## Voz y degradación controlada
+
+El runtime de voz selecciona un proveedor TTS y un backend de salida de forma independiente. Si XTTS o el backend de reproducción no están disponibles, Jarvis conserva el texto de la respuesta y recorre los fallbacks configurados. Un fallback de reproducción queda registrado en los metadatos del resultado para que el fallo original siga siendo observable.
+
+Configuración principal en `.env`:
+
+```dotenv
+JARVIS_VOICE_ENABLED=true
+JARVIS_VOICE_TTS_PROVIDER_DEFAULT=coqui_xtts
+JARVIS_VOICE_TTS_PROVIDER_FALLBACK_ORDER=pyttsx3,in_memory
+JARVIS_VOICE_AUDIO_OUTPUT_BACKEND_DEFAULT=winsound
+JARVIS_VOICE_COQUI_DEVICE_PREFERENCE=auto
+JARVIS_VOICE_COQUI_SPEAKER_WAV=C:\ruta\a\speaker.wav
+```
+
+Usa `auto` para seleccionar CUDA sólo cuando PyTorch confirme que está disponible. Si configuras `cuda` explícitamente en un equipo CPU-only, XTTS se marcará como no saludable y Jarvis continuará con el orden de fallback. La muestra WAV debe existir antes de que XTTS cargue el modelo.
+
+Comandos útiles:
+
+```powershell
+python -m jarvis voice status
+python -m jarvis voice speak "Sistema en línea"
+python -m jarvis doctor
 ```
 
 ## Local Image Runtime
@@ -199,8 +433,9 @@ Recommended validation commands:
 python --version
 python -c "import jarvis; print('ok')"
 python -m compileall src\jarvis
-python -m pytest tests/test_voice_runtime.py -q
-python -m pytest tests/test_desktop_runtime_routing.py -q
+python -m pip check
+python -m ruff check --no-cache .
+python -m pytest -p no:cacheprovider -q
 ```
 
 Remove any legacy repo-local virtual environment backups after the root `.venv` is confirmed working. Keeping virtual environments or archived copies inside the indexed workspace will slow down searches, validation, and indexing.
@@ -213,7 +448,7 @@ New capabilities should enter the runtime as modules, actions, and optionally to
 2. Register one or more actions in `register_actions()`.
 3. Optionally register tools in `register_tools()`.
 4. Add the module to `build_application()`.
-5. If the capability needs reasoning, use `context.models` or inject `ModelService`; do not call Ollama directly.
+5. If the capability needs reasoning, use `context.models` or inject `ModelService`; do not call NVIDIA, vLLM or another backend directly.
 
 Example:
 
@@ -271,4 +506,4 @@ class DiagnosticsModule:
 
 ## Current Phase Scope
 
-The current codebase now includes Phase 2 inference wiring with Ollama behind a provider abstraction. No final visual desktop shell is included yet. The next safe expansions are STT/TTS providers, semantic vision, embeddings, reranking, memory indexing, and a desktop surface on top of the runtime service facade.
+The current codebase includes a desktop shell plus CLI and HTTP surfaces over the same runtime facade. The remote and local Nemotron providers remain behind the model-provider abstraction, while optional local integrations supply STT/TTS, voice cloning, vision capture, embeddings, image generation, Windows automation, Word COM, and Unity workflows. Optional capability providers must continue to degrade through their registries without bypassing safety confirmation, persistence, cancellation, privacy or observability contracts.

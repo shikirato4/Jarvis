@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import time
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -26,15 +27,27 @@ def _build_window(tmp_path):
     from jarvis.config import Settings
     from jarvis.desktop import build_desktop_runtime
     from jarvis.desktop_runtime.window import JarvisDesktopWindow
+    from jarvis.models_runtime.base import ModelResponse, ProviderKind
 
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     backend, desktop = build_desktop_runtime(settings)
+
+    def infer(request):
+        return ModelResponse(
+            provider_name="nemotron-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model=request.logical_model or "general_assistant",
+            model_name="nemotron-test",
+            content="Respuesta de Jarvis.",
+            latency_ms=1.0,
+        )
+
+    backend.agent_controller._infer_model = infer  # noqa: SLF001
     window = JarvisDesktopWindow(desktop)
     return backend, window
 
@@ -129,9 +142,10 @@ def test_window_submit_chat_returns_before_background_work_finishes(tmp_path) ->
     app = create_qt_application()
     backend, window = _build_window(tmp_path)
     original = window._desktop.send_chat  # noqa: SLF001
+    release_background_work = Event()
     try:
         def _slow_send_chat(text: str, **kwargs):
-            time.sleep(0.3)
+            release_background_work.wait(timeout=10)
             return original(text, **kwargs)
 
         window._desktop.send_chat = _slow_send_chat  # type: ignore[method-assign]  # noqa: SLF001
@@ -146,6 +160,7 @@ def test_window_submit_chat_returns_before_background_work_finishes(tmp_path) ->
         assert elapsed < 0.15
         assert window._send_button.isEnabled() is False  # noqa: SLF001
         assert window._input.isEnabled() is True  # noqa: SLF001
+        release_background_work.set()
 
         deadline = time.perf_counter() + 5.0
         while time.perf_counter() < deadline and window._pending_future is not None:  # noqa: SLF001
@@ -156,6 +171,7 @@ def test_window_submit_chat_returns_before_background_work_finishes(tmp_path) ->
         assert window._pending_future is None  # noqa: SLF001
         assert window._send_button.isEnabled() is True  # noqa: SLF001
     finally:
+        release_background_work.set()
         window.close()
         backend.stop()
         window._desktop.shutdown()  # noqa: SLF001

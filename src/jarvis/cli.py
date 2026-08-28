@@ -14,7 +14,6 @@ import uvicorn
 
 from jarvis.automation.service import AutomationDefinition
 from jarvis.benchmark import format_benchmark, format_real_benchmark, format_streaming_benchmark, run_benchmark, run_real_benchmark, run_streaming_benchmark
-from jarvis.bootstrap import build_application
 from jarvis.code_agent_runtime import CodeAgentRuntimeService
 from jarvis.config import Settings
 from jarvis.cognition.models import OrchestrationRequest
@@ -28,10 +27,8 @@ from jarvis.indexing_runtime.models import IndexRunRequest, IndexSourceCreateReq
 from jarvis.memory_semantic.base import SemanticSearchQuery
 from jarvis.memory_semantic.documents import DocumentIngestionRequest
 from jarvis.models_runtime.base import ModelRequest
-from jarvis.ollama_diagnostics import diagnose_ollama, warmup_ollama
 from jarvis.research_runtime.models import ResearchBudget, ResearchRunRequest, SimulatedResearchSource
 from jarvis.routing.models import TaskRequest
-from jarvis.science_runtime import ScienceSimulationRequest, ScienceSolveRequest
 from jarvis.security_runtime import SecurityAnalyzeRequest, SecurityPasswordCheckRequest
 from jarvis.system_runtime.base import ResourceQuery, SystemOpenRequest, SystemResolveRequest, SystemSearchRequest
 from jarvis.unity_runtime.base import (
@@ -52,6 +49,12 @@ from jarvis.ui_automation.base import ClickRequest, FocusWindowRequest, MoveMous
 from jarvis.voice_runtime.base import VoiceSessionRequest
 from jarvis.web_search import build_web_search_provider
 from jarvis.writing_runtime.models import WritingContinuationRequest, WritingMode
+
+
+def build_application(*args, **kwargs):
+    from jarvis.bootstrap import build_application as factory
+
+    return factory(*args, **kwargs)
 
 app = typer.Typer(help="Jarvis cognitive operating system CLI.")
 semantic_app = typer.Typer(help="Semantic memory operations.")
@@ -79,7 +82,6 @@ code_patch_app = typer.Typer(help="Reviewable patch proposals and safe patch app
 code_change_app = typer.Typer(help="Controlled natural-language change generation for reviewable patches.")
 code_llm_app = typer.Typer(help="Safe optional LLM provider status and configuration.")
 web_app = typer.Typer(help="Safe web search status and Brave Search queries.")
-ollama_app = typer.Typer(help="Local Ollama diagnostics for Jarvis.")
 image_app = typer.Typer(help="Local image generation with JuggernautXL SDXL.")
 app.add_typer(semantic_app, name="semantic")
 app.add_typer(ui_app, name="ui")
@@ -96,7 +98,6 @@ app.add_typer(index_app, name="index")
 app.add_typer(desktop_agent_app, name="desktop-agent")
 app.add_typer(code_agent_app, name="code")
 app.add_typer(web_app, name="web")
-app.add_typer(ollama_app, name="ollama")
 app.add_typer(image_app, name="image")
 code_agent_app.add_typer(code_memory_app, name="memory")
 code_agent_app.add_typer(code_git_app, name="git")
@@ -131,11 +132,29 @@ def _parse_json(raw: str | None) -> dict[str, Any]:
 def doctor() -> None:
     from jarvis.environment import detect_environment
     from jarvis.image_runtime.service import ImageGenerationService
+    from jarvis.local_runtime import LocalHardwareDiagnostics
+    from jarvis.models_runtime.coordinator import PersistentModeStore
+    from jarvis.models_runtime.hybrid import LLMMode
+    from jarvis.models_runtime.nemotron_local import NemotronOmniLocalProvider
+    from jarvis.models_runtime.nemotron_identity import local_model_policy_description
+    from jarvis.models_runtime.nvidia_nim import NvidiaNimProvider
     from jarvis.persistent_config import load_persistent_config
-    p_config = load_persistent_config()
-    env = detect_environment(ollama_base_url=p_config.local_base_url, prefer_model=p_config.local_model)
-    web_status = build_web_search_provider().status()
+    from jarvis.security_runtime.secrets import NvidiaSecretManager
+
     settings = Settings()
+    fallback_secret = settings.nvidia_api_key.get_secret_value() if settings.nvidia_api_key is not None else None
+    secret_manager = NvidiaSecretManager.from_system(fallback_value=fallback_secret)
+    p_config = load_persistent_config()
+    env = detect_environment(
+        local_base_url=p_config.local_base_url,
+        local_model=p_config.local_model,
+        nvidia_configured=secret_manager.status().configured,
+    )
+    web_status = build_web_search_provider().status()
+    nvidia_provider = NvidiaNimProvider(settings, secret_manager=secret_manager)
+    local_provider = NemotronOmniLocalProvider(settings)
+    selected_mode = PersistentModeStore(default_mode=LLMMode(settings.llm_mode)).load()
+    local_hardware = LocalHardwareDiagnostics().inspect(settings.local_llm_base_url)
     image_service = ImageGenerationService(settings=settings)
     try:
         image_status = image_service.status()
@@ -143,20 +162,34 @@ def doctor() -> None:
         image_service.stop()
     typer.echo(json.dumps({
         "internet_available": env.internet_available,
-        "ollama_available": env.ollama.available,
-        "ollama_models": env.ollama.models,
-        "ollama_error": env.ollama.error,
-        "ollama_status": env.ollama.status,
-        "ollama_reachable": env.ollama.reachable,
-        "ollama_base_url": env.ollama.base_url,
-        "ollama_openai_base_url": env.ollama.openai_base_url,
-        "ollama_model": env.ollama.model,
-        "ollama_model_found": env.ollama.model_found,
-        "ollama_response_time_ms": env.ollama.response_time_ms,
-        "ollama_suggestions": env.ollama.suggestions,
+        "local_endpoint": {
+            "available": env.local_endpoint.available,
+            "reachable": env.local_endpoint.reachable,
+            "status": env.local_endpoint.status,
+            "base_url": env.local_endpoint.base_url,
+            "model": env.local_endpoint.model,
+            "model_found": env.local_endpoint.model_found,
+            "response_time_ms": env.local_endpoint.response_time_ms,
+            "error": env.local_endpoint.error,
+            "suggestions": env.local_endpoint.suggestions,
+        },
         "recommended_local_provider": env.recommended_local_provider,
         "recommended_local_model": env.recommended_local_model,
         "recommended_mode": env.recommended_mode,
+        "hybrid_llm": {
+            "enabled": True,
+            "selected_mode": selected_mode.value,
+            "nvidia_provider": nvidia_provider.provider_name,
+            "nvidia_model": nvidia_provider.configured_model,
+            "nvidia_base_url": nvidia_provider.base_url,
+            "nvidia_capabilities": nvidia_provider.capabilities.model_dump(mode="json"),
+            "local_provider": local_provider.provider_name,
+            "local_model": local_provider.configured_model,
+            "local_base_url": local_provider.base_url,
+            "local_capabilities": local_provider.capabilities.model_dump(mode="json"),
+            "key_status": secret_manager.status().model_dump(mode="json"),
+            "local_hardware": local_hardware.model_dump(mode="json"),
+        },
         "web_search": {
             "provider": web_status.provider,
             "enabled": web_status.enabled,
@@ -179,94 +212,12 @@ def doctor() -> None:
         "policy": {
             "openai": "blocked",
             "gemini": "blocked",
-            "online_llm": "disabled",
-            "online_search": "Brave + local Ollama",
+            "nvidia_nim": "enabled_by_selected_mode",
+            "local_llm": local_model_policy_description(),
+            "online_search": "Brave + assigned Nemotron provider",
         },
         "warnings": env.warnings
     }, indent=2, default=str))
-
-
-@ollama_app.command("status")
-def ollama_status(json_output: bool = typer.Option(False, "--json")) -> None:
-    from jarvis.persistent_config import load_persistent_config
-
-    p_config = load_persistent_config()
-    diagnostic = diagnose_ollama(base_url=p_config.local_base_url, model=p_config.local_model, timeout_seconds=2.0)
-    payload = {
-        "reachable": diagnostic.reachable,
-        "available": diagnostic.available,
-        "status": diagnostic.status,
-        "base_url": diagnostic.base_url,
-        "openai_base_url": diagnostic.openai_base_url,
-        "model": diagnostic.model,
-        "model_found": diagnostic.model_found,
-        "response_time_ms": diagnostic.response_time_ms,
-        "message": diagnostic.message,
-        "suggestions": diagnostic.suggestions,
-        "openai": "blocked",
-        "gemini": "blocked",
-    }
-    if json_output:
-        typer.echo(json.dumps(payload, indent=2, default=str))
-        return
-    lines = [
-        "Jarvis Ollama Status",
-        f"Reachable: {str(diagnostic.reachable).lower()}",
-        f"Available: {str(diagnostic.available).lower()}",
-        f"Status: {diagnostic.status}",
-        f"Base URL: {diagnostic.base_url}",
-        f"OpenAI-compatible URL: {diagnostic.openai_base_url}",
-        f"Model: {diagnostic.model}",
-        f"Model found: {'unknown' if diagnostic.model_found is None else str(diagnostic.model_found).lower()}",
-        f"Response time: {diagnostic.response_time_ms} ms",
-        f"Message: {diagnostic.message}",
-        "OpenAI: blocked",
-        "Gemini: blocked",
-    ]
-    if diagnostic.suggestions:
-        lines.append("Suggestions:")
-        lines.extend(f"- {item}" for item in diagnostic.suggestions)
-    typer.echo("\n".join(lines))
-
-
-@ollama_app.command("warmup")
-def ollama_warmup(
-    prompt: str | None = typer.Option(None, "--prompt"),
-    timeout_seconds: float = typer.Option(20.0, "--timeout"),
-    json_output: bool = typer.Option(False, "--json"),
-) -> None:
-    from jarvis.persistent_config import load_persistent_config
-
-    p_config = load_persistent_config()
-    warm_prompt = prompt or "ping"
-    diagnostic = warmup_ollama(base_url=p_config.local_base_url, model=p_config.local_model, prompt=warm_prompt, timeout_seconds=timeout_seconds)
-    payload = {
-        "status": diagnostic.status,
-        "available": diagnostic.available,
-        "base_url": diagnostic.base_url,
-        "model": diagnostic.model,
-        "response_time_ms": diagnostic.response_time_ms,
-        "message": diagnostic.message,
-        "openai": "blocked",
-        "gemini": "blocked",
-    }
-    if json_output:
-        typer.echo(json.dumps(payload, indent=2, default=str))
-        return
-    typer.echo(
-        "\n".join(
-            [
-                "Jarvis Ollama Warmup",
-                f"Status: {diagnostic.status}",
-                f"Available: {str(diagnostic.available).lower()}",
-                f"Model: {diagnostic.model}",
-                f"Response time: {diagnostic.response_time_ms} ms",
-                f"Message: {diagnostic.message}",
-                "OpenAI: blocked",
-                "Gemini: blocked",
-            ]
-        )
-    )
 
 
 @app.command("benchmark")
@@ -1088,7 +1039,7 @@ def code_agent_run(
     patch_id: str | None = typer.Option(None, "--patch-id"),
     generate_patch: bool = typer.Option(False, "--generate-patch"),
     llm_assisted: bool = typer.Option(False, "--llm-assisted"),
-    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, nvidia_api, local."),
     allow_online: bool = typer.Option(False, "--allow-online"),
     max_steps: int = typer.Option(12, "--max-steps"),
     max_commands: int = typer.Option(3, "--max-commands"),
@@ -1120,7 +1071,7 @@ def code_change_plan(
     task: str,
     max_targets: int = typer.Option(3, "--max-targets"),
     llm_assisted: bool = typer.Option(False, "--llm-assisted"),
-    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, nvidia_api, local."),
     allow_online: bool = typer.Option(False, "--allow-online"),
     root: str | None = typer.Option(None, "--root"),
 ) -> None:
@@ -1132,7 +1083,7 @@ def code_change_propose(
     task: str,
     max_targets: int = typer.Option(3, "--max-targets"),
     llm_assisted: bool = typer.Option(False, "--llm-assisted"),
-    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, nvidia_api, local."),
     allow_online: bool = typer.Option(False, "--allow-online"),
     root: str | None = typer.Option(None, "--root"),
 ) -> None:
@@ -1157,7 +1108,7 @@ def code_llm_mode(root: str | None = typer.Option(None, "--root")) -> None:
 @code_llm_app.command("route")
 def code_llm_route(
     task: str,
-    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, offline, online, disabled."),
+    llm_mode: str | None = typer.Option(None, "--mode", help="LLM routing mode: auto, nvidia_api, local."),
     allow_online: bool = typer.Option(False, "--allow-online"),
     root: str | None = typer.Option(None, "--root"),
 ) -> None:
@@ -1585,7 +1536,23 @@ def voice_speak(text: str) -> None:
     jarvis = build_application()
     jarvis.start()
     try:
-        typer.echo(json.dumps(jarvis.runtime_service.voice_speak(text).model_dump(mode="json"), indent=2, default=str))
+        receipt = jarvis.runtime_service.voice_speak(text)
+        completion = None
+        if receipt.data.get("queued"):
+            completion = jarvis.runtime_service.voice_wait_for_speech(
+                receipt.correlation_id,
+                jarvis.settings.voice_watchdog_timeout_ms / 1000,
+            )
+        typer.echo(
+            json.dumps(
+                {
+                    "request": receipt.model_dump(mode="json"),
+                    "completion": completion,
+                },
+                indent=2,
+                default=str,
+            )
+        )
     finally:
         jarvis.stop()
 
@@ -1976,6 +1943,8 @@ def science_solve(
     parameters: str = typer.Option("{}", "--parameters"),
     plot: bool = typer.Option(False, "--plot"),
 ) -> None:
+    from jarvis.science_runtime.base import ScienceSolveRequest
+
     jarvis = build_application()
     jarvis.start()
     try:
@@ -2002,6 +1971,8 @@ def science_simulate(
     max_points: int = typer.Option(2000, "--max-points"),
     plot: bool = typer.Option(True, "--plot/--no-plot"),
 ) -> None:
+    from jarvis.science_runtime.base import ScienceSimulationRequest
+
     jarvis = build_application()
     jarvis.start()
     try:
@@ -2072,6 +2043,38 @@ def index_status() -> None:
     jarvis.start()
     try:
         typer.echo(json.dumps(jarvis.runtime_service.indexing_status(), indent=2, default=str))
+    finally:
+        jarvis.stop()
+
+
+@index_app.command("pause")
+def index_pause() -> None:
+    jarvis = build_application()
+    jarvis.start()
+    try:
+        typer.echo(json.dumps(jarvis.runtime_service.indexing_pause(), indent=2))
+    finally:
+        jarvis.stop()
+
+
+@index_app.command("resume")
+def index_resume() -> None:
+    jarvis = build_application()
+    jarvis.start()
+    try:
+        typer.echo(json.dumps(jarvis.runtime_service.indexing_resume(), indent=2))
+    finally:
+        jarvis.stop()
+
+
+@index_app.command("cancel-pending")
+def index_cancel_pending() -> None:
+    jarvis = build_application()
+    jarvis.start()
+    try:
+        typer.echo(
+            json.dumps(jarvis.runtime_service.indexing_cancel_pending(), indent=2)
+        )
     finally:
         jarvis.stop()
 

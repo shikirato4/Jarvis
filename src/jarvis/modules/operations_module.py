@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from jarvis.actions.models import ActionResult, ActionStep
+from jarvis.actions.models import ActionResult, ActionRisk, ActionStep
 from jarvis.actions.registry import ActionContext, ActionDefinition, ActionRegistry
 from jarvis.core.capabilities import CapabilityDescriptor, CapabilityRegistry
 from jarvis.core.modes import ExecutionMode
@@ -31,6 +31,8 @@ class OperationsModule:
                 payload_model=RunCommandPayload,
                 handler=self._run_command,
                 tags=("operations", "shell"),
+                risk=ActionRisk.SENSITIVE,
+                idempotent=False,
             )
         )
 

@@ -4,7 +4,7 @@ import io
 import time
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageGrab
+from PIL import Image, ImageDraw, ImageGrab, ImageOps, UnidentifiedImageError
 
 from jarvis.core.errors import VisionRuntimeError
 from jarvis.ui_automation.base import WindowInfo
@@ -287,14 +287,12 @@ class TesseractOCRProvider:
         if capture is None and request.image_bytes is None and request.image_path is None:
             raise VisionRuntimeError("tesseract provider requires image input")
         started = time.perf_counter()
-        image = None
-        if capture is not None and capture.image_bytes is not None:
-            image = Image.open(io.BytesIO(capture.image_bytes))
-        elif request.image_bytes is not None:
-            image = Image.open(io.BytesIO(request.image_bytes))
-        elif request.image_path is not None:
-            image = Image.open(request.image_path)
-        assert image is not None
+        try:
+            image = _load_normalized_ocr_image(request, capture=capture)
+        except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as exc:
+            raise VisionRuntimeError(
+                "La imagen está vacía, corrupta o usa un formato no compatible."
+            ) from exc
         raw = self._pytesseract.image_to_string(image, lang=request.language or "eng")
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
         blocks = [
@@ -315,6 +313,27 @@ class TesseractOCRProvider:
             blocks=blocks,
             metadata={"engine": "tesseract"},
         )
+
+
+def _load_normalized_ocr_image(
+    request: OCRRequest,
+    *,
+    capture: ScreenCaptureResult | None,
+    max_edge: int = 4096,
+) -> Image.Image:
+    if capture is not None and capture.image_bytes is not None:
+        image = Image.open(io.BytesIO(capture.image_bytes))
+    elif request.image_bytes is not None:
+        image = Image.open(io.BytesIO(request.image_bytes))
+    elif request.image_path is not None:
+        image = Image.open(request.image_path)
+    else:
+        raise VisionRuntimeError("La solicitud OCR no contiene una imagen.")
+    image.load()
+    normalized = ImageOps.exif_transpose(image)
+    if max(normalized.size) > max_edge:
+        normalized.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+    return normalized
 
 
 class HeuristicVisionAnalyzer:

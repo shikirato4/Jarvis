@@ -13,7 +13,6 @@ from .base import (
     MissionApprovalRequest,
     MissionControlActionRequest,
     MissionControlView,
-    MissionState,
     MissionStatus,
     MissionStep,
     MissionStepResult,

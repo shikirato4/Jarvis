@@ -48,6 +48,52 @@ class ResearchSynthesizer:
             metadata={"requested_outputs": list(task.requested_outputs), "model_correlation_id": correlation_id},
         )
 
+    @classmethod
+    def build_partial(
+        cls,
+        task: ResearchTask,
+        findings: list[ResearchFinding],
+        conflicts: list[ResearchConflict],
+        *,
+        confidence: float,
+        correlation_id: str,
+        error_type: str,
+    ) -> ResearchReport:
+        """Preserve attributable evidence if the normal synthesis path fails."""
+
+        return ResearchReport(
+            report_id=f"report-{task.task_id}-partial",
+            task_id=task.task_id,
+            title=f"Partial research report: {task.query}",
+            short_summary=(
+                f"Partial results for '{task.query}' from {len(task.sources)} source(s)."
+            ),
+            detailed_summary=cls._summarize_detailed(task, findings, conflicts),
+            technical_analysis=cls._technical_analysis(
+                task, findings, conflicts, confidence
+            ),
+            key_points=[item.summary for item in findings[:5]],
+            hypotheses=task.hypotheses,
+            findings=findings,
+            conflicts=conflicts,
+            confidence=confidence,
+            confidence_level=confidence_level(confidence),
+            structured_report={
+                "query": task.query,
+                "partial_results": True,
+                "sources": [item.model_dump(mode="json") for item in task.sources],
+                "evidence": [item.model_dump(mode="json") for item in task.evidence],
+                "findings": [item.model_dump(mode="json") for item in findings],
+                "conflicts": [item.model_dump(mode="json") for item in conflicts],
+            },
+            metadata={
+                "requested_outputs": list(task.requested_outputs),
+                "model_correlation_id": correlation_id,
+                "partial_results": True,
+                "synthesis_error_type": error_type,
+            },
+        )
+
     @staticmethod
     def _summarize_short(task: ResearchTask, findings: list[ResearchFinding]) -> str:
         if not findings:

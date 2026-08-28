@@ -83,6 +83,10 @@ class DesktopVoiceInputController:
             self._state = "LISTENING"
             self._error = None
             self._active_correlation_id = correlation_id
+        Thread(target=self._admit_session, args=(correlation_id, request), daemon=True).start()
+        return self.status()
+
+    def _admit_session(self, correlation_id: str, request: VoiceSessionRequest) -> None:
         try:
             receipt = self._voice_runtime.start_session(request)
         except Exception as exc:  # noqa: BLE001
@@ -90,11 +94,23 @@ class DesktopVoiceInputController:
                 if self._active_correlation_id == correlation_id:
                     self._active_correlation_id = None
                     self._set_error_locked(str(exc))
-            return self.status()
+            return
         with self._lock:
-            self._active_session_id = receipt.session_id
-        Thread(target=self._watch_session, args=(correlation_id, receipt.session_id), daemon=True).start()
-        return self.status()
+            if self._active_correlation_id != correlation_id:
+                stale_admission = True
+            else:
+                stale_admission = False
+                self._active_session_id = receipt.session_id
+        if stale_admission:
+            try:
+                self._voice_runtime.cancel(correlation_id)
+            except Exception:  # noqa: BLE001
+                self._logger.exception(
+                    "desktop_voice_stale_admission_cancel_failed",
+                    extra={"correlation_id": correlation_id},
+                )
+            return
+        self._watch_session(correlation_id, receipt.session_id)
 
     def cancel(self) -> dict[str, object]:
         with self._lock:

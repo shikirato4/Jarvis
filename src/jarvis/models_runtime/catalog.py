@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from pydantic import Field
-
 from jarvis.models.base import JarvisBaseModel
 
 
@@ -55,45 +53,35 @@ class ModelCatalog:
 
 
 def build_default_model_catalog(settings=None) -> ModelCatalog:
-    provider_name = getattr(settings, "model_provider_default", "ollama") if settings is not None else "ollama"
-    general_provider = getattr(settings, "general_chat_model_provider", "gpt_oss") if settings is not None else "gpt_oss"
-    provider_kind = "remote" if provider_name == "gpt_oss" else "local"
-    general_provider_kind = "remote" if general_provider == "gpt_oss" else "local"
-    provider_timeout = (
-        getattr(settings, "gpt_oss_timeout_seconds", 90.0)
-        if provider_name == "gpt_oss"
-        else getattr(settings, "ollama_timeout_seconds", 90.0)
+    provider_name = "provider_coordinator"
+    provider_kind = "hybrid"
+    model_name = (
+        getattr(settings, "nvidia_model", None)
+        or "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
     )
-    general_provider_timeout = (
-        getattr(settings, "gpt_oss_timeout_seconds", 90.0)
-        if general_provider == "gpt_oss"
-        else getattr(settings, "ollama_timeout_seconds", 90.0)
+    provider_timeout = max(
+        float(getattr(settings, "nvidia_timeout_seconds", 90.0)),
+        float(getattr(settings, "local_llm_timeout_seconds", 120.0)),
     )
-    general_model = getattr(settings, "gpt_oss_general_model", "gpt-oss-20b") if general_provider == "gpt_oss" else "llama3.1:8b"
-    reasoning_model = getattr(settings, "gpt_oss_reasoning_model", "qwen2.5:14b") if provider_name == "gpt_oss" else "qwen2.5:14b"
-    coding_model = getattr(settings, "gpt_oss_coding_model", "qwen2.5-coder:14b") if provider_name == "gpt_oss" else "qwen2.5-coder:14b"
-    summarizer_model = getattr(settings, "gpt_oss_summarizer_model", "llama3.1:8b") if provider_name == "gpt_oss" else "llama3.1:8b"
-    writing_model = getattr(settings, "gpt_oss_writing_model", "mistral-nemo:12b") if provider_name == "gpt_oss" else "mistral-nemo:12b"
-    planner_model = getattr(settings, "gpt_oss_planner_model", "qwen2.5:14b") if provider_name == "gpt_oss" else "qwen2.5:14b"
     profiles = [
         ModelProfile(
             logical_name="general_assistant",
-            provider=general_provider,
-            provider_kind=general_provider_kind,
-            model_name=general_model,
+            provider=provider_name,
+            provider_kind=provider_kind,
+            model_name=model_name,
             purpose="General assistant dialogue and classification.",
             capabilities=("chat", "classification"),
             task_types=("assistant", "classification"),
             temperature=0.2,
-            timeout_seconds=general_provider_timeout,
+            timeout_seconds=provider_timeout,
             priority=10,
-            fallbacks=tuple(getattr(settings, "general_chat_model_fallback_order", ()) or ()),
+            fallbacks=(),
         ),
         ModelProfile(
             logical_name="reasoning_engine",
             provider=provider_name,
             provider_kind=provider_kind,
-            model_name=reasoning_model,
+            model_name=model_name,
             purpose="Reasoning and plan generation.",
             capabilities=("chat", "planning", "reasoning"),
             task_types=("reasoning", "planning"),
@@ -106,7 +94,7 @@ def build_default_model_catalog(settings=None) -> ModelCatalog:
             logical_name="coding_engine",
             provider=provider_name,
             provider_kind=provider_kind,
-            model_name=coding_model,
+            model_name=model_name,
             purpose="Coding, implementation and technical transformation tasks.",
             capabilities=("chat", "coding", "reasoning"),
             task_types=("coding",),
@@ -119,7 +107,7 @@ def build_default_model_catalog(settings=None) -> ModelCatalog:
             logical_name="summarizer",
             provider=provider_name,
             provider_kind=provider_kind,
-            model_name=summarizer_model,
+            model_name=model_name,
             purpose="Summaries and brief synthesis.",
             capabilities=("chat", "summarization"),
             task_types=("summarization",),
@@ -132,7 +120,7 @@ def build_default_model_catalog(settings=None) -> ModelCatalog:
             logical_name="writing_engine",
             provider=provider_name,
             provider_kind=provider_kind,
-            model_name=writing_model,
+            model_name=model_name,
             purpose="Long-form structured writing.",
             capabilities=("chat", "writing"),
             task_types=("writing",),
@@ -145,7 +133,7 @@ def build_default_model_catalog(settings=None) -> ModelCatalog:
             logical_name="planner",
             provider=provider_name,
             provider_kind=provider_kind,
-            model_name=planner_model,
+            model_name=model_name,
             purpose="Task and action planning.",
             capabilities=("chat", "planning", "classification"),
             task_types=("planning", "classification"),

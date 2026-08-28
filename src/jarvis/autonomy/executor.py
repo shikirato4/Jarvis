@@ -24,7 +24,7 @@ class MissionExecutor:
         return ObservationBundle(
             runtime_state=snapshot,
             ui_context=self._ui.health(),
-            voice_context=self._voice.status(),
+            voice_context=self._voice.status(lightweight_voice_clone=True),
             vision_context=self._vision.status(),
             mission_context=mission.context.model_dump(mode="json"),
             receipts=[item.model_dump(mode="json") for item in mission.step_results[-5:]],

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 
 _REAL_CAPABILITIES = (
-    "Chat local con Ollama/gpt-oss:20b.",
+    "Chat híbrido con Nemotron 3 Nano Omni: NVIDIA API o endpoint NVFP4 local según el modo elegido.",
     "Streaming de respuestas en la app desktop.",
+    "Selector persistente AUTO, NVIDIA API y LOCAL con proveedor visible y fallback diagnosticado.",
+    "Adjuntos multimodales desde el botón +: imágenes, audio, video, documentos, texto y código.",
     "Busqueda web con Brave Search y fuentes visibles.",
     "Research asistido por Brave para temas actuales.",
     "Context Window y resumen del contexto activo.",
@@ -14,14 +16,15 @@ _REAL_CAPABILITIES = (
     "Agent Mode real en Guided Control: observa, planea, pide confirmacion, ejecuta y verifica acciones aprobadas.",
     "Generacion local de imagenes con JuggernautXL SDXL via Diffusers directo; Fooocus no requerido.",
     "Voz/TTS local con salida preparada para no leer codigo largo.",
-    "Doctor, benchmark, web status y diagnosticos de Ollama.",
-    "Politica de seguridad: OpenAI bloqueado, Gemini bloqueado, secretos protegidos.",
+    "Doctor, benchmark, estado híbrido y diagnóstico verificable de NVFP4.",
+    "Politica de seguridad: herramientas locales con permisos, secretos protegidos y contexto remoto mínimo.",
 )
 
 _NOT_ENABLED = (
     "Control completo sin supervision no esta habilitado; Agent Mode usa Guided Control y Stop Agent.",
     "No compro, pago, envio mensajes externos ni ejecuto acciones sensibles sin confirmacion.",
-    "No uso OpenAI ni Gemini como cerebro.",
+    "OpenAI y Gemini no son proveedores principales configurados; NVIDIA NIM es el proveedor remoto.",
+    "El checkpoint NVFP4 exacto requiere hardware/backend compatible o un endpoint local alojado en otra máquina.",
     "No clono ni ejecuto repos sospechosos o malware.",
 )
 
@@ -63,9 +66,11 @@ def get_capabilities_summary() -> str:
 
 def get_capabilities_for_context_tab() -> str:
     return (
-        "Jarvis usa gpt-oss:20b local, Brave Search para web, memoria local, Code Agent seguro, "
-        "Git local seguro, repo learning, generacion local de imagenes con JuggernautXL via Diffusers "
-        "sin Fooocus y voz/TTS. OpenAI y Gemini estan bloqueados. "
+        "Jarvis usa Nemotron 3 Nano Omni mediante NVIDIA API o el checkpoint NVFP4 exacto en un endpoint "
+        "OpenAI-compatible local. AUTO prefiere NVIDIA y usa el proveedor local solo ante un fallo seguro; "
+        "NVIDIA API y LOCAL son estrictos. Brave Search aporta fuentes web; memoria, herramientas, permisos y "
+        "estado permanecen locales. Conserva Code Agent, Git seguro, repo learning, adjuntos multimodales, "
+        "generacion local de imagenes con JuggernautXL via Diffusers sin Fooocus y voz/TTS. "
         "Agent Mode real esta disponible con confirmacion para acciones sensibles y Stop Agent."
     )
 
@@ -73,10 +78,13 @@ def get_capabilities_for_context_tab() -> str:
 def get_capabilities_for_prompt(context_profile: str) -> str:
     profile = (context_profile or "minimal").casefold()
     if profile == "minimal":
-        return "Identidad: Jarvis. Cerebro local: Ollama/gpt-oss:20b. OpenAI y Gemini bloqueados."
+        return (
+            "Identidad: Jarvis. Modelo principal: Nemotron 3 Nano Omni mediante el proveedor asignado "
+            "por AUTO, NVIDIA API o LOCAL. Herramientas y permisos siempre locales."
+        )
     if profile == "web":
         return (
-            "Jarvis puede usar Brave Search como fuente web y Ollama/gpt-oss:20b local para redactar. "
+            "Jarvis puede usar Brave Search como fuente web y el proveedor Nemotron asignado para redactar. "
             "No debe inventar datos fuera de las fuentes ni mandar secretos a internet."
         )
     if profile == "project":
@@ -86,7 +94,7 @@ def get_capabilities_for_prompt(context_profile: str) -> str:
         )
     if profile in {"capability", "detailed"}:
         return get_capabilities_for_context_tab()
-    return "Jarvis local con gpt-oss:20b, seguridad activa y contexto adaptativo."
+    return "Jarvis con Nemotron híbrido, seguridad activa y contexto adaptativo."
 
 
 def _format_items(items: tuple[str, ...]) -> list[str]:

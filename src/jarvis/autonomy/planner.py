@@ -33,8 +33,6 @@ class MissionPlanner:
         return plan
 
     def _model_plan(self, mission) -> list[MissionStep] | None:
-        if not self._settings.ollama_enabled:
-            return None
         try:
             response = self._models.infer(
                 ModelRequest(

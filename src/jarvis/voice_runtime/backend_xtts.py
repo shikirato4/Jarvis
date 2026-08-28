@@ -44,7 +44,9 @@ class CoquiXTTSProvider:
         if available:
             try:
                 self._device = self._select_device()
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                available = False
+                reason = str(exc)
                 self._device = "cpu"
         return {
             "provider_name": self.provider_name,
@@ -59,11 +61,6 @@ class CoquiXTTSProvider:
         text = (request.text or "").strip()
         if not text:
             raise UIAutomationError("coqui xtts requires non-empty text")
-        try:
-            model = self._ensure_model_loaded()
-        except Exception as exc:  # noqa: BLE001
-            raise UIAutomationError(f"coqui xtts unavailable: {exc}") from exc
-
         language = request.language or self._default_language
         metadata = request.metadata or {}
         kwargs: dict[str, Any] = {}
@@ -99,6 +96,10 @@ class CoquiXTTSProvider:
                 },
             )
             raise UIAutomationError(fallback_reason)
+        try:
+            model = self._ensure_model_loaded()
+        except Exception as exc:  # noqa: BLE001
+            raise UIAutomationError(f"coqui xtts unavailable: {exc}") from exc
         self._logger.info(
             "coqui_xtts_request",
             extra={
@@ -173,14 +174,18 @@ class CoquiXTTSProvider:
 
     def _select_device(self) -> str:
         preference = self._device_preference.casefold().strip()
-        if preference in {"cpu", "cuda"}:
-            return preference
+        if preference == "cpu":
+            return "cpu"
         try:
             import torch  # type: ignore
-
-            return "cuda" if torch.cuda.is_available() else "cpu"
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            if preference == "cuda":
+                raise RuntimeError(f"CUDA requested but unavailable: {exc}") from exc
             return "cpu"
+        cuda_available = bool(torch.cuda.is_available())
+        if preference == "cuda" and not cuda_available:
+            raise RuntimeError("CUDA requested but unavailable")
+        return "cuda" if cuda_available else "cpu"
 
     def _dependency_status(self) -> tuple[bool, str]:
         try:

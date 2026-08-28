@@ -3,6 +3,7 @@ from __future__ import annotations
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 import importlib.util
+import inspect
 import logging
 from pathlib import Path
 import threading
@@ -20,7 +21,7 @@ _DEFAULT_MODEL_PATH = Path(
 class ImageBackend(Protocol):
     def load(self, model_path: Path, *, device: str, torch_dtype: object | None) -> object: ...
 
-    def generate(self, pipeline: object, request: ImageGenerationRequest, output_dir: Path, *, cancel_event: threading.Event) -> ImageGenerationResult: ...
+    def generate(self, pipeline: object, request: ImageGenerationRequest, output_dir: Path, *, cancel_event: threading.Event, progress_callback=None) -> ImageGenerationResult: ...
 
     def unload(self, pipeline: object | None) -> None: ...
 
@@ -46,7 +47,7 @@ class DiffusersImageBackend:
                 pass
         return pipe
 
-    def generate(self, pipeline: object, request: ImageGenerationRequest, output_dir: Path, *, cancel_event: threading.Event) -> ImageGenerationResult:
+    def generate(self, pipeline: object, request: ImageGenerationRequest, output_dir: Path, *, cancel_event: threading.Event, progress_callback=None) -> ImageGenerationResult:
         if cancel_event.is_set():
             return ImageGenerationResult(success=False, message="Generacion cancelada.", error="cancelled")
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -58,16 +59,33 @@ class DiffusersImageBackend:
                 generator = torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu").manual_seed(request.seed)
         except Exception:  # noqa: BLE001
             generator = None
-        result = pipeline(
-            prompt=request.prompt,
-            negative_prompt=request.negative_prompt or None,
-            width=request.width,
-            height=request.height,
-            num_inference_steps=request.steps,
-            guidance_scale=request.cfg,
-            num_images_per_prompt=request.num_images,
-            generator=generator,
+        pipeline_kwargs: dict[str, Any] = {
+            "prompt": request.prompt,
+            "negative_prompt": request.negative_prompt or None,
+            "width": request.width,
+            "height": request.height,
+            "num_inference_steps": request.steps,
+            "guidance_scale": request.cfg,
+            "num_images_per_prompt": request.num_images,
+            "generator": generator,
+        }
+        try:
+            call_parameters = inspect.signature(pipeline.__call__).parameters
+        except (TypeError, ValueError):
+            call_parameters = {}
+        accepts_callback = "callback_on_step_end" in call_parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in call_parameters.values()
         )
+        if progress_callback is not None and accepts_callback:
+            def on_step_end(pipe, step_index, _timestep, callback_kwargs):
+                progress_callback(int(step_index) + 1, request.steps)
+                if cancel_event.is_set() and hasattr(pipe, "_interrupt"):
+                    pipe._interrupt = True  # noqa: SLF001
+                return callback_kwargs
+
+            pipeline_kwargs["callback_on_step_end"] = on_step_end
+        result = pipeline(**pipeline_kwargs)
         if cancel_event.is_set():
             return ImageGenerationResult(success=False, message="Generacion cancelada.", error="cancelled")
         paths: list[Path] = []
@@ -155,7 +173,8 @@ class ImageModelManager:
             self._status = ImageModelStatus.UNLOADING
             pipeline = self._pipeline
             self._pipeline = None
-        self._backend.unload(pipeline)
+        if pipeline is not None:
+            self._backend.unload(pipeline)
         with self._lock:
             self._status = ImageModelStatus.UNLOADED
             self._error = None
@@ -189,7 +208,7 @@ class ImageModelManager:
 class ImageGenerationService:
     service_name = "image_runtime"
 
-    def __init__(self, *, settings, backend: ImageBackend | None = None, logger: logging.Logger | None = None) -> None:
+    def __init__(self, *, settings, backend: ImageBackend | None = None, logger: logging.Logger | None = None, event_bus=None) -> None:
         self._settings = settings
         self._logger = logger or logging.getLogger("jarvis.image_runtime")
         self._model = ImageModelManager(
@@ -204,6 +223,7 @@ class ImageGenerationService:
         self._cancel_events: dict[str, threading.Event] = {}
         self._lock = threading.RLock()
         self._started = False
+        self._event_bus = event_bus
 
     def start(self) -> None:
         self._started = True
@@ -265,6 +285,7 @@ class ImageGenerationService:
             self._jobs[job.job_id] = job
             self._cancel_events[job.job_id] = cancel_event
             self._futures[job.job_id] = self._executor.submit(self._run_job, job.job_id, parsed, cancel_event)
+        self._publish_job(job, "queued")
         return job
 
     def generate_sync(self, request: ImageGenerationRequest | dict[str, Any]) -> ImageGenerationJob:
@@ -288,6 +309,8 @@ class ImageGenerationService:
                 job.status = ImageJobStatus.CANCELLED
                 job.completed_at = datetime.now(timezone.utc)
                 job.message = "Generacion cancelada."
+                job.progress = None
+                self._publish_job(job, "cancelled")
             return {"status": "ok", "job_id": target, "message": "Cancelacion solicitada."}
 
     def unload(self) -> dict[str, Any]:
@@ -300,31 +323,57 @@ class ImageGenerationService:
             if cancel_event.is_set():
                 return self._finish_cancelled(job)
             job.status = ImageJobStatus.LOADING_MODEL
-            job.progress = 0.05
+            job.progress = None
+            self._publish_job(job, "loading_model")
             pipeline = self._model.ensure_loaded()
             if cancel_event.is_set():
                 return self._finish_cancelled(job)
             self._model.mark_generating()
             job.status = ImageJobStatus.GENERATING
-            job.progress = 0.15
-            result = self._model._backend.generate(pipeline, request, request.output_dir or self.output_dir, cancel_event=cancel_event)  # noqa: SLF001
+            job.progress = None
+            self._publish_job(job, "generating")
+
+            def progress_callback(step: int, total_steps: int) -> None:
+                if total_steps <= 0:
+                    return
+                job.current_step = max(0, min(int(step), int(total_steps)))
+                job.total_steps = int(total_steps)
+                job.progress = job.current_step / job.total_steps
+                self._publish_job(job, "generating")
+
+            generate = self._model._backend.generate  # noqa: SLF001
+            generate_kwargs: dict[str, Any] = {"cancel_event": cancel_event}
+            try:
+                supports_progress = "progress_callback" in inspect.signature(generate).parameters
+            except (TypeError, ValueError):
+                supports_progress = False
+            if supports_progress:
+                generate_kwargs["progress_callback"] = progress_callback
+            result = generate(
+                pipeline,
+                request,
+                request.output_dir or self.output_dir,
+                **generate_kwargs,
+            )
             if cancel_event.is_set() or result.error == "cancelled":
                 return self._finish_cancelled(job)
             job.status = ImageJobStatus.SAVING
-            job.progress = 0.95
+            self._publish_job(job, "saving")
             if result.success:
                 job.status = ImageJobStatus.COMPLETED
                 job.output_paths = result.output_paths
                 job.message = result.message or "Imagen lista."
-                job.progress = 1.0
+                job.progress = 1.0 if job.total_steps is not None else None
             else:
                 job.status = ImageJobStatus.FAILED
                 job.error = result.error or result.message or "No se pudo generar la imagen."
                 job.message = _human_generation_error(job.error)
+                job.progress = None
         except Exception as exc:  # noqa: BLE001
             job.status = ImageJobStatus.FAILED
             job.error = str(exc)
             job.message = _human_generation_error(str(exc))
+            job.progress = None
             self._model._cleanup_cuda()  # noqa: SLF001
         finally:
             job.completed_at = datetime.now(timezone.utc)
@@ -332,14 +381,29 @@ class ImageGenerationService:
                 self._model.mark_ready_after_generation()
             elif not self._model.keep_loaded:
                 self._model.unload()
+            self._publish_job(job, job.status.value)
         return job
 
-    @staticmethod
-    def _finish_cancelled(job: ImageGenerationJob) -> ImageGenerationJob:
+    def _finish_cancelled(self, job: ImageGenerationJob) -> ImageGenerationJob:
         job.status = ImageJobStatus.CANCELLED
         job.message = "Generacion cancelada."
+        job.progress = None
         job.completed_at = datetime.now(timezone.utc)
+        self._publish_job(job, "cancelled")
         return job
+
+    def _publish_job(self, job: ImageGenerationJob, status: str) -> None:
+        if self._event_bus is None:
+            return
+        payload: dict[str, Any] = {
+            "run_id": job.job_id,
+            "correlation_id": job.job_id,
+            "status": status,
+        }
+        if job.current_step is not None and job.total_steps is not None:
+            payload["step"] = job.current_step
+            payload["total_steps"] = job.total_steps
+        self._event_bus.publish("image.generation_progress", payload)
 
     def _prepare_request(self, request: ImageGenerationRequest) -> ImageGenerationRequest:
         if not _content_allowed(request.prompt):
@@ -360,17 +424,13 @@ def dependency_status() -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for name in ("torch", "diffusers", "safetensors", "transformers", "accelerate"):
         payload[name] = importlib.util.find_spec(name) is not None
-    payload["torch_cuda_available"] = False
-    payload["torch_cuda_compiled"] = False
-    if payload["torch"]:
-        try:
-            import torch
-
-            payload["torch_version"] = getattr(torch, "__version__", "unknown")
-            payload["torch_cuda_available"] = bool(torch.cuda.is_available())
-            payload["torch_cuda_compiled"] = bool(getattr(torch.version, "cuda", None))
-        except Exception as exc:  # noqa: BLE001
-            payload["torch_error"] = f"{type(exc).__name__}: {exc}"
+    # Startup and status endpoints must remain discovery-only. Importing torch here
+    # initializes a very large native runtime (and its optional compiler stack) on
+    # the caller's thread. CUDA is probed when image generation actually loads the
+    # backend, so an unprobed future GPU is not reported as unavailable.
+    payload["torch_runtime_checked"] = False
+    payload["torch_cuda_available"] = None
+    payload["torch_cuda_compiled"] = None
     return payload
 
 

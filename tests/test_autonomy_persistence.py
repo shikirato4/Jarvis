@@ -11,7 +11,6 @@ def _settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
 

@@ -21,7 +21,6 @@ def test_unity_generate_and_write_script(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         unity_require_confirmation_for_script_overwrite=False,
         unity_discovery_roots=(tmp_path,),
@@ -62,7 +61,6 @@ def test_unity_write_script_blocks_outside_assets(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         unity_discovery_roots=(tmp_path,),
     )

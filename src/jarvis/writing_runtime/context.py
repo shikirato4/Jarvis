@@ -105,7 +105,7 @@ class WritingContextResolver:
 
     def _retrieve_semantic_context(self, *, query: str, collection_name: str | None, correlation_id: str) -> str:
         settings = getattr(self._semantic_memory, "_settings", None)
-        if settings is not None and (not getattr(settings, "ollama_enabled", True) or not getattr(settings, "embeddings_enabled", True)):
+        if settings is not None and not getattr(settings, "embeddings_enabled", True):
             return ""
         try:
             context = self._semantic_memory.retrieve_context(

@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from uuid import uuid4
 
 from jarvis.capability_manifest import get_capabilities_for_prompt, get_capabilities_summary, is_capability_query
 from jarvis.config import Settings
+from jarvis.conversation_context import ConversationContextBuilder, ContextFragment
+from jarvis.agent_runtime import AgentController, AgentRunRequest, AgentRunStatus
 from jarvis.chat_optimization import select_chat_generation_profile, streaming_timeout_seconds
 from jarvis.conversational_safety import ConversationRisk, classify_conversation_risk, malware_safe_refusal
 from jarvis.core.errors import JarvisError
 from jarvis.identity import jarvis_identity_prompt, sanitize_assistant_identity
-from jarvis.models_runtime.base import ModelRequest
-from jarvis.ollama_diagnostics import classify_local_model_error, local_model_failure_message
+from jarvis.models_runtime.base import ModelMessage, ModelRequest
+from jarvis.models_runtime.errors import (
+    classify_provider_failure,
+    provider_failure_message,
+)
 from jarvis.services import summarize_error, summarize_model_response
 from jarvis.voice_runtime.spoken import prepare_spoken_response
 from jarvis.web_search import build_grounded_web_prompt, build_web_search_provider, should_use_web_search
@@ -30,23 +36,48 @@ class PendingDesktopAction:
 
 
 class DesktopChatEngine:
-    def __init__(self, bridge, panel_composer, action_executor, settings: Settings) -> None:
+    def __init__(
+        self,
+        bridge,
+        panel_composer,
+        action_executor,
+        settings: Settings,
+        *,
+        context_builder: ConversationContextBuilder | None = None,
+        agent_controller: AgentController | None = None,
+    ) -> None:
         self._bridge = bridge
         self._panels = panel_composer
         self._actions = action_executor
         self._settings = settings
+        self._context_builder = context_builder or ConversationContextBuilder()
+        self._agent_controller = agent_controller
         self._intent_router = DesktopIntentRouter(bridge, action_executor)
         self._logger = logging.getLogger("jarvis.desktop.chat")
         self.pending_action: PendingDesktopAction | None = None
         self.awaiting_confirmation = False
+        self._pending_agent_confirmation: tuple[str, str] | None = None
 
-    def handle(self, text: str) -> DesktopChatResponse:
+    def handle(
+        self,
+        text: str,
+        *,
+        request_transform: Callable[[ModelRequest], ModelRequest] | None = None,
+        history: Iterable[ModelMessage] = (),
+        tool_observations: Iterable[ModelMessage] = (),
+        attachment_context: Iterable[ContextFragment] = (),
+        memory_candidates: Iterable[ContextFragment] = (),
+        correlation_id: str | None = None,
+        request_finalized: Callable[[ModelRequest], None] | None = None,
+    ) -> DesktopChatResponse:
         normalized = text.strip()
         result: dict = {}
         response_text = ""
         web_result_for_error = None
         spoken_content_override: str | None = None
         spoken_mode = "prepared"
+        if self._pending_agent_confirmation is not None:
+            return self._handle_agent_confirmation_reply(normalized)
         if self.awaiting_confirmation and self.pending_action is not None:
             return self._handle_confirmation_reply(normalized)
         risk = classify_conversation_risk(normalized)
@@ -62,25 +93,72 @@ class DesktopChatEngine:
                 {"status": "ok", "category": "capabilities", "agent_mode_real": True, "openai": "blocked", "gemini": "blocked"},
             )
         decision = self._intent_router.classify(normalized)
-        self._logger.info("desktop_intent_detected", extra={"intent": decision.category, "prompt": normalized})
+        self._logger.info(
+            "desktop_intent_detected",
+            extra={"intent": decision.category, "prompt_length": len(normalized)},
+        )
         try:
             if decision.category == "chat":
-                if self._is_context_query(lowered := normalized.casefold()):
+                if self._is_context_query(normalized.casefold()):
                     web_status = build_web_search_provider().status()
                     result = {"status": "ok", "context": "jarvis_context", "web_search": web_status.model_dump(mode="json")}
                     response_text = self._context_summary(web_status)
                 else:
                     request, web_result = self._build_model_request(normalized)
+                    if request_transform is not None:
+                        request = request_transform(request)
+                    if correlation_id is not None:
+                        request = request.model_copy(
+                            update={"correlation_id": correlation_id}
+                        )
+                    request = self.finalize_model_request(
+                        request,
+                        history=history,
+                        tool_observations=tool_observations,
+                        attachment_context=attachment_context,
+                        memory_candidates=memory_candidates,
+                    )
+                    if request_finalized is not None:
+                        request_finalized(request)
                     web_result_for_error = web_result
                     route = f"models_runtime:{request.logical_model}"
                     if web_result is not None:
                         route = f"web_search:{web_result.provider}+{route}"
                     self._log_route(route, normalized)
-                    model_response = self._bridge.runtime.infer_model(request)
-                    result = model_response.model_dump(mode="json")
+                    if self._agent_controller is None:
+                        model_response = self._bridge.runtime.infer_model(request)
+                        result = model_response.model_dump(mode="json")
+                        response_text = sanitize_assistant_identity(
+                            summarize_model_response(result)
+                        )
+                    else:
+                        agent_result = self._agent_controller.run(
+                            AgentRunRequest(
+                                user_message=normalized,
+                                model_request=request,
+                                max_steps=self._settings.agent_max_steps,
+                                timeout_seconds=self._settings.agent_timeout_seconds,
+                                correlation_id=correlation_id,
+                                source_surface="desktop_chat",
+                            )
+                        )
+                        result = agent_result.model_dump(mode="json")
+                        self._merge_last_observation(result, agent_result)
+                        if agent_result.observations and hasattr(self._panels, "invalidate"):
+                            self._panels.invalidate()
+                        response_text = self._agent_result_text(agent_result)
+                        if (
+                            agent_result.status
+                            is AgentRunStatus.WAITING_CONFIRMATION
+                            and agent_result.pending_confirmation is not None
+                            and agent_result.pending_confirmation.confirmation_id
+                        ):
+                            self._pending_agent_confirmation = (
+                                agent_result.run_id,
+                                agent_result.pending_confirmation.confirmation_id,
+                            )
                     if web_result is not None:
                         result["web_search"] = web_result.model_dump(mode="json")
-                    response_text = sanitize_assistant_identity(summarize_model_response(result))
             else:
                 if decision.category == "research" and self._should_use_brave_for_research(normalized):
                     result, response_text, route_name = self._handle_current_research(normalized)
@@ -106,12 +184,26 @@ class DesktopChatEngine:
         except Exception as exc:  # noqa: BLE001
             result = {"error": {"message": str(exc), "type": type(exc).__name__}, "ok": False}
             if decision.category == "chat":
-                reason = classify_local_model_error(exc)
+                failure = classify_provider_failure(exc)
                 web_sources = len(getattr(web_result_for_error, "hits", []) or [])
-                result["error"]["message"] = reason
+                result["error"].update(
+                    {"message": failure.detail, "code": failure.code, "web_sources": web_sources}
+                )
                 if web_result_for_error is not None:
                     result["web_search"] = web_result_for_error.model_dump(mode="json")
-                response_text = sanitize_assistant_identity(local_model_failure_message(reason, web_sources=web_sources))
+                response_text = sanitize_assistant_identity(
+                    provider_failure_message(
+                        failure,
+                        selected_mode=self._settings.llm_mode,
+                    )
+                )
+                if web_result_for_error is not None and web_sources:
+                    response_text = (
+                        "Encontré fuentes con Brave, pero Nemotron no pudo redactar el informe completo.\n\n"
+                        + self._format_sources(web_result_for_error)
+                        + "\n\n"
+                        + response_text
+                    )
             else:
                 response_text = sanitize_assistant_identity(self._human_error_summary(normalized, str(exc)))
 
@@ -180,6 +272,81 @@ class DesktopChatEngine:
             raw_result=result,
         )
 
+    def _handle_agent_confirmation_reply(
+        self,
+        normalized: str,
+    ) -> DesktopChatResponse:
+        assert self._pending_agent_confirmation is not None
+        run_id, confirmation_id = self._pending_agent_confirmation
+        folded = self._intent_router._fold(normalized)  # noqa: SLF001
+        if self._is_negative_confirmation(folded):
+            self._agent_controller.cancel_pending_confirmation(run_id)  # type: ignore[union-attr]
+            self._pending_agent_confirmation = None
+            return self._deterministic_response(
+                "Acción cancelada.",
+                {"run_id": run_id, "status": "cancelled"},
+            )
+        if not self._is_affirmative_confirmation(folded):
+            return self._deterministic_response(
+                "Hay una acción del agente pendiente. Responde sí para ejecutarla "
+                "o no para cancelarla.",
+                {"run_id": run_id, "status": "waiting_confirmation"},
+            )
+        self._pending_agent_confirmation = None
+        agent_result = self._agent_controller.resume_confirmation(  # type: ignore[union-attr]
+            run_id,
+            confirmation_id,
+        )
+        result = agent_result.model_dump(mode="json")
+        self._merge_last_observation(result, agent_result)
+        if agent_result.observations and hasattr(self._panels, "invalidate"):
+            self._panels.invalidate()
+        message = DesktopChatMessage(
+            message_id=str(uuid4()),
+            role="assistant",
+            content=self._agent_result_text(agent_result),
+            metadata={"result": result},
+        )
+        return DesktopChatResponse(
+            message=message,
+            spoken_content=self._spoken_variant(message.content),
+            spoken_mode="prepared",
+            panel_snapshot=self._panels.compose(),
+            raw_result=result,
+        )
+
+    def _agent_result_text(self, agent_result) -> str:
+        if agent_result.status is AgentRunStatus.COMPLETED:
+            return sanitize_assistant_identity(agent_result.final_answer or "")
+        if agent_result.status is AgentRunStatus.WAITING_CONFIRMATION:
+            return (
+                "La siguiente acción requiere confirmación explícita antes de "
+                "continuar."
+            )
+        response_text = (
+            "No pude completar el ciclo de agente de forma segura "
+            f"(estado: {agent_result.status.value})."
+        )
+        partial_sources = self._format_agent_web_sources(agent_result.observations)
+        if partial_sources:
+            response_text = (
+                f"{response_text}\n\n"
+                "La síntesis final falló, pero estas fuentes ya habían sido "
+                f"recuperadas:\n\n{partial_sources}"
+            )
+        return response_text
+
+    @staticmethod
+    def _merge_last_observation(result: dict, agent_result) -> None:
+        """Keep stable public receipt fields while retaining the agent envelope."""
+        if not agent_result.observations:
+            return
+        observation = agent_result.observations[-1]
+        result.setdefault("tool_action", observation.action)
+        result.setdefault("tool_status", observation.status.value)
+        for key, value in observation.data.items():
+            result.setdefault(key, value)
+
     def _spoken_variant(self, visual_text: str) -> str:
         spoken_text, _profile = prepare_spoken_response(
             visual_text,
@@ -238,10 +405,10 @@ class DesktopChatEngine:
             return result, self._ensure_sources_visible(summary, web_response), "web_search.research+models_runtime"
         except Exception as exc:  # noqa: BLE001
             result["status"] = "partial"
-            result["synthesis_error"] = classify_local_model_error(exc)
+            result["synthesis_error"] = classify_provider_failure(exc).code
             return (
                 result,
-                "Encontre fuentes con Brave, pero el modelo local tardo demasiado o no pudo redactar el informe completo.\n\n"
+                "Encontré fuentes con Brave, pero Nemotron no pudo redactar el informe completo.\n\n"
                 + self._format_sources(web_response)
                 + "\n\nPuedo reintentarlo con solo 2 o 3 fuentes para hacerlo mas rapido.",
                 "web_search.research.partial",
@@ -262,6 +429,30 @@ class DesktopChatEngine:
         for index, hit in enumerate(hits, start=1):
             snippet = " ".join((hit.snippet or "").split())[:280]
             lines.append(f"{index}. {hit.title} - {hit.source}\n   {snippet}\n   {hit.url}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_agent_web_sources(observations) -> str:
+        lines: list[str] = []
+        seen_urls: set[str] = set()
+        for observation in observations:
+            if getattr(observation, "action", "") != "web.search":
+                continue
+            data = getattr(observation, "data", {}) or {}
+            hits = data.get("hits", []) if isinstance(data, dict) else []
+            for hit in hits:
+                if not isinstance(hit, dict):
+                    continue
+                url = str(hit.get("url") or "").strip()
+                if not url.startswith(("https://", "http://")) or url in seen_urls:
+                    continue
+                seen_urls.add(url)
+                title = str(hit.get("title") or "Fuente").strip() or "Fuente"
+                source = str(hit.get("source") or "").strip()
+                label = f"{title} — {source}" if source else title
+                lines.append(f"- {label}\n  {url}")
+                if len(lines) >= 5:
+                    return "\n".join(lines)
         return "\n".join(lines)
 
     @staticmethod
@@ -292,26 +483,13 @@ class DesktopChatEngine:
         logical_model = "coding_engine" if is_coding else "general_assistant"
         task_type = "coding" if is_coding else "assistant"
         required_capabilities = ("chat", "coding") if is_coding else ("chat",)
-        web_result = None
         prompt = normalized
-        if not is_coding and should_use_web_search(normalized, mode="auto"):
-            provider = build_web_search_provider()
-            candidate = provider.search(normalized, max_results=provider.status().max_results)
-            if candidate.status == "ok" and candidate.hits:
-                web_result = candidate
-                prompt = build_grounded_web_prompt(
-                    normalized,
-                    candidate,
-                    max_sources=self._settings.web_synthesis_max_sources,
-                    snippet_chars=self._settings.web_synthesis_snippet_chars,
-                )
-            elif candidate.status in {"blocked", "unavailable", "disabled", "error", "empty"}:
-                prompt = (
-                    f"{normalized}\n\n"
-                    f"Nota de Jarvis: busqueda web {candidate.status}. {candidate.message} "
-                    "Responde con Ollama local, indicando claramente si no hay datos actuales disponibles."
-                )
-        profile = select_chat_generation_profile(normalized, self._settings, web_used=web_result is not None, is_coding=is_coding)
+        profile = select_chat_generation_profile(
+            normalized,
+            self._settings,
+            web_used=False,
+            is_coding=is_coding,
+        )
         context_profile = profile.context_profile
         prompt_context = get_capabilities_for_prompt(context_profile)
         system_context = "Superficie: chat de escritorio local."
@@ -329,8 +507,13 @@ class DesktopChatEngine:
             temperature=profile.temperature,
             timeout_seconds=streaming_timeout_seconds(profile, self._settings),
             max_tokens=profile.max_tokens,
-            metadata={"source": "desktop_chat", "generation_profile": profile.name, "context_profile": context_profile},
-        ), web_result
+            metadata={
+                "source": "desktop_chat",
+                "generation_profile": profile.name,
+                "context_profile": context_profile,
+                "web_used": False,
+            },
+        ), None
 
     def prepare_streaming_request(self, normalized: str) -> tuple[ModelRequest, object | None] | DesktopChatResponse | None:
         decision = self._intent_router.classify(normalized)
@@ -349,15 +532,39 @@ class DesktopChatEngine:
             )
         return self._build_model_request(normalized)
 
+    def finalize_model_request(
+        self,
+        request: ModelRequest,
+        *,
+        history: Iterable[ModelMessage] = (),
+        tool_observations: Iterable[ModelMessage] = (),
+        attachment_context: Iterable[ContextFragment] = (),
+        memory_candidates: Iterable[ContextFragment] = (),
+    ) -> ModelRequest:
+        return self._context_builder.finalize_model_request(
+            request,
+            history=history,
+            tool_observations=tool_observations,
+            attachment_context=attachment_context,
+            memory_candidates=memory_candidates,
+            max_context_tokens=self._settings.conversation_context_max_tokens,
+            safety_margin_tokens=(
+                self._settings.conversation_context_safety_margin_tokens
+            ),
+        )
+
     def _log_route(self, route: str, query: str) -> None:
-        self._logger.info("desktop_chat_route", extra={"route": route, "query": query})
+        self._logger.info(
+            "desktop_chat_route",
+            extra={"route": route, "query_length": len(query)},
+        )
 
     def _log_execution(self, route: str, query: str, result: dict) -> None:
         self._logger.info(
             "desktop_chat_execution",
             extra={
                 "route": route,
-                "query": query,
+                "query_length": len(query),
                 "status": result.get("status"),
                 "target_window": self._target_window_from_result(result),
                 "security_decision": self._security_decision_from_result(result),
@@ -374,7 +581,7 @@ class DesktopChatEngine:
             "contexto tienes",
             "que sabes",
             "que esta activo",
-            "que sabe gpt-oss",
+            "que modelo usa jarvis",
         )
         if any(phrase in lowered for phrase in extra_phrases):
             return True
@@ -386,13 +593,15 @@ class DesktopChatEngine:
         return (
             "Contexto actual de Jarvis\n\n"
             "Proyecto:\nJarvis desktop local en el workspace actual.\n\n"
-            "Modelo:\nModo auto, usando Ollama local con gpt-oss:20b como cerebro principal.\n\n"
+            "Modelo:\nNemotron 3 Nano Omni con modos AUTO, NVIDIA API y LOCAL. El objetivo local exacto es "
+            "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4.\n\n"
             "Web:\n"
             f"Brave Search provider={web_status.provider}, enabled={str(web_status.enabled).lower()}, API key {key_status}. "
-            "Brave solo busca; Ollama local redacta.\n\n"
+            "Brave solo busca; el proveedor Nemotron asignado redacta.\n\n"
             "Reglas importantes:\n"
             "- Mi identidad es Jarvis, sin identidad externa.\n"
-            "- OpenAI y Gemini estan bloqueados como modelos principales.\n"
+            "- NVIDIA NIM es el proveedor remoto; el modo LOCAL no realiza trafico a NVIDIA.\n"
+            "- OpenAI y Gemini estan bloqueados como proveedores principales.\n"
             "- No mando secretos, archivos de entorno, tokens, PIN ni archivos privados a internet.\n"
             "- Patches y acciones sensibles requieren revision y confirmacion.\n"
             "- GitHub learning no clona repos sin confirmacion.\n"

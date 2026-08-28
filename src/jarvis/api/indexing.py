@@ -33,3 +33,15 @@ def install_indexing_routes(app, get_jarvis: Callable[[Request], Any]) -> None:
             return get_jarvis(request).runtime_service.indexing_reindex(body).model_dump(mode="json")
         except JarvisError as exc:
             raise HTTPException(status_code=400, detail=exc.to_dict()) from exc
+
+    @app.post("/index/pause")
+    def index_pause(request: Request) -> dict[str, object]:
+        return get_jarvis(request).runtime_service.indexing_pause()
+
+    @app.post("/index/resume")
+    def index_resume(request: Request) -> dict[str, object]:
+        return get_jarvis(request).runtime_service.indexing_resume()
+
+    @app.post("/index/cancel-pending")
+    def index_cancel_pending(request: Request) -> dict[str, object]:
+        return get_jarvis(request).runtime_service.indexing_cancel_pending()

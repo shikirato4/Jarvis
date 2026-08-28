@@ -17,7 +17,6 @@ from jarvis.vision_runtime.base import (
     ElementLocationRequest,
     OCRRequest,
     ScreenCaptureRequest,
-    ScreenRegion,
     TextLocationRequest,
     UIAwarenessRequest,
     VisionAnalysisRequest,

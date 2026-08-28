@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .backends import AudioOutputRegistry
-from .base import CancellationToken, PlaybackHandle, SynthesisResult
+from .base import AudioOutputBackend, CancellationToken, PlaybackHandle, SynthesisResult
 
 
 class PlaybackController:
@@ -10,21 +10,44 @@ class PlaybackController:
         self._default_backend_name = default_backend_name
 
     def play(self, result: SynthesisResult, *, cancellation: CancellationToken | None = None) -> PlaybackHandle:
-        backend = self._select_backend(result)
-        if backend is None:
+        candidates = self._candidate_backends(result)
+        if not candidates:
             raise RuntimeError("no audio output backend configured")
-        result.backend_name = backend.backend_name
-        return backend.play(result, cancellation=cancellation)
+        failures: list[tuple[str, Exception]] = []
+        for backend in candidates:
+            result.backend_name = backend.backend_name
+            try:
+                handle = backend.play(result, cancellation=cancellation)
+            except Exception as exc:  # noqa: BLE001
+                failures.append((backend.backend_name, exc))
+                continue
+            if failures:
+                failed_backend, failure = failures[-1]
+                result.metadata["playback_fallback_from"] = failed_backend
+                result.metadata["playback_fallback_reason"] = str(failure)
+            return handle
+        raise failures[-1][1]
 
-    def _select_backend(self, result: SynthesisResult):
+    def _candidate_backends(self, result: SynthesisResult) -> list[AudioOutputBackend]:
+        candidates: list[AudioOutputBackend] = []
+
+        def add(backend: AudioOutputBackend | None) -> None:
+            if backend is not None and all(candidate.backend_name != backend.backend_name for candidate in candidates):
+                candidates.append(backend)
+
         preferred = self._registry.get(self._default_backend_name)
         if preferred is not None:
             if result.audio_bytes and preferred.backend_name in {"winsound", "in_memory"}:
-                return preferred
+                add(preferred)
             if result.text_payload and preferred.backend_name in {"pyttsx3", "in_memory"}:
-                return preferred
+                add(preferred)
         if result.audio_bytes:
-            return self._registry.get("winsound") or self._registry.get("in_memory")
+            add(self._registry.get("winsound"))
+            add(self._registry.get("in_memory"))
         if result.text_payload:
-            return self._registry.get("pyttsx3") or self._registry.get("in_memory")
-        return preferred or self._registry.get("in_memory")
+            add(self._registry.get("pyttsx3"))
+            add(self._registry.get("in_memory"))
+        if not candidates:
+            add(preferred)
+            add(self._registry.get("in_memory"))
+        return candidates

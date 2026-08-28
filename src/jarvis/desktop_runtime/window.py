@@ -7,22 +7,25 @@ import logging
 from time import perf_counter
 
 from .styling import JARVIS_QSS
-from .widgets import ConversationSurfaceWidget, MetricCard, ReactorCoreWidget, StatusBadge, apply_cyan_glow, tone_color
+from .widgets import ChatComposerInput, ConversationSurfaceWidget, MetricCard, ReactorCoreWidget, StatusBadge, apply_cyan_glow, tone_color
+from .activity_graph import ActivityGraphWidget
+from jarvis.image_runtime.presentation import format_image_progress
 
 try:
-    from PySide6.QtCore import QRect, QSize, Qt, QTimer
-    from PySide6.QtGui import QAction, QColor, QFont
+    from PySide6.QtCore import QBuffer, QEvent, QIODevice, QRect, QSize, Qt, QTimer
+    from PySide6.QtGui import QAction, QColor, QFont, QKeySequence
     from PySide6.QtWidgets import (
         QApplication,
+        QFileDialog,
         QFrame,
         QGridLayout,
         QHBoxLayout,
         QLabel,
         QComboBox,
         QLineEdit,
-        QListWidget,
         QListWidgetItem,
         QMainWindow,
+        QMenu,
         QMessageBox,
         QPlainTextEdit,
         QPushButton,
@@ -65,7 +68,9 @@ if QApplication is not None:
             self._right_panel_open = False
             self._state = None
             self._nav_buttons: dict[str, QPushButton] = {}
+            self._attachment_chip_buttons: list[QPushButton] = []
             self.setWindowTitle("JARVIS Desktop")
+            self.setAcceptDrops(True)
             self._build_ui()
             self._configure_window_geometry()
             self._refresh_timer = QTimer(self)
@@ -128,7 +133,8 @@ if QApplication is not None:
             self._voice_badge = StatusBadge("VOICE", "neutral")
             self._llm_badge = StatusBadge("LLM", "neutral")
             self._mode_badge = StatusBadge("MODE AUTO", "active")
-            self._model_badge = StatusBadge("MODEL gpt-oss:20b", "active")
+            self._model_badge = StatusBadge("MODEL NEMOTRON", "active")
+            self._provider_badge = StatusBadge("PROVIDER PENDING", "neutral")
             self._web_badge = StatusBadge("WEB BRAVE", "neutral")
             self._openai_badge = StatusBadge("OPENAI BLOCKED", "warning")
             self._gemini_badge = StatusBadge("GEMINI BLOCKED", "warning")
@@ -138,9 +144,21 @@ if QApplication is not None:
             layout.addWidget(self._llm_badge)
             layout.addWidget(self._mode_badge)
             layout.addWidget(self._model_badge)
+            layout.addWidget(self._provider_badge)
             layout.addWidget(self._web_badge)
             layout.addWidget(self._openai_badge)
             layout.addWidget(self._gemini_badge)
+
+            self._llm_mode_selector = QComboBox()
+            self._llm_mode_selector.setObjectName("LLMModeSelector")
+            self._llm_mode_selector.setAccessibleName("Seleccionar proveedor LLM")
+            for label, value in (("AUTO", "auto"), ("NVIDIA API", "nvidia_api"), ("LOCAL", "local")):
+                self._llm_mode_selector.addItem(label, value)
+            initial_mode = self._desktop.llm_status()["selected_mode"]
+            initial_index = self._llm_mode_selector.findData(initial_mode)
+            self._llm_mode_selector.setCurrentIndex(max(initial_index, 0))
+            self._llm_mode_selector.currentIndexChanged.connect(self._change_llm_mode)
+            layout.addWidget(self._llm_mode_selector)
 
             self._focus_button = QPushButton("FOCUS MODE")
             self._focus_button.setObjectName("ModeToggle")
@@ -319,25 +337,60 @@ if QApplication is not None:
 
             composer = QFrame()
             composer.setObjectName("ChatComposer")
-            composer_layout = QHBoxLayout(composer)
+            composer_layout = QVBoxLayout(composer)
             composer_layout.setContentsMargins(12, 12, 12, 12)
-            composer_layout.setSpacing(10)
-            self._input = QLineEdit()
+            composer_layout.setSpacing(8)
+
+            self._attachment_preview = QFrame()
+            self._attachment_preview.setObjectName("AttachmentPreview")
+            self._attachment_preview_layout = QHBoxLayout(self._attachment_preview)
+            self._attachment_preview_layout.setContentsMargins(6, 4, 6, 4)
+            self._attachment_preview_layout.setSpacing(8)
+            self._attachment_preview_layout.addStretch(1)
+            self._attachment_preview.hide()
+            composer_layout.addWidget(self._attachment_preview)
+
+            composer_row = QHBoxLayout()
+            composer_row.setSpacing(10)
+            self._attach_button = QPushButton("+")
+            self._attach_button.setObjectName("AttachButton")
+            self._attach_button.setAccessibleName("Adjuntar archivos")
+            self._attach_button.setToolTip("Adjuntar archivos")
+            self._attach_button.setMinimumSize(54, 54)
+            self._attach_button.setMaximumWidth(54)
+            self._attachment_menu = QMenu(self._attach_button)
+            for label, file_filter in (
+                ("Imágenes", "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp)"),
+                ("Videos", "Videos (*.mp4 *.mov *.mkv *.webm)"),
+                ("Audio", "Audio (*.wav *.mp3 *.flac *.m4a *.ogg)"),
+                ("Documentos", "Documentos (*.pdf *.docx *.csv *.json)"),
+                ("Texto y código", "Texto y código (*.txt *.md *.py *.js *.ts *.tsx *.jsx *.rs *.go *.java *.c *.cpp *.h *.yaml *.yml *.toml)"),
+                ("Otros archivos", "Todos los archivos (*)"),
+            ):
+                action = self._attachment_menu.addAction(label)
+                action.triggered.connect(
+                    lambda _checked=False, selected_filter=file_filter: self._open_attachment_picker(selected_filter)
+                )
+            self._attach_button.setMenu(self._attachment_menu)
+            self._attach_button.installEventFilter(self)
+            composer_row.addWidget(self._attach_button)
+            self._input = ChatComposerInput()
             self._input.setObjectName("ChatInput")
             self._input.setPlaceholderText("Habla con JARVIS...")
-            self._input.setMinimumHeight(54)
-            self._input.returnPressed.connect(self._submit_chat)
-            composer_layout.addWidget(self._input, 1)
+            self._input.submit_requested.connect(self._submit_chat)
+            self._input.installEventFilter(self)
+            composer_row.addWidget(self._input, 1)
             self._mic_button = QPushButton("Listen")
             self._mic_button.setMinimumHeight(54)
             self._mic_button.setMinimumWidth(110)
             self._mic_button.clicked.connect(self._start_listening)
-            composer_layout.addWidget(self._mic_button)
+            composer_row.addWidget(self._mic_button)
             self._send_button = QPushButton("Transmit")
             self._send_button.setMinimumHeight(54)
             self._send_button.setMinimumWidth(132)
             self._send_button.clicked.connect(self._submit_chat)
-            composer_layout.addWidget(self._send_button)
+            composer_row.addWidget(self._send_button)
+            composer_layout.addLayout(composer_row)
             chat_layout.addWidget(composer)
             layout.addWidget(chat_card, 3)
             return panel
@@ -388,11 +441,16 @@ if QApplication is not None:
             status_layout = QVBoxLayout(status_tab)
             status_layout.setContentsMargins(6, 10, 6, 6)
             status_layout.setSpacing(10)
-            status_layout.addWidget(self._section_header("Live System", "Brave busca; Ollama local redacta; OpenAI/Gemini bloqueados"))
+            status_layout.addWidget(
+                self._section_header(
+                    "Live System",
+                    "Nemotron híbrido; memoria, herramientas y políticas permanecen locales",
+                )
+            )
             status_grid = QGridLayout()
             status_grid.setHorizontalSpacing(10)
             status_grid.setVerticalSpacing(10)
-            self._local_model_card = MetricCard("Local Model", "gpt-oss:20b")
+            self._local_model_card = MetricCard("Active Model", "Nemotron pending")
             self._web_search_card = MetricCard("Web Search", "Brave")
             self._voice_card = MetricCard("Voice", "ready")
             self._context_card = MetricCard("Context", "active")
@@ -414,6 +472,64 @@ if QApplication is not None:
                 status_grid.addWidget(card, index // 2, index % 2)
             status_layout.addLayout(status_grid)
             status_layout.addStretch(1)
+
+            settings_tab = QWidget()
+            settings_layout = QVBoxLayout(settings_tab)
+            settings_layout.setContentsMargins(10, 12, 10, 10)
+            settings_layout.setSpacing(10)
+            settings_layout.addWidget(
+                self._section_header(
+                    "NVIDIA y Nemotron local",
+                    "La clave se guarda en el almacén seguro del sistema; nunca en la interfaz ni en el historial",
+                )
+            )
+            self._nvidia_key_input = QLineEdit()
+            self._nvidia_key_input.setObjectName("ChatInput")
+            self._nvidia_key_input.setEchoMode(QLineEdit.Password)
+            self._nvidia_key_input.setPlaceholderText("NVIDIA_API_KEY")
+            self._nvidia_key_input.setAccessibleName("Clave API de NVIDIA")
+            settings_layout.addWidget(self._nvidia_key_input)
+            key_buttons = QHBoxLayout()
+            self._nvidia_key_visibility_button = QPushButton("Mostrar")
+            self._nvidia_key_visibility_button.setCheckable(True)
+            self._nvidia_key_visibility_button.toggled.connect(self._toggle_nvidia_key_visibility)
+            self._nvidia_key_save_button = QPushButton("Guardar o reemplazar")
+            self._nvidia_key_save_button.clicked.connect(self._save_nvidia_key)
+            self._nvidia_key_delete_button = QPushButton("Eliminar")
+            self._nvidia_key_delete_button.setObjectName("DangerActionButton")
+            self._nvidia_key_delete_button.clicked.connect(self._delete_nvidia_key)
+            self._nvidia_key_test_button = QPushButton("Probar conexión")
+            self._nvidia_key_test_button.clicked.connect(self._test_nvidia_connection)
+            for button in (
+                self._nvidia_key_visibility_button,
+                self._nvidia_key_save_button,
+                self._nvidia_key_delete_button,
+                self._nvidia_key_test_button,
+            ):
+                key_buttons.addWidget(button)
+            settings_layout.addLayout(key_buttons)
+            self._nvidia_key_status = QLabel("Clave NVIDIA: consultando estado seguro")
+            self._nvidia_key_status.setObjectName("SectionMeta")
+            self._nvidia_key_status.setWordWrap(True)
+            settings_layout.addWidget(self._nvidia_key_status)
+            self._provider_status_detail = QLabel("Proveedor: pendiente")
+            self._provider_status_detail.setObjectName("SectionMeta")
+            self._provider_status_detail.setWordWrap(True)
+            settings_layout.addWidget(self._provider_status_detail)
+            self._provider_capabilities = QLabel("Capacidades: pendientes")
+            self._provider_capabilities.setObjectName("SectionMeta")
+            self._provider_capabilities.setWordWrap(True)
+            settings_layout.addWidget(self._provider_capabilities)
+            self._local_runtime_button = QPushButton("Diagnosticar Nemotron local")
+            self._local_runtime_button.clicked.connect(self._refresh_local_runtime_diagnostic)
+            settings_layout.addWidget(self._local_runtime_button)
+            self._local_runtime_diagnostic = QLabel(
+                "Diagnóstico local: pulsa el botón para comprobar GPU, VRAM, RAM, CUDA, backend y NVFP4."
+            )
+            self._local_runtime_diagnostic.setObjectName("SectionMeta")
+            self._local_runtime_diagnostic.setWordWrap(True)
+            settings_layout.addWidget(self._local_runtime_diagnostic)
+            settings_layout.addStretch(1)
 
             agent_tab = QWidget()
             agent_layout = QVBoxLayout(agent_tab)
@@ -550,7 +666,7 @@ if QApplication is not None:
             mode_row.setSpacing(8)
             mode_row.addWidget(QLabel("Mode"))
             self._dev_mode = QComboBox()
-            self._dev_mode.addItems(["auto", "offline", "online", "disabled"])
+            self._dev_mode.addItems(["auto", "nvidia_api", "local"])
             mode_row.addWidget(self._dev_mode, 1)
             code_layout.addLayout(mode_row)
             self._patch_id_input = QLineEdit()
@@ -599,7 +715,20 @@ if QApplication is not None:
             self._patch_diff_output.setFont(QFont("Consolas", 9))
             code_layout.addWidget(self._patch_diff_output, 2)
 
+            activity_tab = QWidget()
+            activity_layout = QVBoxLayout(activity_tab)
+            activity_layout.setContentsMargins(6, 10, 6, 6)
+            activity_layout.addWidget(
+                self._section_header(
+                    "Runtime Activity Graph",
+                    "Solo eventos reales; sin chain-of-thought ni progreso inventado",
+                )
+            )
+            self._activity_graph = ActivityGraphWidget()
+            activity_layout.addWidget(self._activity_graph, 1)
+
             tabs.addTab(status_tab, "Status")
+            tabs.addTab(settings_tab, "Settings")
             tabs.addTab(agent_tab, "Agent Mode")
             tabs.addTab(missions_tab, "Missions")
             tabs.addTab(timeline_tab, "Timeline")
@@ -607,6 +736,7 @@ if QApplication is not None:
             tabs.addTab(image_tab, "Image Studio")
             tabs.addTab(context_tab, "Context")
             tabs.addTab(code_tab, "Code Agent")
+            tabs.addTab(activity_tab, "Activity Graph")
             layout.addWidget(tabs, 1)
 
             self._quick_action_frame = QFrame()
@@ -672,10 +802,208 @@ if QApplication is not None:
             frame.moveCenter(available.center())
             self.setGeometry(frame.intersected(available))
 
+        def _change_llm_mode(self, index: int) -> None:
+            mode = self._llm_mode_selector.itemData(index)
+            if not isinstance(mode, str):
+                return
+            try:
+                self._desktop.set_llm_mode(mode)
+            except (ValueError, RuntimeError) as exc:
+                self._provider_status_detail.setText(f"No se pudo cambiar el modo: {exc}")
+            self.refresh_view()
+
+        def _toggle_nvidia_key_visibility(self, visible: bool) -> None:
+            self._nvidia_key_input.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
+            self._nvidia_key_visibility_button.setText("Ocultar" if visible else "Mostrar")
+
+        def _save_nvidia_key(self) -> None:
+            value = self._nvidia_key_input.text()
+            try:
+                if not value.strip():
+                    self._nvidia_key_status.setText("La clave no puede estar vacía.")
+                    return
+                status = self._desktop.save_nvidia_api_key(value)
+                configured = bool(status.get("configured"))
+                source = str(status.get("source") or "almacén seguro")
+                self._nvidia_key_status.setText(
+                    f"Clave NVIDIA: {'configurada' if configured else 'ausente'} ({source})"
+                )
+            except (ValueError, RuntimeError) as exc:
+                self._nvidia_key_status.setText(f"No se pudo guardar la clave: {exc}")
+            finally:
+                self._nvidia_key_input.clear()
+                self._nvidia_key_input.setEchoMode(QLineEdit.Password)
+                self._nvidia_key_visibility_button.setChecked(False)
+
+        def _delete_nvidia_key(self) -> None:
+            try:
+                status = self._desktop.delete_nvidia_api_key()
+                configured = bool(status.get("configured"))
+                self._nvidia_key_status.setText(
+                    f"Clave NVIDIA: {'configurada' if configured else 'eliminada'}"
+                )
+            except (ValueError, RuntimeError) as exc:
+                self._nvidia_key_status.setText(f"No se pudo eliminar la clave: {exc}")
+            finally:
+                self._nvidia_key_input.clear()
+
+        def _test_nvidia_connection(self) -> None:
+            try:
+                result = self._desktop.test_nvidia_connection()
+                state = str(result.get("state") or "unknown")
+                latency = result.get("latency_ms")
+                detail = str(result.get("detail") or result.get("reason") or "")
+                latency_text = f" · {float(latency):.0f} ms" if isinstance(latency, (int, float)) else ""
+                self._nvidia_key_status.setText(
+                    f"Prueba NVIDIA: {state}{latency_text}{' · ' + detail if detail else ''}"
+                )
+            except (ValueError, RuntimeError, OSError) as exc:
+                self._nvidia_key_status.setText(f"Prueba NVIDIA fallida: {exc}")
+
+        def _refresh_local_runtime_diagnostic(self) -> None:
+            try:
+                result = self._desktop.local_runtime_status()
+                diagnostic = result.get("diagnostic") or {}
+                gpu_devices = diagnostic.get("gpu_devices") or []
+                gpu_label = ", ".join(
+                    str(device.get("name") or "GPU desconocida")
+                    for device in gpu_devices
+                    if isinstance(device, dict)
+                ) or "ninguna GPU compatible detectada"
+                missing = diagnostic.get("missing_requirements") or []
+                endpoint_note = "endpoint remoto" if diagnostic.get("endpoint_is_remote") else "host local"
+                detail = (
+                    f"{endpoint_note} · RAM {diagnostic.get('ram_total_gb')} GiB · GPU {gpu_label} · "
+                    f"CUDA {diagnostic.get('cuda_version') or 'no disponible'} · "
+                    f"backend {diagnostic.get('backend') or 'no disponible'} · "
+                    f"NVFP4 {'compatible' if diagnostic.get('nvfp4_compatible') else 'no verificado'}"
+                )
+                if missing:
+                    detail += " · Falta: " + " | ".join(str(item) for item in missing)
+                self._local_runtime_diagnostic.setText(detail)
+            except (ValueError, RuntimeError, OSError) as exc:
+                self._local_runtime_diagnostic.setText(f"Diagnóstico local fallido: {exc}")
+
+        def _open_attachment_picker(self, file_filter: str) -> None:
+            paths, _selected = QFileDialog.getOpenFileNames(
+                self,
+                "Adjuntar archivos",
+                "",
+                file_filter,
+            )
+            if paths:
+                self._add_attachment_paths(paths)
+
+        def _add_attachment_paths(self, paths) -> None:
+            try:
+                self._desktop.add_attachment_paths([str(path) for path in paths])
+            except (ValueError, OSError, RuntimeError) as exc:
+                self._thinking_label.setText(f"ATTACHMENT ERROR: {exc}")
+            self._render_attachment_preview()
+
+        def _render_attachment_preview(self) -> None:
+            for button in self._attachment_chip_buttons:
+                self._attachment_preview_layout.removeWidget(button)
+                button.deleteLater()
+            self._attachment_chip_buttons.clear()
+            pending = self._desktop.pending_attachments()
+            for item in pending:
+                attachment_id = str(item.get("id") or "")
+                name = str(item.get("safe_name") or item.get("original_name") or "archivo")
+                size = int(item.get("size_bytes") or 0)
+                status = str(item.get("status") or "pending")
+                chip = QPushButton(f"{name} · {self._format_file_size(size)} · {status}  ×")
+                chip.setObjectName("AttachmentChip")
+                chip.setAccessibleName(f"Eliminar archivo {name}")
+                chip.setProperty("attachment_name", name)
+                chip.clicked.connect(
+                    lambda _checked=False, selected_id=attachment_id: self._remove_attachment(selected_id)
+                )
+                self._attachment_preview_layout.insertWidget(
+                    max(0, self._attachment_preview_layout.count() - 1),
+                    chip,
+                )
+                self._attachment_chip_buttons.append(chip)
+            self._attachment_preview.setVisible(bool(pending))
+
+        @staticmethod
+        def _format_file_size(size: int) -> str:
+            if size < 1024:
+                return f"{size} B"
+            if size < 1024 * 1024:
+                return f"{size / 1024:.1f} KiB"
+            return f"{size / (1024 * 1024):.1f} MiB"
+
+        def _remove_attachment(self, attachment_id: str) -> None:
+            try:
+                self._desktop.remove_attachment(attachment_id)
+            except (KeyError, ValueError, OSError) as exc:
+                self._thinking_label.setText(f"ATTACHMENT ERROR: {exc}")
+            self._render_attachment_preview()
+
+        def _handle_dropped_urls(self, urls) -> bool:
+            paths = [url.toLocalFile() for url in urls if url.isLocalFile()]
+            if not paths:
+                return False
+            self._add_attachment_paths(paths)
+            return True
+
+        def _paste_attachments(self) -> bool:
+            mime = QApplication.clipboard().mimeData()
+            if mime.hasUrls() and self._handle_dropped_urls(mime.urls()):
+                return True
+            if not mime.hasImage():
+                return False
+            image = QApplication.clipboard().image()
+            if image.isNull():
+                return False
+            buffer = QBuffer()
+            if not buffer.open(QIODevice.WriteOnly) or not image.save(buffer, "PNG"):
+                return False
+            self._desktop.add_attachment_bytes(
+                f"clipboard-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.png",
+                bytes(buffer.data()),
+                "image/png",
+            )
+            self._render_attachment_preview()
+            return True
+
+        def eventFilter(self, watched, event) -> bool:  # noqa: N802
+            if watched is getattr(self, "_attach_button", None) and event.type() == QEvent.KeyPress:
+                if event.key() in {Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space}:
+                    self._attachment_menu.popup(
+                        self._attach_button.mapToGlobal(self._attach_button.rect().bottomLeft())
+                    )
+                    return True
+            if watched is getattr(self, "_input", None) and event.type() == QEvent.KeyPress:
+                if event.matches(QKeySequence.Paste) and self._paste_attachments():
+                    return True
+            return super().eventFilter(watched, event)
+
+        def dragEnterEvent(self, event) -> None:  # noqa: N802
+            if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
+                event.acceptProposedAction()
+                return
+            event.ignore()
+
+        def dropEvent(self, event) -> None:  # noqa: N802
+            if event.mimeData().hasUrls() and self._handle_dropped_urls(event.mimeData().urls()):
+                event.acceptProposedAction()
+                return
+            event.ignore()
+
         def _submit_chat(self) -> None:
             text = self._input.text().strip()
-            if not text or self._sending or self._has_pending_work() or not self._submit_debounce_open():
+            pending_attachments = self._desktop.pending_attachments()
+            if (
+                (not text and not pending_attachments)
+                or self._sending
+                or self._has_pending_work()
+                or not self._submit_debounce_open()
+            ):
                 return
+            if not text:
+                text = "Analiza los archivos adjuntos."
             self._input.clear()
             self._input.setFocus()
             self._sending = True
@@ -688,9 +1016,16 @@ if QApplication is not None:
             def _start_chat_request() -> None:
                 if pending_placeholder.cancelled():
                     return
-                self._pending_future = self._desktop.send_chat_async(text, correlation_id=correlation_id, metadata={"stream": self._should_stream_chat(text)})
+                self._pending_future = self._desktop.send_chat_async(
+                    text,
+                    correlation_id=correlation_id,
+                    metadata={
+                        "stream": self._should_stream_chat(text),
+                        "attachment_ids": [item["id"] for item in pending_attachments],
+                    },
+                )
 
-            QTimer.singleShot(25, _start_chat_request)
+            QTimer.singleShot(0, _start_chat_request)
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
 
@@ -909,7 +1244,7 @@ if QApplication is not None:
                 "memory": "Context",
                 "code": "Code Agent",
                 "learning": "Context",
-                "settings": "Ops",
+                "settings": "Settings",
             }
             target = tab_map.get(action_id, "Status")
             for index in range(self._right_tabs.count()):
@@ -961,6 +1296,8 @@ if QApplication is not None:
         def refresh_view(self) -> None:
             state = self._desktop.refresh()
             self._state = state
+            if hasattr(self, "_activity_graph"):
+                self._activity_graph.set_snapshot(self._desktop.activity_snapshot())
             if self._pending_future is not None and self._pending_future.done():
                 try:
                     self._pending_future.result()
@@ -1038,6 +1375,11 @@ if QApplication is not None:
                 state.voice.input_error,
                 state.voice.last_transcript,
                 (getattr(state, "performance", {}) or {}).get("last_request_ms"),
+                json.dumps(getattr(state, "llm_status", {}) or {}, sort_keys=True, default=str),
+                tuple(
+                    (item.get("id"), item.get("status"), item.get("progress"))
+                    for item in (getattr(state, "pending_attachments", []) or [])
+                ),
                 json.dumps(getattr(state, "dev_runtime", {}) or {}, sort_keys=True, default=str),
             )
 
@@ -1211,10 +1553,13 @@ if QApplication is not None:
             mode = dev.get("llm_mode") or getattr(state, "llm_mode", "disabled")
             provider = dev.get("llm_provider") or getattr(state, "llm_provider", "none")
             model = dev.get("llm_model") or "n/a"
-            ollama = "OK" if dev.get("ollama_available") else "FAIL"
-            self._dev_status.setText(f"LLM {mode} | provider={provider} | model={model} | Ollama={ollama}")
+            local_endpoint = "OK" if dev.get("local_endpoint_available") else "FAIL"
+            self._dev_status.setText(
+                f"LLM {mode} | provider={provider} | model={model} | endpoint local={local_endpoint}"
+            )
             web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
-            self._local_model_card.set_value(model if model != "n/a" else "gpt-oss:20b")
+            active_model = getattr(state, "llm_model", None)
+            self._local_model_card.set_value(model if model != "n/a" else (active_model or "Nemotron pending"))
             self._web_search_card.set_value("Brave" if web.get("provider", "disabled") == "brave" else str(web.get("provider", "disabled")))
             self._context_card.set_value("active")
             self._memory_card.set_value("enabled")
@@ -1261,7 +1606,7 @@ if QApplication is not None:
                         "",
                         f"Latest job: {latest.get('job_id')}",
                         f"Status: {latest.get('status')}",
-                        f"Progress: {latest.get('progress')}",
+                        f"Progress: {format_image_progress(latest)}",
                         f"Message: {latest.get('message') or latest.get('error') or ''}",
                     ]
                 )
@@ -1284,27 +1629,28 @@ if QApplication is not None:
                     "Contexto actual de Jarvis",
                     "",
                     "Identidad:",
-                    "Jarvis. Sin identidad externa. OpenAI y Gemini bloqueados.",
+                    "Jarvis. Sin identidad externa. NVIDIA NIM es el proveedor remoto configurado.",
                     "",
                     "Modelo:",
                     f"Modo: {dev.get('llm_mode') or 'disabled'}",
-                    f"Provider local: {dev.get('llm_provider') or 'none'}",
-                    f"Modelo local: {dev.get('llm_model') or 'n/a'}",
-                    f"Ollama disponible: {str(bool(dev.get('ollama_available'))).lower()}",
+                    f"Proveedor activo: {dev.get('llm_provider') or 'pending'}",
+                    f"Modelo activo/configurado: {dev.get('llm_model') or 'n/a'}",
+                    f"Endpoint local disponible: {str(bool(dev.get('local_endpoint_available'))).lower()}",
                     "",
                     "Web:",
                     f"Provider: {web.get('provider', 'disabled')}",
                     f"Enabled: {str(bool(web.get('enabled'))).lower()}",
                     f"Available: {str(bool(web.get('available'))).lower()}",
                     f"Brave key configured: {str(bool(web.get('configured'))).lower()}",
-                    "Brave solo busca; Ollama local redacta.",
+                    "Brave solo busca; el proveedor Nemotron asignado redacta.",
                     "No se envia contexto privado, archivos de entorno, tokens, PIN ni archivos del proyecto a internet.",
                     "",
                     "Politica:",
                     f"OpenAI: {policy.get('openai', 'blocked')}",
                     f"Gemini: {policy.get('gemini', 'blocked')}",
-                    f"Online LLM: {policy.get('online_llm', 'disabled')}",
-                    f"Online search: {policy.get('online_search', 'Brave + local Ollama')}",
+                    f"NVIDIA NIM: {policy.get('nvidia_nim', 'enabled_by_selected_mode')}",
+                    f"Local LLM: {policy.get('local_llm', 'Nemotron configurable aliases')}",
+                    f"Online search: {policy.get('online_search', 'Brave + assigned Nemotron provider')}",
                     "",
                     "Code Agent:",
                     "Patches revisables; nada se aplica automaticamente.",
@@ -1523,22 +1869,72 @@ if QApplication is not None:
             self._ops_badge.setText(f"OPS {active_ops}")
             self._ops_badge.set_tone("active" if active_ops else "neutral")
             
-            # Setup LLM badge
-            llm_mode = getattr(state, "llm_mode", "disabled").upper()
-            llm_provider = getattr(state, "llm_provider", "none").upper()
-            if llm_mode == "DISABLED":
-                self._llm_badge.setText("LLM DISABLED")
-                self._llm_badge.set_tone("error")
-            elif llm_mode == "AUTO":
-                self._llm_badge.setText(f"LLM AUTO ({llm_provider})")
-                self._llm_badge.set_tone("active")
-            elif llm_mode == "OFFLINE":
-                self._llm_badge.setText(f"LLM OFFLINE ({llm_provider})")
-                self._llm_badge.set_tone("warning")
-            else:
-                self._llm_badge.setText(f"LLM {llm_mode}")
-                self._llm_badge.set_tone("active")
-            
+            llm_status = getattr(state, "llm_status", {}) or {}
+            llm_mode_value = str(llm_status.get("selected_mode") or getattr(state, "llm_mode", "auto"))
+            llm_mode = llm_mode_value.upper()
+            llm_provider_value = str(
+                llm_status.get("request_provider")
+                or llm_status.get("active_provider")
+                or getattr(state, "llm_provider", "none")
+            )
+            provider_status = llm_status.get("provider_status") if isinstance(llm_status.get("provider_status"), dict) else {}
+            provider_state = str(provider_status.get("state") or "recovering")
+            provider_healthy = bool(provider_status.get("healthy"))
+            llm_model = str(
+                llm_status.get("active_model")
+                or getattr(state, "llm_model", "")
+                or "Nemotron 3 Nano Omni"
+            )
+            self._llm_badge.setText(f"LLM {provider_state.upper()}")
+            self._llm_badge.set_tone("active" if provider_healthy else "warning")
+            self._mode_badge.setText(f"MODE {llm_mode}")
+            self._mode_badge.set_tone("active" if llm_mode == "AUTO" else "warning")
+            self._model_badge.setText(f"MODEL {llm_model}")
+            self._model_badge.set_tone("active" if provider_healthy else "neutral")
+            provider_label = llm_provider_value.replace("_", " ").upper()
+            self._provider_badge.setText(f"PROVIDER {provider_label}")
+            self._provider_badge.set_tone("active" if provider_healthy else "warning")
+            selected_index = self._llm_mode_selector.findData(llm_mode_value.casefold())
+            if selected_index >= 0 and selected_index != self._llm_mode_selector.currentIndex():
+                self._llm_mode_selector.blockSignals(True)
+                self._llm_mode_selector.setCurrentIndex(selected_index)
+                self._llm_mode_selector.blockSignals(False)
+
+            key_status = llm_status.get("key_status") if isinstance(llm_status.get("key_status"), dict) else {}
+            configured = bool(key_status.get("configured"))
+            validity = str(key_status.get("validity") or "unknown")
+            source = str(key_status.get("source") or "none")
+            self._nvidia_key_status.setText(
+                f"Clave NVIDIA: {'configurada' if configured else 'ausente'} · estado {validity} · origen {source}"
+            )
+            latency = provider_status.get("latency_ms")
+            latency_text = f" · {float(latency):.0f} ms" if isinstance(latency, (int, float)) else ""
+            fallback = str(llm_status.get("fallback_reason") or "sin fallback")
+            provider_message = str(provider_status.get("message") or "")
+            self._provider_status_detail.setText(
+                f"Proveedor: {provider_label} · {provider_state}{latency_text} · {fallback}"
+                + (f" · {provider_message}" if provider_message else "")
+            )
+            capabilities = llm_status.get("capabilities") if isinstance(llm_status.get("capabilities"), dict) else {}
+            enabled_capabilities = [
+                label
+                for key, label in (
+                    ("text", "texto"),
+                    ("images", "imágenes"),
+                    ("audio", "audio"),
+                    ("video", "video"),
+                    ("documents", "documentos"),
+                    ("streaming", "streaming"),
+                    ("reasoning", "razonamiento"),
+                    ("structured_output", "salida estructurada"),
+                    ("tool_calling", "herramientas"),
+                )
+                if capabilities.get(key) is True
+            ]
+            self._provider_capabilities.setText(
+                "Capacidades verificadas: " + (", ".join(enabled_capabilities) if enabled_capabilities else "solo texto base")
+            )
+
             if str(voice_state.input_state).upper() == "ERROR":
                 self._voice_badge.setText("VOICE ERROR")
                 self._voice_badge.set_tone("error")
@@ -1570,14 +1966,9 @@ if QApplication is not None:
                 self._voice_badge.set_tone("neutral")
                 self._voice_card.set_value("ready" if voice_state.enabled else "off")
             dev = getattr(state, "dev_runtime", {}) or {}
-            llm_model = str(dev.get("llm_model") or getattr(state, "llm_model", "") or "gpt-oss:20b")
             web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
             web_provider = str(web.get("provider") or "disabled")
             web_available = bool(web.get("available"))
-            self._mode_badge.setText(f"MODE {llm_mode}")
-            self._mode_badge.set_tone("active" if llm_mode in {"AUTO", "ONLINE"} else "warning" if llm_mode == "OFFLINE" else "neutral")
-            self._model_badge.setText(f"MODEL {llm_model}")
-            self._model_badge.set_tone("active")
             self._web_badge.setText(f"WEB {web_provider.upper()}")
             self._web_badge.set_tone("active" if web_available else "neutral")
             self._openai_badge.setText("OPENAI BLOCKED")
@@ -1595,6 +1986,7 @@ if QApplication is not None:
             self._cancel_listen_button.setEnabled(str(voice_state.input_state).upper() in {"LISTENING", "TRANSCRIBING", "PROCESSING"})
             self._mic_button.setEnabled(bool(voice_state.input_enabled and not voice_state.input_muted and not self._is_processing))
             self._mic_button.setText("Listening..." if str(voice_state.input_state).upper() == "LISTENING" else "Listen")
+            self._render_attachment_preview()
 
         def _render_metrics(self, state) -> None:
             latest = state.panel_snapshot.resources.get("latest", {})

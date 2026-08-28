@@ -28,7 +28,6 @@ def test_unity_resolve_project_across_multiple_roots(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         unity_discovery_roots=(disk_a, disk_b),
     )
@@ -51,7 +50,6 @@ def test_unity_create_project_scaffold(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         unity_require_confirmation_for_project_creation=False,
         unity_discovery_roots=(root,),

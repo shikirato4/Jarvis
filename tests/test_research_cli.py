@@ -14,7 +14,6 @@ def test_research_cli_run_and_report(monkeypatch, tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     runner = CliRunner()

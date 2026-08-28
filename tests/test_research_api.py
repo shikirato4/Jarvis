@@ -11,7 +11,6 @@ def test_research_api_routes(monkeypatch, tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     test_app = build_application(settings)

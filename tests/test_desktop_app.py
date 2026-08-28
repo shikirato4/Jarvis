@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import time
+from threading import Event
 
 from jarvis.desktop import build_desktop_runtime
-from jarvis.models_runtime.base import StreamChunk
+from jarvis.models_runtime.base import ModelResponse, ModelToolCall, ProviderKind, StreamChunk
 from jarvis.config import Settings
 from jarvis.desktop_runtime.panels import DesktopPanelComposer
 
@@ -47,12 +48,25 @@ class _PanelBridge:
         return self._timeline
 
 
+def _install_fixed_agent_response(app, content: str = "Respuesta de Jarvis.") -> None:
+    def infer(request):
+        return ModelResponse(
+            provider_name="nemotron-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model=request.logical_model or "general_assistant",
+            model_name="nemotron-test",
+            content=content,
+            latency_ms=1.0,
+        )
+
+    app.agent_controller._infer_model = infer  # noqa: SLF001
+
+
 def test_desktop_runtime_boot_and_panels(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
@@ -133,7 +147,6 @@ def test_desktop_runtime_chat_panel_remains_functional(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
@@ -150,14 +163,41 @@ def test_desktop_runtime_routes_clean_final_text_to_voice(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
     captured: list[tuple[str, str | None]] = []
+    requests = []
     try:
+        def _scripted_infer(request):
+            requests.append(request)
+            if request.messages[-1].role == "tool":
+                return ModelResponse(
+                    provider_name="nemotron_omni_local",
+                    provider_kind=ProviderKind.LOCAL,
+                    logical_model=request.logical_model or "general_assistant",
+                    model_name="nemotron-test",
+                    content="La derivada es 2 x.",
+                    latency_ms=1.0,
+                )
+            return ModelResponse(
+                provider_name="nemotron_omni_local",
+                provider_kind=ProviderKind.LOCAL,
+                logical_model=request.logical_model or "general_assistant",
+                model_name="nemotron-test",
+                tool_calls=[
+                    ModelToolCall(
+                        id="science-tool-1",
+                        name="science.solve_problem",
+                        arguments={"query": "calcula la derivada de x**2"},
+                    )
+                ],
+                latency_ms=1.0,
+            )
+
+        app.agent_controller._infer_model = _scripted_infer  # type: ignore[method-assign]  # noqa: SLF001
         original = app.voice_runtime_service.speak
 
         def _capture(text: str, *, correlation_id: str | None = None):
@@ -166,11 +206,15 @@ def test_desktop_runtime_routes_clean_final_text_to_voice(tmp_path) -> None:
 
         app.voice_runtime_service.speak = _capture  # type: ignore[method-assign]
         response = desktop.send_chat("calcula la derivada de x**2")
+        assert response.message.content == "La derivada es 2 x.", response.raw_result
         assert captured
         assert captured[-1][0] == response.spoken_content
         assert response.spoken_content != response.message.content
         assert "dos equis" in captured[-1][0].casefold()
         assert "metadata" not in captured[-1][0].casefold()
+        assert len(requests) == 2
+        assert requests[1].messages[-1].role == "tool"
+        assert requests[1].messages[-1].name == "science.solve_problem"
     finally:
         app.stop()
 
@@ -180,7 +224,6 @@ def test_desktop_runtime_exposes_voice_controls(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
@@ -204,7 +247,6 @@ def test_desktop_runtime_can_defer_backend_startup(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings, start=False)
@@ -229,7 +271,6 @@ def test_desktop_backend_start_does_not_auto_sync_indexing_by_default(tmp_path) 
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings, start=False)
@@ -256,7 +297,6 @@ def test_desktop_shell_state_reuses_cached_panel_snapshot(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
@@ -282,25 +322,25 @@ def test_desktop_send_chat_async_sets_busy_without_blocking(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_fixed_agent_response(app)
     original = desktop._chat.handle  # noqa: SLF001
     try:
-        def _slow_handle(text: str):
-            time.sleep(0.25)
-            return original(text)
+        def _slow_handle(text: str, *args, **kwargs):
+            time.sleep(1.0)
+            return original(text, *args, **kwargs)
 
         desktop._chat.handle = _slow_handle  # type: ignore[method-assign]  # noqa: SLF001
         started = time.perf_counter()
         future = desktop.send_chat_async("calcula la derivada de x**2")
         elapsed = time.perf_counter() - started
-        assert elapsed < 0.1
+        assert elapsed < 0.5
         assert desktop.shell_state().busy is True
-        response = future.result(timeout=5.0)
+        response = future.result(timeout=15.0)
         assert response.message.content
         final_state = desktop.shell_state()
         assert final_state.busy is False
@@ -315,20 +355,20 @@ def test_desktop_send_chat_async_deduplicates_same_correlation_id(tmp_path) -> N
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_fixed_agent_response(app)
     calls = 0
     original = desktop._chat.handle  # noqa: SLF001
     try:
-        def _slow_handle(text: str):
+        def _slow_handle(text: str, *args, **kwargs):
             nonlocal calls
             calls += 1
             time.sleep(0.2)
-            return original(text)
+            return original(text, *args, **kwargs)
 
         desktop._chat.handle = _slow_handle  # type: ignore[method-assign]  # noqa: SLF001
         future_a = desktop.send_chat_async("calcula la derivada de x**2", correlation_id="same-request")
@@ -348,8 +388,6 @@ def test_desktop_streaming_updates_single_assistant_message_and_speaks_at_done(t
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
-        gpt_oss_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
@@ -357,18 +395,23 @@ def test_desktop_streaming_updates_single_assistant_message_and_speaks_at_done(t
     )
     app, desktop = build_desktop_runtime(settings)
     spoken: list[str] = []
+    partial_chunk_yielded = Event()
+    release_final_chunk = Event()
 
-    def _stream(_request, *, cancel_check=None):
-        yield StreamChunk(text="Ho", metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
+    def _stream(_request, *, cancel_check=None, execution_context=None):
+        assert execution_context.request_id == "stream-1"
+        partial_chunk_yielded.set()
+        yield StreamChunk(text="Ho", metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
         assert spoken == []
-        time.sleep(0.05)
-        yield StreamChunk(text="la", metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
-        yield StreamChunk(done=True, metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
+        release_final_chunk.wait(timeout=10)
+        yield StreamChunk(text="la", metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
+        yield StreamChunk(done=True, metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
 
     app.runtime_service.stream_model = _stream  # type: ignore[method-assign]
     desktop._voice.speak_response = lambda text: spoken.append(text)  # type: ignore[method-assign]  # noqa: SLF001
     try:
         future = desktop.send_chat_async("hola jarvis", correlation_id="stream-1", metadata={"stream": True})
+        assert partial_chunk_yielded.wait(timeout=5)
         deadline = time.perf_counter() + 5.0
         saw_partial = False
         while time.perf_counter() < deadline and not future.done():
@@ -376,7 +419,10 @@ def test_desktop_streaming_updates_single_assistant_message_and_speaks_at_done(t
             assistant = [message for message in state.conversation if message.role == "assistant"]
             if assistant and assistant[-1].content == "Ho":
                 saw_partial = True
+                release_final_chunk.set()
+                break
             time.sleep(0.01)
+        release_final_chunk.set()
         response = future.result(timeout=5)
         state = desktop.shell_state(force=True)
         assistant = [message for message in state.conversation if message.role == "assistant"]
@@ -386,6 +432,7 @@ def test_desktop_streaming_updates_single_assistant_message_and_speaks_at_done(t
         assert response.raw_result["chunks"] == 2
         assert spoken == ["Hola"]
     finally:
+        release_final_chunk.set()
         app.stop()
         desktop.shutdown()
 
@@ -395,8 +442,6 @@ def test_desktop_streaming_superseded_stream_does_not_mix_tokens(tmp_path) -> No
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
-        gpt_oss_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
@@ -404,16 +449,17 @@ def test_desktop_streaming_superseded_stream_does_not_mix_tokens(tmp_path) -> No
     )
     app, desktop = build_desktop_runtime(settings)
 
-    def _stream(request, *, cancel_check=None):
+    def _stream(request, *, cancel_check=None, execution_context=None):
+        assert execution_context.request_id in {"stream-old", "stream-new"}
         prompt = request.messages[-1].content
         if "primero" in prompt:
-            yield StreamChunk(text="viejo", metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
+            yield StreamChunk(text="viejo", metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
             time.sleep(0.2)
-            yield StreamChunk(text="-tarde", metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
-            yield StreamChunk(done=True, metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
+            yield StreamChunk(text="-tarde", metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
+            yield StreamChunk(done=True, metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
             return
-        yield StreamChunk(text="nuevo", metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
-        yield StreamChunk(done=True, metadata={"provider": "gpt_oss", "model": "gpt-oss:20b"})
+        yield StreamChunk(text="nuevo", metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
+        yield StreamChunk(done=True, metadata={"provider": "nemotron_omni_local", "model": "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"})
 
     app.runtime_service.stream_model = _stream  # type: ignore[method-assign]
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
@@ -428,5 +474,71 @@ def test_desktop_streaming_superseded_stream_does_not_mix_tokens(tmp_path) -> No
         assert any(content == "nuevo" for content in contents)
         assert not any("viejo-tarde" in content for content in contents)
     finally:
+        app.stop()
+        desktop.shutdown()
+
+
+def test_superseding_stream_cancels_at_admission_when_workers_are_saturated(tmp_path) -> None:
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+        voice_audio_output_backend_default="in_memory",
+        voice_tts_provider_default="in_memory",
+    )
+    app, desktop = build_desktop_runtime(settings)
+    release_workers = Event()
+    worker_a_started = Event()
+    worker_b_started = Event()
+    old_chunk_started = Event()
+    release_old_chunk = Event()
+
+    def _occupy_worker(started: Event) -> None:
+        started.set()
+        release_workers.wait(timeout=10)
+
+    blocker_a = desktop._executor.submit(_occupy_worker, worker_a_started)  # noqa: SLF001
+    blocker_b = desktop._executor.submit(_occupy_worker, worker_b_started)  # noqa: SLF001
+
+    def _stream(request, *, cancel_check=None, execution_context=None):
+        prompt = request.messages[-1].content
+        if "primero" in prompt:
+            old_chunk_started.set()
+            yield StreamChunk(text="viejo", metadata={"provider": "nemotron-test", "model": "nemotron-test"})
+            release_old_chunk.wait(timeout=10)
+            yield StreamChunk(text="-tarde", metadata={"provider": "nemotron-test", "model": "nemotron-test"})
+            yield StreamChunk(done=True, metadata={"provider": "nemotron-test", "model": "nemotron-test"})
+            return
+        yield StreamChunk(text="nuevo", metadata={"provider": "nemotron-test", "model": "nemotron-test"})
+        yield StreamChunk(done=True, metadata={"provider": "nemotron-test", "model": "nemotron-test"})
+
+    app.runtime_service.stream_model = _stream  # type: ignore[method-assign]
+    desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
+    try:
+        assert worker_a_started.wait(timeout=5)
+        assert worker_b_started.wait(timeout=5)
+        first = desktop.send_chat_async("primero", correlation_id="saturated-old", metadata={"stream": True})
+        assert old_chunk_started.wait(timeout=5)
+
+        second = desktop.send_chat_async("segundo", correlation_id="saturated-new", metadata={"stream": True})
+        release_old_chunk.set()
+        first.result(timeout=5)
+        release_workers.set()
+        second.result(timeout=5)
+
+        contents = [
+            message.content
+            for message in desktop.shell_state(force=True).conversation
+            if message.role == "assistant"
+        ]
+        assert any(content == "nuevo" for content in contents)
+        assert not any("viejo-tarde" in content for content in contents)
+    finally:
+        release_old_chunk.set()
+        release_workers.set()
+        blocker_a.result(timeout=5)
+        blocker_b.result(timeout=5)
         app.stop()
         desktop.shutdown()

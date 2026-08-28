@@ -32,6 +32,10 @@ class DesktopPanelComposer:
         self._cached_at = perf_counter()
         return snapshot
 
+    def invalidate(self) -> None:
+        self._cached_snapshot = None
+        self._cached_at = 0.0
+
     def _compose_uncached(self) -> DesktopPanelSnapshot:
         dashboard = _as_dict(self._bridge.hud_dashboard())
         health = _as_dict(self._bridge.hud_health())

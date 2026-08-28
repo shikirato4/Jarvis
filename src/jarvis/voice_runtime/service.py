@@ -98,12 +98,22 @@ class VoiceRuntimeService:
 
     def status(self, *, lightweight_voice_clone: bool = False) -> dict[str, object]:
         active = self._sessions.active()
+        if lightweight_voice_clone:
+            audio_inputs = self._unprobed_status(self._input_registry.list_backends())
+            audio_outputs = self._unprobed_status(self._output_registry.list_backends())
+            stt_providers = self._unprobed_status(self._stt._registry.list_providers())  # noqa: SLF001
+            tts_providers = self._unprobed_status(self._tts._registry.list_providers())  # noqa: SLF001
+        else:
+            audio_inputs = self._cached_health("audio_inputs", self._input_registry.list_backends)
+            audio_outputs = self._cached_health("audio_outputs", self._output_registry.list_backends)
+            stt_providers = self._cached_health("stt_providers", self._stt.health)
+            tts_providers = self._cached_health("tts_providers", self._tts.health)
         return {
             "active_session": active.model_dump(mode="json") if active else None,
-            "audio_inputs": self._cached_health("audio_inputs", self._input_registry.list_backends),
-            "audio_outputs": self._cached_health("audio_outputs", self._output_registry.list_backends),
-            "stt_providers": self._cached_health("stt_providers", self._stt.health),
-            "tts_providers": self._cached_health("tts_providers", self._tts.health),
+            "audio_inputs": audio_inputs,
+            "audio_outputs": audio_outputs,
+            "stt_providers": stt_providers,
+            "tts_providers": tts_providers,
             "degradation_policy": self._settings.voice_degradation_policy,
             "voice_enabled": self._voice_enabled,
             "voice_muted": self._voice_muted,
@@ -113,6 +123,24 @@ class VoiceRuntimeService:
             "current_speech_correlation_id": self._current_speech_correlation_id,
             "last_speech_result": self._last_speech_result,
         }
+
+    @staticmethod
+    def _unprobed_status(items) -> list[dict[str, object]]:
+        result: list[dict[str, object]] = []
+        for item in items:
+            name = (
+                getattr(item, "provider_name", None)
+                or getattr(item, "backend_name", None)
+                or type(item).__name__
+            )
+            result.append(
+                {
+                    "name": str(name),
+                    "status": "not_probed",
+                    "healthy": None,
+                }
+            )
+        return result
 
     def _cached_health(self, key: str, loader) -> list[dict[str, object]]:
         now = time.perf_counter()
@@ -153,7 +181,12 @@ class VoiceRuntimeService:
             operation_name="voice.transcribe_file",
             started_at=started,
             latency_ms=result.latency_ms,
-            data={"text": result.text, "provider": result.provider_name, "backend": capture.backend_name},
+            data={
+                "text": result.text,
+                "provider": result.provider_name,
+                "backend": capture.backend_name,
+                "segments": [segment.model_dump(mode="json") for segment in result.segments],
+            },
             provider=result.provider_name,
             backend=capture.backend_name,
         )
@@ -176,10 +209,16 @@ class VoiceRuntimeService:
                 started_at=started,
                 data={"queued": False, "reason": "voice_muted"},
             )
+        with self._speech_lock:
+            previous_worker = self._speech_worker
         self._cancel_active_speech()
         token = CancellationToken(correlation_id)
         self._cancellations[correlation_id] = token
-        worker = Thread(target=self._run_speech, args=(correlation_id, text, token, literal), daemon=True)
+        worker = Thread(
+            target=self._run_speech_after,
+            args=(previous_worker, correlation_id, text, token, literal),
+            daemon=True,
+        )
         with self._speech_lock:
             self._speech_worker = worker
             self._current_speech_correlation_id = correlation_id
@@ -191,6 +230,50 @@ class VoiceRuntimeService:
             started_at=started,
             data={"queued": True, "text_length": len(text)},
         )
+
+    def wait_for_speech(
+        self,
+        correlation_id: str,
+        *,
+        timeout_seconds: float,
+    ) -> dict[str, object]:
+        """Wait for one admitted speech request without polling provider health."""
+        with self._speech_lock:
+            worker = self._speech_worker
+            current_id = self._current_speech_correlation_id
+        if worker is None or current_id != correlation_id:
+            result = dict(self._last_speech_result)
+            if result.get("correlation_id") == correlation_id:
+                return result
+            raise VoiceRuntimeError("voice speech request is no longer active")
+        worker.join(timeout=max(float(timeout_seconds), 0.0))
+        if worker.is_alive():
+            self.cancel(correlation_id)
+            raise VoiceRuntimeError("voice speech deadline exceeded")
+        result = dict(self._last_speech_result)
+        if result.get("correlation_id") != correlation_id:
+            raise VoiceRuntimeError("voice speech did not complete")
+        if result.get("status") == "failed":
+            raise VoiceRuntimeError("voice speech provider failed")
+        return result
+
+    def _run_speech_after(
+        self,
+        previous_worker: Thread | None,
+        correlation_id: str,
+        text: str,
+        token: CancellationToken,
+        literal: bool,
+    ) -> None:
+        while previous_worker is not None and previous_worker.is_alive():
+            if token.cancelled():
+                self._cancellations.pop(correlation_id, None)
+                return
+            previous_worker.join(timeout=0.05)
+        if token.cancelled():
+            self._cancellations.pop(correlation_id, None)
+            return
+        self._run_speech(correlation_id, text, token, literal)
 
     def set_voice_enabled(self, enabled: bool) -> dict[str, object]:
         self._voice_enabled = enabled
@@ -366,7 +449,6 @@ class VoiceRuntimeService:
             self._cancellations.pop(request.correlation_id or "", None)
 
     def _run_speech(self, correlation_id: str, text: str, token: CancellationToken, literal: bool = False) -> None:
-        started = datetime.now(timezone.utc)
         started_perf = time.perf_counter()
         operation_handle = None
         operation_finished = False
@@ -435,6 +517,7 @@ class VoiceRuntimeService:
             segment_results: list[dict[str, object]] = []
             fallback_used = False
             fallback_reason: str | None = None
+            all_segments_played = True
             tts_start_ms: float | None = None
             for segment_index, segment in enumerate(segments, start=1):
                 if token.cancelled():
@@ -485,7 +568,8 @@ class VoiceRuntimeService:
                     return
                 playback_handle = self._playback.play(result, cancellation=token)
                 self._current_playback_handle = playback_handle
-                result.played = True
+                result.played = result.backend_name != "in_memory"
+                all_segments_played = all_segments_played and result.played
                 playback_handle.wait(result.duration_seconds)
                 if token.cancelled():
                     cancellation_reason = "cancelled_during_playback"
@@ -498,6 +582,7 @@ class VoiceRuntimeService:
                         "segment_index": segment_index,
                         "provider": result.provider_name,
                         "backend": result.backend_name,
+                        "played": result.played,
                         "fallback_used": result.fallback_used,
                         "latency_ms": result.latency_ms,
                         "segment_latency_ms": round((time.perf_counter() - segment_started) * 1000, 2),
@@ -521,6 +606,7 @@ class VoiceRuntimeService:
                     time.sleep(segment.pause_ms / 1000)
             final_result = segment_results[-1]
             self._last_speech_result = {
+                "status": "completed" if all_segments_played else "partial",
                 "provider": final_result["provider"],
                 "backend": final_result["backend"],
                 "fallback_used": fallback_used,
@@ -593,6 +679,11 @@ class VoiceRuntimeService:
                 },
             )
         except Exception as exc:  # noqa: BLE001
+            self._last_speech_result = {
+                "status": "failed",
+                "correlation_id": correlation_id,
+                "error_type": type(exc).__name__,
+            }
             self._logger.exception(
                 "voice_speak_failed",
                 extra={

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from jarvis.core.errors import ConfigurationError
 
-from .models import ActionResult
+from .models import ActionResult, ActionRisk
 
 if TYPE_CHECKING:
     from jarvis.config import Settings
@@ -42,6 +42,11 @@ class ActionDefinition:
     handler: ActionHandler
     rollback: RollbackHandler | None = None
     tags: tuple[str, ...] = ()
+    risk: ActionRisk = ActionRisk.SAFE
+    timeout_seconds: float = 30.0
+    idempotent: bool = True
+    supports_cancellation: bool = False
+    adapter: str = "internal_api"
 
 
 class ActionRegistry:

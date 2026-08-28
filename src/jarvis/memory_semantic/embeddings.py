@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
+import re
 import time
 from typing import Any
-
-import httpx
 
 from jarvis.config import Settings
 from jarvis.core.errors import CapabilityUnavailableError, ConfigurationError, EmbeddingProviderError, EmbeddingRoutingError
@@ -169,34 +170,26 @@ class EmbeddingService:
         raise EmbeddingProviderError(str(last_error))
 
 
-class OllamaEmbeddingProvider:
-    provider_name = "ollama_embeddings"
+class LocalHashEmbeddingProvider:
+    """Deterministic, private embedding fallback with no model-server dependency."""
+
+    provider_name = "local_hash_embeddings"
     provider_kind = "local"
 
-    def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
+    def __init__(self, settings: Settings, *, dimensions: int = 256) -> None:
         self._settings = settings
-        self._base_url = settings.ollama_base_url.rstrip("/")
-        self._client = client or httpx.Client(base_url=self._base_url)
+        self._dimensions = max(int(dimensions), 32)
 
     def health_check(self) -> EmbeddingProviderHealth:
-        try:
-            response = self._client.get(
-                self._settings.ollama_tags_endpoint,
-                timeout=self._settings.ollama_healthcheck_timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
-            return EmbeddingProviderHealth(
-                provider_name=self.provider_name,
-                healthy=True,
-                details={"models": len(payload.get("models", []))},
-            )
-        except Exception as exc:
-            return EmbeddingProviderHealth(
-                provider_name=self.provider_name,
-                healthy=False,
-                details={"error": str(exc)},
-            )
+        return EmbeddingProviderHealth(
+            provider_name=self.provider_name,
+            healthy=True,
+            details={
+                "implementation": "deterministic_local_hash",
+                "dimensions": self._dimensions,
+                "network": False,
+            },
+        )
 
     def embed(
         self,
@@ -205,46 +198,38 @@ class OllamaEmbeddingProvider:
         model_name: str,
         timeout_seconds: float | None,
     ) -> EmbeddingResponse:
-        attempts = max(self._settings.ollama_max_retries + 1, 1)
-        timeout = timeout_seconds or self._settings.ollama_timeout_seconds
-        payload = {"model": model_name, "input": list(request.texts)}
-        last_error: Exception | None = None
         started_at = time.perf_counter()
-        for attempt in range(1, attempts + 1):
-            try:
-                response = self._client.post(
-                    self._settings.ollama_embeddings_endpoint,
-                    json=payload,
-                    timeout=timeout,
-                )
-                response.raise_for_status()
-                body = response.json()
-                elapsed_ms = (time.perf_counter() - started_at) * 1000
-                vectors = [
-                    EmbeddingVector(
-                        index=index,
-                        text=request.texts[index],
-                        values=[float(value) for value in values],
-                        dimensions=len(values),
-                    )
-                    for index, values in enumerate(body.get("embeddings", []))
-                ]
-                return EmbeddingResponse(
-                    provider_name=self.provider_name,
-                    provider_kind=self.provider_kind,
-                    logical_model=request.logical_model or model_name,
-                    model_name=body.get("model", model_name),
-                    vectors=vectors,
-                    latency_ms=elapsed_ms,
-                    metadata={"attempt": attempt, "task_type": request.task_type},
-                )
-            except Exception as exc:
-                last_error = exc
-                if attempt >= attempts:
-                    break
-                time.sleep(self._settings.ollama_retry_backoff_seconds * attempt)
-        assert last_error is not None
-        raise last_error
+        vectors = [
+            EmbeddingVector(
+                index=index,
+                text=text,
+                values=self._embed_text(text),
+                dimensions=self._dimensions,
+            )
+            for index, text in enumerate(request.texts)
+        ]
+        return EmbeddingResponse(
+            provider_name=self.provider_name,
+            provider_kind=self.provider_kind,
+            logical_model=request.logical_model or model_name,
+            model_name=model_name,
+            vectors=vectors,
+            latency_ms=(time.perf_counter() - started_at) * 1000,
+            metadata={"task_type": request.task_type, "network": False},
+        )
+
+    def _embed_text(self, text: str) -> list[float]:
+        values = [0.0] * self._dimensions
+        tokens = re.findall(r"[\wáéíóúüñ]+", text.casefold())
+        for token in tokens:
+            digest = hashlib.blake2b(token.encode("utf-8"), digest_size=16).digest()
+            index = int.from_bytes(digest[:8], "little") % self._dimensions
+            sign = -1.0 if digest[8] & 1 else 1.0
+            values[index] += sign
+        norm = math.sqrt(sum(value * value for value in values))
+        if norm:
+            return [value / norm for value in values]
+        return values
 
 
 def build_default_embedding_profiles(settings: Settings) -> list[EmbeddingProfile]:

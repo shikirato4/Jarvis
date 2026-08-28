@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from jarvis.core.modes import ExecutionMode
+from jarvis.runtime_paths import resolve_user_data_path, user_logs_dir
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_ENV_FILE = _REPO_ROOT / ".env"
@@ -82,28 +83,81 @@ class Settings(BaseSettings):
     sqlite_busy_timeout_ms: int = 5_000
     sqlite_pool_pre_ping: bool = True
     sqlite_check_same_thread: bool = False
-    model_provider_default: str = "ollama"
-    model_provider_fallback_order: tuple[str, ...] = ("ollama", "gpt_oss")
-    general_chat_model_provider: str = "ollama"
-    general_chat_model_fallback_order: tuple[str, ...] = ("gpt_oss",)
-    gpt_oss_enabled: bool = False
-    gpt_oss_base_url: str = "http://127.0.0.1:8000/v1"
-    gpt_oss_api_key: str | None = None
-    gpt_oss_timeout_seconds: float = 90.0
-    gpt_oss_healthcheck_timeout_seconds: float = 5.0
-    gpt_oss_chat_endpoint: str = "/chat/completions"
-    gpt_oss_models_endpoint: str = "/models"
-    gpt_oss_general_model: str = "gpt-oss-20b"
-    gpt_oss_reasoning_model: str = "gpt-oss-20b"
-    gpt_oss_coding_model: str = "gpt-oss-20b"
-    gpt_oss_summarizer_model: str = "gpt-oss-20b"
-    gpt_oss_writing_model: str = "gpt-oss-20b"
-    gpt_oss_planner_model: str = "gpt-oss-20b"
-    embedding_provider_default: str = "ollama_embeddings"
-    embedding_provider_fallback_order: tuple[str, ...] = ("ollama_embeddings",)
-    embedding_model_default: str = "nomic-embed-text"
+    llm_mode: Literal["auto", "nvidia_api", "local"] = Field(
+        default="auto",
+        validation_alias=AliasChoices("JARVIS_LLM_MODE", "llm_mode"),
+    )
+    nvidia_api_key: SecretStr | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        validation_alias=AliasChoices("NVIDIA_API_KEY", "JARVIS_NVIDIA_API_KEY", "nvidia_api_key"),
+    )
+    nvidia_base_url: str = Field(
+        default="https://integrate.api.nvidia.com/v1",
+        validation_alias=AliasChoices("NVIDIA_BASE_URL", "JARVIS_NVIDIA_BASE_URL", "nvidia_base_url"),
+    )
+    nvidia_model: str = Field(
+        default="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        validation_alias=AliasChoices("NVIDIA_MODEL", "JARVIS_NVIDIA_MODEL", "nvidia_model"),
+    )
+    nvidia_timeout_seconds: float = 90.0
+    nvidia_healthcheck_timeout_seconds: float = 5.0
+    nvidia_circuit_failure_threshold: int = 3
+    nvidia_circuit_cooldown_seconds: float = 30.0
+    local_llm_base_url: str = Field(
+        default="http://127.0.0.1:8000/v1",
+        validation_alias=AliasChoices("LOCAL_LLM_BASE_URL", "JARVIS_LOCAL_LLM_BASE_URL", "local_llm_base_url"),
+    )
+    local_llm_model: str = Field(
+        default="nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4",
+        validation_alias=AliasChoices("LOCAL_LLM_MODEL", "JARVIS_LOCAL_LLM_MODEL", "local_llm_model"),
+    )
+    local_llm_model_aliases: tuple[str, ...] = Field(
+        default=(),
+        validation_alias=AliasChoices(
+            "LOCAL_LLM_MODEL_ALIASES",
+            "JARVIS_LOCAL_LLM_MODEL_ALIASES",
+            "local_llm_model_aliases",
+        ),
+    )
+    local_llm_timeout_seconds: float = 120.0
+    local_llm_healthcheck_timeout_seconds: float = 5.0
+    local_cpu_offload_gb: str = Field(
+        default="auto",
+        validation_alias=AliasChoices("LOCAL_CPU_OFFLOAD_GB", "JARVIS_LOCAL_CPU_OFFLOAD_GB", "local_cpu_offload_gb"),
+    )
+    local_gpu_memory_utilization: str = Field(
+        default="auto",
+        validation_alias=AliasChoices(
+            "LOCAL_GPU_MEMORY_UTILIZATION",
+            "JARVIS_LOCAL_GPU_MEMORY_UTILIZATION",
+            "local_gpu_memory_utilization",
+        ),
+    )
+    local_max_model_len: str = Field(
+        default="auto",
+        validation_alias=AliasChoices("LOCAL_MAX_MODEL_LEN", "JARVIS_LOCAL_MAX_MODEL_LEN", "local_max_model_len"),
+    )
+    local_tensor_parallel_size: str = Field(
+        default="auto",
+        validation_alias=AliasChoices(
+            "LOCAL_TENSOR_PARALLEL_SIZE",
+            "JARVIS_LOCAL_TENSOR_PARALLEL_SIZE",
+            "local_tensor_parallel_size",
+        ),
+    )
+    local_load_timeout_seconds: float = 900.0
+    local_performance_profile: Literal["stable", "balanced", "performance", "custom"] = "stable"
+    attachment_max_file_bytes: int = 50 * 1024 * 1024
+    attachment_max_request_bytes: int = 200 * 1024 * 1024
+    attachment_max_files_per_request: int = 16
+    attachment_processing_timeout_seconds: float = 120.0
+    attachment_video_max_frames: int = 12
+    embedding_provider_default: str = "local_hash_embeddings"
+    embedding_provider_fallback_order: tuple[str, ...] = ("local_hash_embeddings",)
+    embedding_model_default: str = "jarvis-hash-embedding-v1"
     embeddings_enabled: bool = True
-    ollama_embeddings_endpoint: str = "/api/embed"
     semantic_chunk_size: int = 900
     semantic_chunk_overlap: int = 120
     semantic_top_k: int = 5
@@ -239,6 +293,9 @@ class Settings(BaseSettings):
     autonomy_default_strategy: str = "balanced"
     autonomy_stop_on_low_confidence: bool = True
     autonomy_reflection_enabled: bool = True
+    agent_max_steps: int = Field(default=8, gt=0)
+    agent_timeout_seconds: float = Field(default=120.0, gt=0)
+    agent_max_repeated_action_signature: int = Field(default=2, gt=0)
     system_runtime_enabled: bool = True
     system_backend_kind: str = "native"
     system_search_roots: tuple[Path, ...] = ()
@@ -308,13 +365,14 @@ class Settings(BaseSettings):
             "json": 150,
         }
     )
-    ollama_enabled: bool = True
-    ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_timeout_seconds: float = 90.0
-    ollama_healthcheck_timeout_seconds: float = 5.0
     chat_default_max_tokens: int = 500
     chat_fast_max_tokens: int = 160
     chat_detailed_max_tokens: int = 1200
+    conversation_context_max_tokens: int = Field(default=16_384, gt=0)
+    conversation_context_safety_margin_tokens: int = Field(default=512, ge=0)
+    conversation_context_recent_turns: int = Field(default=8, gt=0)
+    conversation_context_memory_top_k: int = Field(default=5, ge=0)
+    conversation_context_attachment_char_budget: int = Field(default=12_000, ge=0)
     chat_temperature: float = 0.4
     llm_timeout_seconds: float = 60.0
     llm_fast_timeout_seconds: float = 20.0
@@ -325,14 +383,6 @@ class Settings(BaseSettings):
     research_visible_sources: int = 5
     research_synthesis_max_tokens: int = 900
     research_short_max_tokens: int = 220
-    ollama_keep_warm: bool = False
-    ollama_keep_warm_prompt: str = "ping"
-    ollama_keep_warm_delay_seconds: float = 5.0
-    ollama_max_retries: int = 2
-    ollama_retry_backoff_seconds: float = 0.25
-    ollama_chat_endpoint: str = "/api/chat"
-    ollama_tags_endpoint: str = "/api/tags"
-    ollama_stream_endpoint: str = "auto"
     unity_allowed_bridge_commands: tuple[str, ...] = ()
     unity_blocked_bridge_commands: tuple[str, ...] = ()
     unity_require_confirmation_for_editor_commands: bool = True
@@ -476,28 +526,6 @@ class Settings(BaseSettings):
             return tuple(str(item).strip() for item in value if str(item).strip())
         raise TypeError("command_allowlist must be a string or a sequence of strings")
 
-    @field_validator("model_provider_fallback_order", mode="before")
-    @classmethod
-    def _coerce_provider_order(cls, value: object) -> tuple[str, ...]:
-        if value in (None, "", ()):
-            return ()
-        if isinstance(value, str):
-            return tuple(item.strip() for item in value.split(",") if item.strip())
-        if isinstance(value, (list, tuple)):
-            return tuple(str(item).strip() for item in value if str(item).strip())
-        raise TypeError("model_provider_fallback_order must be a string or a sequence of strings")
-
-    @field_validator("general_chat_model_fallback_order", mode="before")
-    @classmethod
-    def _coerce_general_chat_provider_order(cls, value: object) -> tuple[str, ...]:
-        if value in (None, "", ()):
-            return ()
-        if isinstance(value, str):
-            return tuple(item.strip() for item in value.split(",") if item.strip())
-        if isinstance(value, (list, tuple)):
-            return tuple(str(item).strip() for item in value if str(item).strip())
-        raise TypeError("general_chat_model_fallback_order must be a string or a sequence of strings")
-
     @field_validator("ui_blocked_window_titles", "ui_allowed_window_titles", "ui_hotkey_blocklist", mode="before")
     @classmethod
     def _coerce_string_tuple(cls, value: object) -> tuple[str, ...]:
@@ -571,7 +599,7 @@ class Settings(BaseSettings):
 
     @property
     def resolved_data_dir(self) -> Path:
-        return self.data_dir.resolve()
+        return resolve_user_data_path(self.data_dir)
 
     @property
     def resolved_workspace_root(self) -> Path:
@@ -580,8 +608,12 @@ class Settings(BaseSettings):
     @property
     def resolved_logs_dir(self) -> Path:
         if self.logs_dir is not None:
-            return self.logs_dir.resolve()
-        return (self.resolved_data_dir / "logs").resolve()
+            return (
+                self.logs_dir.resolve(strict=False)
+                if self.logs_dir.is_absolute()
+                else (user_logs_dir() / self.logs_dir).resolve(strict=False)
+            )
+        return user_logs_dir().resolve(strict=False)
 
     @property
     def resolved_vision_capture_dir(self) -> Path:
@@ -610,8 +642,8 @@ class Settings(BaseSettings):
     @property
     def resolved_image_output_dir(self) -> Path:
         if self.image_output_dir is not None:
-            return self.image_output_dir.resolve()
-        return (self.resolved_workspace_root / "outputs" / "images").resolve()
+            return resolve_user_data_path(self.image_output_dir)
+        return (self.resolved_data_dir / "outputs" / "images").resolve()
 
     @property
     def resolved_log_file(self) -> Path:

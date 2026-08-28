@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
+from pathlib import Path
 
 from .theme import PALETTE
 
 try:
-    from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer
-    from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen
+    from PySide6.QtCore import QPointF, QProcess, QRect, QRectF, QSize, Qt, QTimer, QUrl, Signal
+    from PySide6.QtGui import QColor, QDesktopServices, QFont, QGuiApplication, QPainter, QPainterPath, QPen, QPixmap
     from PySide6.QtWidgets import (
-        QApplication,
         QFrame,
         QGraphicsDropShadowEffect,
         QHBoxLayout,
         QLabel,
+        QPlainTextEdit,
+        QPushButton,
         QScrollArea,
         QSizePolicy,
         QVBoxLayout,
@@ -258,12 +260,25 @@ if QWidget is not object:
 
 
     class ChatMessageWidget(QFrame):
-        def __init__(self, role: str, content: str, created_at: datetime, *, compact: bool = False, parent=None) -> None:
+        def __init__(
+            self,
+            role: str,
+            content: str,
+            created_at: datetime,
+            *,
+            compact: bool = False,
+            metadata: dict | None = None,
+            parent=None,
+        ) -> None:
             super().__init__(parent)
             self.setObjectName("MessageBubble")
             self.setProperty("messageRole", role)
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             self.setMinimumWidth(0)
+            self._calculated_height = 0
+            self._preview_path = str((metadata or {}).get("image_preview_path") or "")
+            self._preview_pixmap: QPixmap | None = None
+            self._image_action_buttons: list[QPushButton] = []
 
             layout = QVBoxLayout(self)
             layout.setContentsMargins(16, 12, 16, 12)
@@ -282,6 +297,7 @@ if QWidget is not object:
 
             body = QLabel(content)
             body.setObjectName(self._message_body_object_name(role))
+            body.setTextFormat(Qt.PlainText)
             body.setWordWrap(True)
             body.setTextInteractionFlags(Qt.TextSelectableByMouse)
             body.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -290,11 +306,40 @@ if QWidget is not object:
             layout.addWidget(body)
 
             self._body = body
+            self._preview = QLabel()
+            self._preview.setObjectName("ImageMessagePreview")
+            self._preview.setAlignment(Qt.AlignCenter)
+            self._preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+            self._preview.setVisible(False)
+            layout.addWidget(self._preview)
+
+            actions = QFrame()
+            action_layout = QHBoxLayout(actions)
+            action_layout.setContentsMargins(0, 0, 0, 0)
+            action_layout.setSpacing(8)
+            for label, callback in (
+                ("Abrir", self._open_preview),
+                ("Mostrar en carpeta", self._reveal_preview),
+                ("Copiar", self._copy_preview),
+            ):
+                button = QPushButton(label)
+                button.clicked.connect(callback)
+                action_layout.addWidget(button)
+                self._image_action_buttons.append(button)
+            action_layout.addStretch(1)
+            self._preview_actions = actions
+            self._preview_actions.setVisible(False)
+            layout.addWidget(actions)
+            self._load_preview()
+
             if role == "assistant":
                 apply_cyan_glow(self, alpha=22 if compact else 28, blur=16 if compact else 18)
 
         def text(self) -> str:
             return self._body.text()
+
+        def preview_path(self) -> str:
+            return self._preview_path
 
         def set_content_width(self, width: int) -> None:
             bubble_width = max(width, 240)
@@ -308,10 +353,70 @@ if QWidget is not object:
             ).height()
             if body_height > 0:
                 self._body.setFixedHeight(body_height + 14)
+            if self._preview_pixmap is not None:
+                scaled = self._preview_pixmap.scaled(
+                    body_width,
+                    min(body_width, 420),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+                self._preview.setPixmap(scaled)
+                self._preview.setFixedHeight(scaled.height())
             self.layout().activate()
-            self.adjustSize()
-            self.setFixedHeight(self.sizeHint().height())
+            header_height = self.fontMetrics().lineSpacing() + 6
+            margins = self.layout().contentsMargins()
+            self._calculated_height = (
+                body_height
+                + 14
+                + header_height
+                + self.layout().spacing()
+                + margins.top()
+                + margins.bottom()
+            )
+            self._calculated_height = max(
+                self._calculated_height,
+                self.layout().sizeHint().height(),
+            )
+            self.setMinimumHeight(self._calculated_height)
+            self.resize(bubble_width, self._calculated_height)
             self.updateGeometry()
+
+        def sizeHint(self) -> QSize:  # noqa: N802 - Qt API.
+            base = super().sizeHint()
+            if self._calculated_height:
+                return QSize(base.width(), max(base.height(), self._calculated_height))
+            return base
+
+        def _load_preview(self) -> None:
+            if not self._preview_path:
+                return
+            path = Path(self._preview_path)
+            if not path.is_file():
+                return
+            pixmap = QPixmap(str(path))
+            if pixmap.isNull():
+                return
+            self._preview_pixmap = pixmap
+            self._preview.setPixmap(pixmap)
+            self._preview.setVisible(True)
+            self._preview_actions.setVisible(True)
+
+        def _open_preview(self) -> None:
+            if self._preview_path:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(self._preview_path))
+
+        def _reveal_preview(self) -> None:
+            if not self._preview_path:
+                return
+            path = Path(self._preview_path)
+            QProcess.startDetached(
+                "explorer.exe",
+                ["/select,", str(path.resolve(strict=False))],
+            )
+
+        def _copy_preview(self) -> None:
+            if self._preview_pixmap is not None:
+                QGuiApplication.clipboard().setPixmap(self._preview_pixmap)
 
         @staticmethod
         def _speaker_label(role: str) -> str:
@@ -370,14 +475,26 @@ if QWidget is not object:
 
             if prefix_len == len(self._message_signatures) and len(signatures) >= len(self._message_signatures):
                 for message in messages[prefix_len:]:
-                    bubble = ChatMessageWidget(message.role, message.content, message.created_at, compact=True)
+                    bubble = ChatMessageWidget(
+                        message.role,
+                        message.content,
+                        message.created_at,
+                        compact=True,
+                        metadata=getattr(message, "metadata", None),
+                    )
                     bubble.set_content_width(self.viewport().width() - 12)
                     self._layout.insertWidget(self._layout.count() - 1, bubble)
                     self._message_widgets.append(bubble)
             else:
                 self._clear()
                 for message in messages:
-                    bubble = ChatMessageWidget(message.role, message.content, message.created_at, compact=True)
+                    bubble = ChatMessageWidget(
+                        message.role,
+                        message.content,
+                        message.created_at,
+                        compact=True,
+                        metadata=getattr(message, "metadata", None),
+                    )
                     bubble.set_content_width(self.viewport().width() - 12)
                     self._layout.insertWidget(self._layout.count() - 1, bubble)
                     self._message_widgets.append(bubble)
@@ -436,13 +553,97 @@ if QWidget is not object:
             self._placeholder.hide()
 
         @staticmethod
-        def _signature(message) -> tuple[str, str, str, str]:
+        def _signature(message) -> tuple[str, str, str, str, str, str]:
+            metadata = getattr(message, "metadata", {}) or {}
             return (
                 str(getattr(message, "message_id", "")),
                 str(getattr(message, "role", "")),
                 str(getattr(message, "content", "")),
                 getattr(message, "created_at").isoformat(),
+                str(metadata.get("image_job_status") or ""),
+                str(metadata.get("image_preview_path") or ""),
             )
+
+
+    class ChatComposerInput(QPlainTextEdit):
+        submit_requested = Signal()
+
+        def __init__(
+            self,
+            parent=None,
+            *,
+            minimum_height: int = 54,
+            maximum_height: int = 220,
+        ) -> None:
+            super().__init__(parent)
+            self._minimum_document_height = max(minimum_height, 32)
+            self._maximum_document_height = max(
+                maximum_height,
+                self._minimum_document_height,
+            )
+            self._updating_document_height = False
+            self._document_height_update_pending = False
+            self.setMinimumHeight(self._minimum_document_height)
+            self.setMaximumHeight(self._maximum_document_height)
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+            self.document().documentLayout().documentSizeChanged.connect(
+                lambda _size: self._schedule_document_height_update()
+            )
+            self.textChanged.connect(self._schedule_document_height_update)
+            self.update_document_height()
+
+        def text(self) -> str:
+            return self.toPlainText()
+
+        def setText(self, text: str) -> None:  # noqa: N802 - QLineEdit compatibility.
+            self.setPlainText(text)
+
+        def _schedule_document_height_update(self) -> None:
+            if self._document_height_update_pending:
+                return
+            self._document_height_update_pending = True
+            QTimer.singleShot(0, self._apply_scheduled_document_height_update)
+
+        def _apply_scheduled_document_height_update(self) -> None:
+            self._document_height_update_pending = False
+            self.update_document_height()
+
+        def update_document_height(self) -> None:
+            if self._updating_document_height:
+                return
+            self._updating_document_height = True
+            try:
+                document_height = max(
+                    int(self.document().documentLayout().documentSize().height()),
+                    self.document().blockCount() * self.fontMetrics().lineSpacing(),
+                )
+                margins = int(self.contentsMargins().top() + self.contentsMargins().bottom())
+                frame = self.frameWidth() * 2
+                target = max(
+                    self._minimum_document_height,
+                    min(document_height + margins + frame + 12, self._maximum_document_height),
+                )
+                if self.height() != target:
+                    self.setFixedHeight(target)
+                policy = (
+                    Qt.ScrollBarAsNeeded
+                    if target >= self._maximum_document_height
+                    else Qt.ScrollBarAlwaysOff
+                )
+                if self.verticalScrollBarPolicy() != policy:
+                    self.setVerticalScrollBarPolicy(policy)
+            finally:
+                self._updating_document_height = False
+
+        def keyPressEvent(self, event) -> None:  # noqa: N802 - Qt API.
+            if event.key() in {Qt.Key_Return, Qt.Key_Enter} and not (
+                event.modifiers() & Qt.ShiftModifier
+            ):
+                self.submit_requested.emit()
+                event.accept()
+                return
+            super().keyPressEvent(event)
 
 
     class ConversationSurfaceWidget(QFrame):

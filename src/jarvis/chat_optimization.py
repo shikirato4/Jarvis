@@ -97,9 +97,8 @@ def estimated_tokens_from_chars(chars: int) -> int:
 
 
 def streaming_timeout_seconds(profile: ChatGenerationProfile, settings: Any) -> float:
-    provider_timeout = float(
-        getattr(settings, "gpt_oss_timeout_seconds", 90.0)
-        if getattr(settings, "gpt_oss_enabled", False)
-        else getattr(settings, "ollama_timeout_seconds", 90.0)
+    provider_timeout = max(
+        float(getattr(settings, "nvidia_timeout_seconds", 90.0)),
+        float(getattr(settings, "local_llm_timeout_seconds", 120.0)),
     )
     return max(float(profile.timeout_seconds), provider_timeout)

@@ -1,6 +1,5 @@
 from .base import RetrievedContext, SemanticSearchQuery, SemanticSearchResult
 from .documents import DocumentIngestionRequest
-from .service import SemanticMemoryService
 
 __all__ = [
     "DocumentIngestionRequest",
@@ -9,3 +8,11 @@ __all__ = [
     "SemanticSearchQuery",
     "SemanticSearchResult",
 ]
+
+
+def __getattr__(name: str):
+    if name == "SemanticMemoryService":
+        from .service import SemanticMemoryService
+
+        return SemanticMemoryService
+    raise AttributeError(name)

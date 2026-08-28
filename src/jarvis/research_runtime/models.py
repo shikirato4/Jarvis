@@ -22,6 +22,10 @@ class ResearchTaskStatus(StrEnum):
 class ResearchStepKind(StrEnum):
     QUERY_PARSING = "query_parsing"
     QUERY_EXPANSION = "query_expansion"
+    SEMANTIC_MEMORY_RETRIEVAL = "semantic_memory_retrieval"
+    MEMORY_RETRIEVAL = "memory_retrieval"
+    WORKSPACE_RETRIEVAL = "workspace_retrieval"
+    WEB_RETRIEVAL = "web_retrieval"
     RETRIEVAL = "retrieval"
     ANALYSIS = "analysis"
     CROSS_VALIDATION = "cross_validation"
@@ -47,6 +51,7 @@ class ResearchSourceKind(StrEnum):
     PDF = "pdf"
     SIMULATED = "simulated"
     MEMORY = "memory"
+    WEB = "web"
 
 
 class ResearchFindingStatus(StrEnum):
@@ -190,7 +195,12 @@ class ResearchTask(JarvisBaseModel):
     status: ResearchTaskStatus = ResearchTaskStatus.PENDING
     budget: ResearchBudget = Field(default_factory=ResearchBudget)
     requested_outputs: tuple[str, ...] = ("short_summary", "detailed_summary", "technical_analysis", "structured_report")
-    source_scope: tuple[str, ...] = ("semantic_memory", "workspace", "simulated")
+    source_scope: tuple[str, ...] = (
+        "semantic_memory",
+        "memory",
+        "workspace",
+        "web",
+    )
     paths: list[str] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
     collection_name: str | None = None
@@ -226,7 +236,12 @@ class ResearchRunRequest(JarvisBaseModel):
     collection_name: str | None = None
     paths: list[str] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
-    source_scope: tuple[str, ...] = ("semantic_memory", "workspace", "simulated")
+    source_scope: tuple[str, ...] = (
+        "semantic_memory",
+        "memory",
+        "workspace",
+        "web",
+    )
     simulated_sources: list[SimulatedResearchSource] = Field(default_factory=list)
     persist_results: bool = True
     run_via_autonomy: bool = False

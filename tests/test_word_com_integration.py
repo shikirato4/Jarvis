@@ -87,7 +87,6 @@ def _settings(tmp_path):
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )

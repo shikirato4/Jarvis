@@ -6,38 +6,19 @@ from jarvis.bootstrap import build_application
 from jarvis.config import Settings
 from jarvis.core.errors import JarvisError
 from jarvis.desktop import build_desktop_runtime
-from jarvis.models_runtime.base import ModelRequest, ModelResponse, ProviderHealth, ProviderKind
+from jarvis.models_runtime.base import ModelRequest, ModelResponse, ModelToolCall, ProviderKind
+from jarvis.modules.web_module import build_web_search_action
 from jarvis.routing.models import TaskRequest
 
 
-class FixedModelProvider:
-    provider_name = "ollama"
-    provider_kind = ProviderKind.LOCAL
-
-    def __init__(self, content: str = "Respuesta directa de JARVIS.") -> None:
-        self.content = content
-
-    def health_check(self) -> ProviderHealth:
-        return ProviderHealth(provider_name=self.provider_name, healthy=True, details={"fake": True})
-
-    def infer(self, request: ModelRequest, *, model_name: str, temperature: float | None, timeout_seconds: float | None) -> ModelResponse:
-        return ModelResponse(
-            provider_name=self.provider_name,
-            provider_kind=self.provider_kind,
-            logical_model=request.logical_model or model_name,
-            model_name=model_name,
-            content=self.content,
-            latency_ms=4.0,
-            metadata={"task_type": request.task_type},
-        )
-
-
 class FixedModelResponse:
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str = "", *, tool_calls=None) -> None:
         self.content = content
         self.logical_model = "general_assistant"
         self.model_name = "fixed"
         self.fallback_used = False
+        self.provider_name = "nemotron_omni_local"
+        self.tool_calls = list(tool_calls or [])
 
     def model_dump(self, mode: str = "json") -> dict:
         return {
@@ -45,7 +26,50 @@ class FixedModelResponse:
             "logical_model": self.logical_model,
             "model_name": self.model_name,
             "fallback_used": self.fallback_used,
+            "tool_calls": [call.model_dump(mode="json") for call in self.tool_calls],
         }
+
+
+def _install_model_inference(app, infer_model) -> None:
+    """Install the same model double on direct and agent-mediated chat paths."""
+    app.runtime_service.infer_model = infer_model  # type: ignore[method-assign]
+    app.agent_controller._infer_model = infer_model  # type: ignore[method-assign]  # noqa: SLF001
+
+
+def _install_desktop_tool_model(app, *, goal: str, final_content: str) -> None:
+    """Script Nemotron to delegate a desktop goal and synthesize its observation."""
+    def infer(request):
+        if request.messages[-1].role == "tool":
+            return ModelResponse(
+                provider_name="nemotron-test",
+                provider_kind=ProviderKind.LOCAL,
+                logical_model=request.logical_model or "general_assistant",
+                model_name="nemotron-test",
+                content=final_content,
+                latency_ms=1.0,
+            )
+        return ModelResponse(
+            provider_name="nemotron-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model=request.logical_model or "general_assistant",
+            model_name="nemotron-test",
+            tool_calls=[
+                ModelToolCall(
+                    id="desktop-routing-tool-1",
+                    name="desktop_agent.run_mission",
+                    arguments={"goal": goal},
+                )
+            ],
+            latency_ms=1.0,
+        )
+
+    _install_model_inference(app, infer)
+
+
+def _run_confirmed_desktop_tool(desktop, prompt: str):
+    pending = desktop.send_chat(prompt)
+    assert pending.raw_result.get("status") == "waiting_confirmation"
+    return desktop.send_chat("sí")
 
 
 def test_runtime_route_uses_general_chat_for_simple_prompt(tmp_path) -> None:
@@ -53,10 +77,6 @@ def test_runtime_route_uses_general_chat_for_simple_prompt(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        gpt_oss_enabled=False,
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -78,10 +98,6 @@ def test_desktop_chat_uses_jarvis_identity_and_sanitizes_model_reply(tmp_path) -
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        gpt_oss_enabled=False,
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -92,7 +108,7 @@ def test_desktop_chat_uses_jarvis_identity_and_sanitizes_model_reply(tmp_path) -
         captured.append(request)
         return FixedModelResponse("Hola, soy ChatGPT. Estoy listo.")
 
-    app.runtime_service.infer_model = _infer_model  # type: ignore[method-assign]
+    _install_model_inference(app, _infer_model)
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     desktop._voice.speak_literal = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     try:
@@ -114,10 +130,6 @@ def test_desktop_chat_detailed_request_uses_larger_generation_profile(tmp_path) 
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        gpt_oss_enabled=False,
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -128,7 +140,7 @@ def test_desktop_chat_detailed_request_uses_larger_generation_profile(tmp_path) 
         captured.append(request)
         return FixedModelResponse("Soy Jarvis.")
 
-    app.runtime_service.infer_model = _infer_model  # type: ignore[method-assign]
+    _install_model_inference(app, _infer_model)
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     try:
         response = desktop.send_chat("explica detallado la historia de la inteligencia artificial paso a paso")
@@ -146,15 +158,11 @@ def test_desktop_chat_context_query_returns_human_safe_context(tmp_path) -> None
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        ollama_enabled=False,
-        gpt_oss_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
-    app.runtime_service.infer_model = lambda _request: FixedModelResponse("No deberia usar modelo.")  # type: ignore[method-assign]
+    _install_model_inference(app, lambda _request: FixedModelResponse("No deberia usar modelo."))
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     try:
         response = desktop.send_chat("que contexto tienes")
@@ -174,10 +182,6 @@ def test_desktop_chat_web_query_uses_brave_context_when_available(tmp_path, monk
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        ollama_enabled=False,
-        gpt_oss_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -196,21 +200,33 @@ def test_desktop_chat_web_query_uses_brave_context_when_available(tmp_path, monk
                 hits=[WebSearchHit(title="Tech News", url="https://example.com/news", snippet="Actualidad tecnologica.", source="example.com", rank=1)],
             )
 
-    monkeypatch.setattr("jarvis.desktop_runtime.chat.build_web_search_provider", lambda: FakeWeb())
+    fake_web = FakeWeb()
+    web_action = build_web_search_action(fake_web)
+    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
 
     def _infer_model(request: ModelRequest):
         captured.append(request)
+        if request.messages[-1].role != "tool":
+            return FixedModelResponse(
+                tool_calls=[
+                    ModelToolCall(
+                        id="web-routing-1",
+                        name="web.search",
+                        arguments={"query": "noticias de tecnologia hoy"},
+                    )
+                ]
+            )
         return FixedModelResponse("Busque en la web.\n\nResumen:\nActualidad tecnologica.\n\nFuentes:\n1. Tech News - example.com")
 
-    app.runtime_service.infer_model = _infer_model  # type: ignore[method-assign]
+    _install_model_inference(app, _infer_model)
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     try:
         response = desktop.send_chat("busca noticias de tecnologia hoy")
 
         assert "Busque en la web" in response.message.content
-        assert captured
-        assert "Fuentes encontradas por Brave Search" in captured[0].messages[-1].content
-        assert response.raw_result["web_search"]["provider"] == "brave"
+        assert [request.messages[-1].role for request in captured] == ["user", "tool"]
+        assert captured[1].messages[-1].name == "web.search"
+        assert response.raw_result["provider"] == "brave"
     finally:
         app.stop()
 
@@ -222,10 +238,6 @@ def test_desktop_chat_reports_local_model_timeout_after_web_sources(tmp_path, mo
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        ollama_enabled=False,
-        gpt_oss_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -243,18 +255,36 @@ def test_desktop_chat_reports_local_model_timeout_after_web_sources(tmp_path, mo
                 hits=[WebSearchHit(title="Tech News", url="https://example.com/news", snippet="Actualidad tecnologica.", source="example.com", rank=1)],
             )
 
-    monkeypatch.setattr("jarvis.desktop_runtime.chat.build_web_search_provider", lambda: FakeWeb())
-    app.runtime_service.infer_model = lambda _request: (_ for _ in ()).throw(TimeoutError("timed out"))  # type: ignore[method-assign]
+    fake_web = FakeWeb()
+    web_action = build_web_search_action(fake_web)
+    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
+    calls = 0
+
+    def _infer_then_timeout(_request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return FixedModelResponse(
+                tool_calls=[
+                    ModelToolCall(
+                        id="web-timeout-1",
+                        name="web.search",
+                        arguments={"query": "noticias de tecnologia hoy"},
+                    )
+                ]
+            )
+        raise TimeoutError("timed out")
+
+    _install_model_inference(app, _infer_then_timeout)
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     try:
         response = desktop.send_chat("busca noticias de tecnologia hoy")
 
-        assert "Encontre 1 fuente" in response.message.content
-        assert "modelo local de Jarvis no respondio" in response.message.content
-        assert "ollama run gpt-oss:20b" in response.message.content
+        assert "fuentes ya habían sido recuperadas" in response.message.content
+        assert "Tech News" in response.message.content
         assert "Traceback" not in response.message.content
-        assert response.raw_result["error"]["message"] == "ollama_timeout"
-        assert response.raw_result["web_search"]["provider"] == "brave"
+        assert response.raw_result["error_type"] == "TimeoutError"
+        assert response.raw_result["provider"] == "brave"
     finally:
         app.stop()
 
@@ -264,7 +294,6 @@ def test_runtime_route_uses_science_for_derivative_prompt(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -284,15 +313,11 @@ def test_runtime_route_keeps_general_definition_out_of_research(tmp_path) -> Non
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        gpt_oss_enabled=False,
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
-    app.provider_registry.register(FixedModelProvider(content="Un telefono es un dispositivo de comunicacion."))
+    app.orchestrator._models.infer = lambda _request: FixedModelResponse("Un telefono es un dispositivo de comunicacion.")  # type: ignore[method-assign]  # noqa: SLF001
     app.start()
     try:
         response = app.runtime_service.route(TaskRequest(raw_input="que es un telefono"))
@@ -308,7 +333,6 @@ def test_runtime_route_keeps_screen_grounding_out_of_general_chat_without_visual
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -326,26 +350,22 @@ def test_runtime_route_keeps_screen_grounding_out_of_general_chat_without_visual
         app.stop()
 
 
-def test_runtime_route_keeps_general_search_language_out_of_research_without_evidence_scope(tmp_path) -> None:
+def test_runtime_route_ranks_explicit_search_language_for_web_tooling(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        model_provider_default="ollama",
-        general_chat_model_provider="ollama",
-        ollama_enabled=False,
-        gpt_oss_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
-    app.provider_registry.register(FixedModelProvider(content="Puedo explicarte el tema directamente."))
+    app.orchestrator._models.infer = lambda _request: FixedModelResponse("Puedo explicarte el tema directamente.")  # type: ignore[method-assign]  # noqa: SLF001
     app.start()
     try:
         response = app.runtime_service.route(TaskRequest(raw_input="busca el significado de entropia"))
-        assert response.target == "general_chat"
+        assert response.target == "web"
         assert response.orchestration is not None
-        assert response.orchestration.receipts[0].action == "model.chat"
+        assert response.orchestration.receipts[0].action == "web.search"
     finally:
         app.stop()
 
@@ -355,7 +375,6 @@ def test_runtime_route_uses_ui_awareness_only_when_screen_context_is_explicit(tm
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -375,7 +394,6 @@ def test_runtime_route_sends_operational_desktop_goal_to_desktop_agent(tmp_path)
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -397,7 +415,6 @@ def test_runtime_route_sends_simple_open_to_system_runtime(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -418,7 +435,6 @@ def test_runtime_route_keeps_visual_prompt_in_vision_runtime(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
@@ -438,19 +454,28 @@ def test_desktop_chat_routes_explicit_desktop_vision_prompts_without_general_cha
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
     try:
-        desktop_response = desktop.send_chat("puedes ver lo que hay en mi escritorio")
+        _install_desktop_tool_model(
+            app,
+            goal="puedes ver lo que hay en mi escritorio",
+            final_content="Veo el escritorio actual.",
+        )
+        desktop_response = _run_confirmed_desktop_tool(desktop, "puedes ver lo que hay en mi escritorio")
         assert "Veo" in desktop_response.message.content
         assert desktop_response.raw_result.get("status") == "completed"
         assert desktop_response.raw_result.get("plan", {}).get("strategy") == "grounded_screen_read"
         assert "no tengo forma de ver" not in desktop_response.message.content.casefold()
 
-        screen_response = desktop.send_chat("que ves en la ventana actual")
+        _install_desktop_tool_model(
+            app,
+            goal="que ves en la ventana actual",
+            final_content="Veo la ventana actual.",
+        )
+        screen_response = _run_confirmed_desktop_tool(desktop, "que ves en la ventana actual")
         assert "Veo" in screen_response.message.content
         assert screen_response.raw_result.get("status") == "completed"
         assert screen_response.raw_result.get("plan", {}).get("strategy") == "grounded_screen_read"
@@ -464,25 +489,35 @@ def test_desktop_chat_returns_clear_visual_runtime_error(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
     original = app.runtime_service.vision_describe_active_window
+    original_awareness = app.runtime_service.vision_ui_awareness
+    _install_desktop_tool_model(
+        app,
+        goal="que hay en mi pantalla",
+        final_content="No puedo completar la captura visual de la pantalla.",
+    )
 
     def _boom():
         raise RuntimeError("screen capture backend unavailable")
 
+    def _screen_boom(_request):
+        raise RuntimeError("screen capture backend unavailable")
+
     app.runtime_service.vision_describe_active_window = _boom  # type: ignore[method-assign]
+    app.runtime_service.vision_ui_awareness = _screen_boom  # type: ignore[method-assign]
     try:
-        response = desktop.send_chat("que hay en mi pantalla")
-        assert "veo la pantalla" in response.message.content.casefold()
+        response = _run_confirmed_desktop_tool(desktop, "que hay en mi pantalla")
         assert "captura visual" in response.message.content.casefold()
-        assert response.raw_result.get("status") == "completed"
-        assert response.raw_result.get("plan", {}).get("strategy") == "grounded_screen_read"
+        assert response.raw_result.get("mission_status") == "failed"
+        assert response.raw_result.get("tool_status") == "failed"
+        assert response.raw_result.get("plan") is None
     finally:
         app.runtime_service.vision_describe_active_window = original  # type: ignore[method-assign]
+        app.runtime_service.vision_ui_awareness = original_awareness  # type: ignore[method-assign]
         app.stop()
 
 
@@ -491,23 +526,28 @@ def test_desktop_chat_degrades_to_active_window_when_visual_capture_is_blocked(t
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
     original = app.runtime_service.vision_describe_active_window
+    _install_desktop_tool_model(
+        app,
+        goal="que hay en mi pantalla",
+        final_content="La ventana está protegida por ser sensible.",
+    )
 
     def _blocked():
         raise JarvisError("capture blocked for a sensitive window", component="vision_runtime", code="capture_failed", recoverable=True)
 
     app.runtime_service.vision_describe_active_window = _blocked  # type: ignore[method-assign]
     try:
-        response = desktop.send_chat("que hay en mi pantalla")
+        response = _run_confirmed_desktop_tool(desktop, "que hay en mi pantalla")
         assert "ventana" in response.message.content.casefold()
         assert "sensible" in response.message.content.casefold() or "protegida" in response.message.content.casefold()
-        assert response.raw_result.get("status") == "completed"
-        assert response.raw_result.get("plan", {}).get("strategy") == "grounded_screen_read"
+        assert response.raw_result.get("mission_status") == "partial"
+        assert response.raw_result.get("tool_status") == "failed"
+        assert response.raw_result.get("plan") is None
     finally:
         app.runtime_service.vision_describe_active_window = original  # type: ignore[method-assign]
         app.stop()
@@ -519,7 +559,6 @@ def test_runtime_route_uses_system_search_for_search_command(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
         system_search_roots=(tmp_path,),
@@ -540,18 +579,17 @@ def test_desktop_chat_opens_trusted_application_without_model_fallback(tmp_path)
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
-    app.provider_registry.register(FixedModelProvider(content="No deberia responder el modelo."))
+    _install_desktop_tool_model(app, goal="abre word", final_content="He abierto Word.")
     try:
-        response = desktop.send_chat("abre word")
+        response = _run_confirmed_desktop_tool(desktop, "abre word")
         assert "he abierto" in response.message.content.casefold()
         assert "word" in response.message.content.casefold()
-        assert response.raw_result.get("status") == "launched"
+        assert response.raw_result.get("status") == "completed"
         assert desktop._chat.awaiting_confirmation is False  # noqa: SLF001
     finally:
         app.stop()
@@ -562,14 +600,18 @@ def test_desktop_chat_reports_missing_application_cleanly(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_desktop_tool_model(
+        app,
+        goal="abre aplicacion imposible",
+        final_content="No pude encontrar esa aplicacion.",
+    )
     try:
-        response = desktop.send_chat("abre aplicacion imposible")
+        response = _run_confirmed_desktop_tool(desktop, "abre aplicacion imposible")
         assert response.message.content == "No pude encontrar esa aplicacion."
     finally:
         app.stop()
@@ -580,12 +622,16 @@ def test_desktop_chat_reads_window_context(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_desktop_tool_model(
+        app,
+        goal="que hay en mi pantalla",
+        final_content="Veo la ventana Editor.",
+    )
     try:
-        response = desktop.send_chat("que hay en mi pantalla")
+        response = _run_confirmed_desktop_tool(desktop, "que hay en mi pantalla")
         assert "Veo" in response.message.content
         assert "Editor" in response.message.content
         assert response.raw_result.get("status") == "completed"
@@ -598,13 +644,17 @@ def test_desktop_chat_clicks_visual_target(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
     backend = app.ui_automation_service._backend  # noqa: SLF001
+    _install_desktop_tool_model(
+        app,
+        goal="haz click en el boton guardar en word",
+        final_content="Acción visual completada.",
+    )
     try:
-        response = desktop.send_chat("haz click en el boton guardar en word")
+        response = _run_confirmed_desktop_tool(desktop, "haz click en el boton guardar en word")
         assert response.raw_result.get("status") == "completed"
         assert backend.clicks[-1] == ("left", False)
     finally:
@@ -616,14 +666,18 @@ def test_desktop_chat_opens_and_types_text(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
     backend = app.ui_automation_service._backend  # noqa: SLF001
+    _install_desktop_tool_model(
+        app,
+        goal="abre word y escribe esto: Hola desde JARVIS",
+        final_content="Abriendo Word y escribiendo el texto.",
+    )
     try:
-        response = desktop.send_chat("abre word y escribe esto: Hola desde JARVIS")
+        response = _run_confirmed_desktop_tool(desktop, "abre word y escribe esto: Hola desde JARVIS")
         assert "Abriendo" in response.message.content
         assert backend.typed_text.endswith("Hola desde JARVIS")
         assert backend.get_active_window().title == "Word"
@@ -636,14 +690,18 @@ def test_desktop_chat_opens_browser_and_searches(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
     backend = app.ui_automation_service._backend  # noqa: SLF001
+    _install_desktop_tool_model(
+        app,
+        goal="abre chrome y busca youtube",
+        final_content="Navegando a YouTube.",
+    )
     try:
-        response = desktop.send_chat("abre chrome y busca youtube")
+        response = _run_confirmed_desktop_tool(desktop, "abre chrome y busca youtube")
         assert "Navegando" in response.message.content
         assert backend.hotkeys[-2] == ("ctrl", "l")
         assert backend.hotkeys[-1] == ("enter",)
@@ -659,15 +717,19 @@ def test_desktop_chat_routes_file_operator_workflow(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
         system_search_roots=(tmp_path,),
     )
     app, desktop = build_desktop_runtime(settings)
+    _install_desktop_tool_model(
+        app,
+        goal="abre el archivo notes.txt",
+        final_content="Archivo notes.txt abierto.",
+    )
     try:
-        response = desktop.send_chat("abre el archivo notes.txt")
+        response = _run_confirmed_desktop_tool(desktop, "abre el archivo notes.txt")
         assert response.raw_result.get("status") == "completed"
         assert response.raw_result.get("plan", {}).get("strategy") == "grounded_open_file"
     finally:
@@ -679,19 +741,18 @@ def test_desktop_runtime_deduplicates_inflight_chat_submit(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
-    app.runtime_service.infer_model = lambda _request: FixedModelResponse("Hola.")  # type: ignore[method-assign]
+    _install_model_inference(app, lambda _request: FixedModelResponse("Hola."))
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     desktop._voice.speak_literal = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     original_handle = desktop._chat.handle  # noqa: SLF001
 
-    def _slow_handle(text: str):
+    def _slow_handle(text: str, *args, **kwargs):
         time.sleep(0.05)
-        return original_handle(text)
+        return original_handle(text, *args, **kwargs)
 
     desktop._chat.handle = _slow_handle  # type: ignore[method-assign]  # noqa: SLF001
     try:
@@ -714,12 +775,11 @@ def test_desktop_runtime_deduplicates_completed_chat_submit(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
-    app.runtime_service.infer_model = lambda _request: FixedModelResponse("Hola.")  # type: ignore[method-assign]
+    _install_model_inference(app, lambda _request: FixedModelResponse("Hola."))
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     desktop._voice.speak_literal = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
     try:

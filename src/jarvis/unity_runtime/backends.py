@@ -6,10 +6,9 @@ from typing import Protocol
 from uuid import uuid4
 
 from .base import UnityBridgeReceipt, UnityBridgeRequest, UnityBridgeStatus, UnityInstallationDescriptor
-from .bridge import UnityBridgeBackend
 from .editor_health import UnityBridgeHealth
 from .editor_session import UnityEditorSession, UnityEditorSessionStatus
-from .editor_transport import HttpLocalUnityEditorTransport, StubUnityEditorTransport, UnityBridgeTransportKind
+from .editor_transport import HttpLocalUnityEditorTransport, StubUnityEditorTransport
 
 
 class UnityInstallationProvider(Protocol):

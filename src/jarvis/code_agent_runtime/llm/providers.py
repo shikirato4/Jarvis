@@ -10,83 +10,88 @@ from jarvis.code_agent_runtime.llm.models import LLMGenerateRequest, LLMGenerate
 
 
 class DisabledLLMProvider(LLMProvider):
-    provider_name = "disabled"
+    provider_name = "unavailable"
     model_name = "none"
 
     def is_available(self) -> bool:
         return False
 
     def generate_change_proposal(self, request: LLMGenerateRequest) -> LLMGenerateResult:
-        return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=False, status="unavailable", error="LLM provider is disabled")
+        return LLMGenerateResult(
+            provider_name=self.provider_name,
+            model_name=self.model_name,
+            available=False,
+            status="unavailable",
+            error="Nemotron provider is unavailable",
+        )
 
 
 class FakeLLMProvider(LLMProvider):
     provider_name = "fake"
 
-    def __init__(self, response: str | None = None, *, model_name: str = "fake-change-model", provider_name: str = "fake", env_var: str = "JARVIS_LLM_FAKE_RESPONSE") -> None:
+    def __init__(
+        self,
+        response: str | None = None,
+        *,
+        model_name: str = "fake-change-model",
+        provider_name: str = "fake",
+        env_var: str = "JARVIS_LLM_FAKE_RESPONSE",
+    ) -> None:
         self.provider_name = provider_name
         self.model_name = model_name
         self._response = response
         self._env_var = env_var
 
     def is_available(self) -> bool:
-        return bool(self._response or os.getenv(self._env_var) or os.getenv("JARVIS_LLM_FAKE_RESPONSE"))
-
-    def generate_change_proposal(self, request: LLMGenerateRequest) -> LLMGenerateResult:
-        content = self._response or os.getenv(self._env_var) or os.getenv("JARVIS_LLM_FAKE_RESPONSE", "")
-        if not content:
-            return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=False, status="unavailable", error="fake provider response is not configured")
-        return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=True, status="ok", content=content[: request.max_output_chars])
-
-
-class OllamaLLMProvider(LLMProvider):
-    provider_name = "ollama"
-
-    def __init__(self, config: LLMConfig) -> None:
-        self._base_url = (os.getenv("JARVIS_LOCAL_LLM_BASE_URL") or os.getenv("JARVIS_OLLAMA_BASE_URL") or "http://127.0.0.1:11434").rstrip("/")
-        self.model_name = os.getenv("JARVIS_LOCAL_LLM_MODEL") or config.model or "gpt-oss:20b"
-        self._timeout = config.timeout_seconds
-
-    def is_available(self) -> bool:
-        return bool(self._base_url and self.model_name and os.getenv("JARVIS_LOCAL_LLM_DISABLED", "").casefold() not in {"1", "true", "yes"})
-
-    def generate_change_proposal(self, request: LLMGenerateRequest) -> LLMGenerateResult:
-        if not self.is_available():
-            return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=False, status="unavailable", error="local Ollama provider is not configured")
-        payload = {
-            "model": self.model_name,
-            "messages": [
-                {"role": "system", "content": "Return only valid JSON for a reviewable patch proposal."},
-                {"role": "user", "content": request.prompt},
-            ],
-            "stream": False,
-        }
-        http_request = urlrequest.Request(
-            self._base_url + "/api/chat",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
+        return bool(
+            self._response
+            or os.getenv(self._env_var)
+            or os.getenv("JARVIS_LLM_FAKE_RESPONSE")
         )
-        try:
-            with urlrequest.urlopen(http_request, timeout=self._timeout) as response:  # noqa: S310 - local URL comes from safe runtime config.
-                data = json.loads(response.read().decode("utf-8", errors="replace"))
-        except Exception as exc:  # noqa: BLE001
-            return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=True, status="failed", error=str(exc))
-        content = str(data.get("message", {}).get("content", ""))
+
+    def generate_change_proposal(self, request: LLMGenerateRequest) -> LLMGenerateResult:
+        content = (
+            self._response
+            or os.getenv(self._env_var)
+            or os.getenv("JARVIS_LLM_FAKE_RESPONSE", "")
+        )
         if not content:
-            return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=True, status="failed", error="Ollama response did not include message content")
-        return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=True, status="ok", content=content[: request.max_output_chars])
+            return LLMGenerateResult(
+                provider_name=self.provider_name,
+                model_name=self.model_name,
+                available=False,
+                status="unavailable",
+                error="fake provider response is not configured",
+            )
+        return LLMGenerateResult(
+            provider_name=self.provider_name,
+            model_name=self.model_name,
+            available=True,
+            status="ok",
+            content=content[: request.max_output_chars],
+        )
 
 
-class OpenAICompatibleProvider(LLMProvider):
-    provider_name = "openai-compatible"
-
-    def __init__(self, config: LLMConfig) -> None:
-        self._config = config
-        self.model_name = config.model or "unknown"
+class NemotronCompatibleProvider(LLMProvider):
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        base_url: str,
+        model_name: str,
+        timeout_seconds: float,
+        api_key_env: str | None,
+    ) -> None:
+        self.provider_name = provider_name
+        self._base_url = base_url.rstrip("/")
+        self.model_name = model_name
+        self._timeout = timeout_seconds
+        self._api_key_env = api_key_env
 
     def is_available(self) -> bool:
-        return bool(self._config.base_url and self._config.model and self._config.has_api_key and LLMConfig._is_allowed_url(self._config.base_url))
+        if not self._base_url or not self.model_name:
+            return False
+        return self._api_key_env is None or bool(os.getenv(self._api_key_env, ""))
 
     def generate_change_proposal(self, request: LLMGenerateRequest) -> LLMGenerateResult:
         if not self.is_available():
@@ -95,60 +100,76 @@ class OpenAICompatibleProvider(LLMProvider):
                 model_name=self.model_name,
                 available=False,
                 status="unavailable",
-                error="OpenAI-compatible provider requires JARVIS_LLM_BASE_URL, JARVIS_LLM_MODEL and JARVIS_LLM_API_KEY",
+                error=f"{self.provider_name} is not configured",
             )
-        api_key = os.getenv("JARVIS_LLM_API_KEY", "")
         payload = {
-            "model": self._config.model,
+            "model": self.model_name,
             "messages": [
-                {"role": "system", "content": "Return only valid JSON for a reviewable patch proposal."},
+                {
+                    "role": "system",
+                    "content": "Return only valid JSON for a reviewable patch proposal.",
+                },
                 {"role": "user", "content": request.prompt},
             ],
             "temperature": 0,
         }
-        endpoint = self._config.base_url.rstrip("/") + "/chat/completions"
+        headers = {"Content-Type": "application/json"}
+        if self._api_key_env is not None:
+            headers["Authorization"] = f"Bearer {os.getenv(self._api_key_env, '')}"
         http_request = urlrequest.Request(
-            endpoint,
+            self._base_url + "/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+            headers=headers,
             method="POST",
         )
         try:
-            with urlrequest.urlopen(http_request, timeout=self._config.timeout_seconds) as response:  # noqa: S310 - URL is user-configured and validated.
-                data = json.loads(response.read().decode("utf-8", errors="replace"))
+            with urlrequest.urlopen(http_request, timeout=self._timeout) as response:  # noqa: S310
+                body = json.loads(response.read().decode("utf-8", errors="replace"))
+            content = str(body["choices"][0]["message"]["content"])
         except Exception as exc:  # noqa: BLE001
-            return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=True, status="failed", error=str(exc))
-        content = ""
-        try:
-            content = str(data["choices"][0]["message"]["content"])
-        except (KeyError, IndexError, TypeError):
-            return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=True, status="failed", error="provider response did not include message content")
-        return LLMGenerateResult(provider_name=self.provider_name, model_name=self.model_name, available=True, status="ok", content=content[: request.max_output_chars])
+            return LLMGenerateResult(
+                provider_name=self.provider_name,
+                model_name=self.model_name,
+                available=True,
+                status="failed",
+                error=type(exc).__name__,
+            )
+        return LLMGenerateResult(
+            provider_name=self.provider_name,
+            model_name=self.model_name,
+            available=True,
+            status="ok",
+            content=content[: request.max_output_chars],
+        )
 
 
 def build_llm_provider(config: LLMConfig | None = None) -> LLMProvider:
     selected = config or LLMConfig.from_env_with_autodetect()
-    if selected.provider == "fake":
-        return FakeLLMProvider(model_name=selected.model or "fake-change-model")
-    if selected.provider in {"ollama", "local"}:
-        return OllamaLLMProvider(selected)
-    if LLMConfig.is_official_provider_blocked(selected.provider):
-        return DisabledLLMProvider()
-    if selected.provider in {"openai-compatible", "lmstudio", "lm-studio"}:
-        return OpenAICompatibleProvider(selected)
-    return DisabledLLMProvider()
+    return build_named_provider(selected.provider, selected, role="local")
 
 
 def build_named_provider(name: str, config: LLMConfig, *, role: str) -> LLMProvider:
     selected = name.strip().casefold()
-    if selected in {"fake", "fake-local", "local-fake"}:
-        return FakeLLMProvider(model_name=config.model or f"{role}-fake-change-model", provider_name=f"fake-{role}", env_var=f"JARVIS_{role.upper()}_LLM_FAKE_RESPONSE")
-    if selected in {"fake-online", "online-fake"}:
-        return FakeLLMProvider(model_name=config.model or "online-fake-change-model", provider_name="fake-online", env_var="JARVIS_ONLINE_LLM_FAKE_RESPONSE")
-    if selected in {"ollama", "local"}:
-        return OllamaLLMProvider(config)
-    if LLMConfig.is_official_provider_blocked(selected):
-        return DisabledLLMProvider()
-    if selected in {"openai-compatible", "lmstudio", "lm-studio"}:
-        return OpenAICompatibleProvider(config)
+    if selected.startswith("fake"):
+        return FakeLLMProvider(
+            model_name=f"{role}-fake-change-model",
+            provider_name=f"fake-{role}",
+            env_var=f"JARVIS_{role.upper()}_LLM_FAKE_RESPONSE",
+        )
+    if selected == "nemotron_omni_local":
+        return NemotronCompatibleProvider(
+            provider_name=selected,
+            base_url=config.local_base_url,
+            model_name=config.local_model,
+            timeout_seconds=config.timeout_seconds,
+            api_key_env=None,
+        )
+    if selected == "nvidia_nim":
+        return NemotronCompatibleProvider(
+            provider_name=selected,
+            base_url=config.online_base_url,
+            model_name=config.online_model,
+            timeout_seconds=config.timeout_seconds,
+            api_key_env="NVIDIA_API_KEY",
+        )
     return DisabledLLMProvider()

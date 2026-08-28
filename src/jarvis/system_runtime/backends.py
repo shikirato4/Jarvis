@@ -46,6 +46,8 @@ class ApplicationCatalogProvider(Protocol):
 
     def list_applications(self) -> list[ResolvedSystemTarget]: ...
 
+    def list_cached_applications(self) -> list[ResolvedSystemTarget]: ...
+
     def resolve_application(self, query: str) -> ResolvedSystemTarget | None: ...
 
 
@@ -122,6 +124,9 @@ class NativeApplicationCatalogProvider:
         if self._cache is None:
             self._cache = self._discover_applications()
         return list(self._cache)
+
+    def list_cached_applications(self) -> list[ResolvedSystemTarget]:
+        return list(self._cache or ())
 
     def resolve_application(self, query: str) -> ResolvedSystemTarget | None:
         query_path = Path(query)
@@ -515,6 +520,9 @@ class InMemoryApplicationCatalogProvider:
 
     def list_applications(self) -> list[ResolvedSystemTarget]:
         return list(self._applications)
+
+    def list_cached_applications(self) -> list[ResolvedSystemTarget]:
+        return self.list_applications()
 
     def resolve_application(self, query: str) -> ResolvedSystemTarget | None:
         lowered = normalize_windows_app_name(query)

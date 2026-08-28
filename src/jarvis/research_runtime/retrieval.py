@@ -10,25 +10,49 @@ from .models import ResearchEvidence, ResearchRunRequest, ResearchSource, Resear
 
 
 class ResearchRetriever:
-    def __init__(self, settings, semantic_memory, memory_service, vision_runtime, system_runtime, logger=None) -> None:
+    def __init__(
+        self,
+        settings,
+        semantic_memory,
+        memory_service,
+        vision_runtime,
+        system_runtime,
+        web_provider=None,
+        logger=None,
+    ) -> None:
         self._settings = settings
         self._semantic_memory = semantic_memory
         self._memory_service = memory_service
         self._vision_runtime = vision_runtime
         self._system_runtime = system_runtime
+        self._web_provider = web_provider
         self._logger = logger
+        self.last_trace: list[dict[str, object]] = []
 
     def retrieve(self, task: ResearchTask, request: ResearchRunRequest, *, correlation_id: str) -> tuple[list[ResearchSource], list[ResearchEvidence]]:
         sources: list[ResearchSource] = []
         evidence: list[ResearchEvidence] = []
+        self.last_trace = []
         if "semantic_memory" in task.source_scope:
             found_sources, found_evidence = self._from_semantic_memory(task, correlation_id=correlation_id)
             sources.extend(found_sources)
             evidence.extend(found_evidence)
+            self._trace("semantic_memory", found_sources, found_evidence)
+        if "memory" in task.source_scope:
+            found_sources, found_evidence = self._from_memory(task)
+            sources.extend(found_sources)
+            evidence.extend(found_evidence)
+            self._trace("memory", found_sources, found_evidence)
         if "workspace" in task.source_scope:
             found_sources, found_evidence = self._from_workspace(task)
             sources.extend(found_sources)
             evidence.extend(found_evidence)
+            self._trace("workspace", found_sources, found_evidence)
+        if "web" in task.source_scope:
+            found_sources, found_evidence = self._from_web(task)
+            sources.extend(found_sources)
+            evidence.extend(found_evidence)
+            self._trace("web", found_sources, found_evidence)
         if "simulated" in task.source_scope and request.simulated_sources:
             found_sources, found_evidence = self._from_simulated(task, request)
             sources.extend(found_sources)
@@ -41,14 +65,79 @@ class ResearchRetriever:
             found_sources, found_evidence = self._from_images(task, correlation_id=correlation_id)
             sources.extend(found_sources)
             evidence.extend(found_evidence)
-        if not evidence:
+        if not evidence and "memory" not in task.source_scope:
             found_sources, found_evidence = self._from_memory(task)
             sources.extend(found_sources)
             evidence.extend(found_evidence)
+            self._trace("memory", found_sources, found_evidence, fallback=True)
         limited_sources = sources[: task.budget.max_sources]
         source_ids = {item.source_id for item in limited_sources}
         limited_evidence = [item for item in evidence if item.source.source_id in source_ids][: task.budget.max_sources * 4]
         return limited_sources, limited_evidence
+
+    def _trace(
+        self,
+        stage: str,
+        sources: list[ResearchSource],
+        evidence: list[ResearchEvidence],
+        *,
+        fallback: bool = False,
+    ) -> None:
+        self.last_trace.append(
+            {
+                "stage": stage,
+                "source_count": len(sources),
+                "evidence_count": len(evidence),
+                "status": "completed",
+                "fallback": fallback,
+            }
+        )
+
+    def _from_web(
+        self, task: ResearchTask
+    ) -> tuple[list[ResearchSource], list[ResearchEvidence]]:
+        if self._web_provider is None:
+            return [], []
+        try:
+            response = self._web_provider.search(
+                task.query,
+                max_results=min(task.budget.max_sources, 10),
+            )
+        except Exception as exc:
+            if self._logger is not None:
+                self._logger.warning(
+                    "research_web_retrieval_degraded",
+                    extra={"error_type": type(exc).__name__},
+                )
+            return [], []
+        sources: list[ResearchSource] = []
+        evidence: list[ResearchEvidence] = []
+        for index, hit in enumerate(response.hits, start=1):
+            source = ResearchSource(
+                source_id=f"web-{uuid4()}",
+                kind=ResearchSourceKind.WEB,
+                provider_name=response.provider,
+                display_name=hit.title,
+                location=hit.url,
+                trust_level="medium",
+                freshness="remote",
+                metadata={"rank": hit.rank, "source": hit.source},
+                capabilities=("search", "cite"),
+            )
+            sources.append(source)
+            evidence.append(
+                ResearchEvidence(
+                    evidence_id=str(uuid4()),
+                    task_id=task.task_id,
+                    source=source,
+                    content=hit.snippet,
+                    excerpt=hit.snippet[:280],
+                    citation=hit.url,
+                    metadata={"topic": "web", "rank": index},
+                    score=max(0.4, 0.75 - ((index - 1) * 0.05)),
+                )
+            )
+        return sources, evidence
 
     def _from_semantic_memory(self, task: ResearchTask, *, correlation_id: str) -> tuple[list[ResearchSource], list[ResearchEvidence]]:
         try:
@@ -256,7 +345,15 @@ class ResearchRetriever:
         return sources, evidence
 
     def _from_memory(self, task: ResearchTask) -> tuple[list[ResearchSource], list[ResearchEvidence]]:
-        matches = self._memory_service.search_memories(task.query, limit=5)
+        try:
+            matches = self._memory_service.search_memories(task.query, limit=5)
+        except Exception as exc:
+            if self._logger is not None:
+                self._logger.warning(
+                    "research_memory_retrieval_degraded",
+                    extra={"error_type": type(exc).__name__},
+                )
+            return [], []
         sources: list[ResearchSource] = []
         evidence: list[ResearchEvidence] = []
         for item in matches:

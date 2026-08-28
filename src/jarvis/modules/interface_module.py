@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from jarvis.actions.models import ActionResult, ActionStep, ExecutionStatus
+from jarvis.actions.models import ActionResult, ActionRisk, ActionStep, ExecutionStatus
 from jarvis.actions.registry import ActionContext, ActionDefinition, ActionRegistry
 from jarvis.core.capabilities import CapabilityDescriptor, CapabilityRegistry
 from jarvis.core.modes import ExecutionMode
@@ -45,14 +45,14 @@ class InterfaceModule:
 
     def register_actions(self, registry: ActionRegistry) -> None:
         registry.register(ActionDefinition(name="interface.active_window", description="Inspect the active desktop window.", payload_model=ActiveWindowPayload, handler=self._active_window, tags=("interface", "inspection")))
-        registry.register(ActionDefinition(name="interface.focus_window", description="Focus a desktop window by title or handle.", payload_model=FocusWindowRequest, handler=self._focus_window, tags=("interface", "window")))
-        registry.register(ActionDefinition(name="interface.write_text", description="Write text into the active window.", payload_model=WriteTextRequest, handler=self._write_text, tags=("interface", "typing")))
-        registry.register(ActionDefinition(name="interface.insert_blocks", description="Insert text by blocks into the active window.", payload_model=InsertBlocksRequest, handler=self._insert_blocks, tags=("interface", "typing")))
-        registry.register(ActionDefinition(name="interface.move_mouse", description="Move the mouse pointer.", payload_model=MoveMouseRequest, handler=self._move_mouse, tags=("interface", "mouse")))
-        registry.register(ActionDefinition(name="interface.click_mouse", description="Perform a mouse click.", payload_model=ClickRequest, handler=self._click_mouse, tags=("interface", "mouse")))
-        registry.register(ActionDefinition(name="interface.keyboard_shortcut", description="Send a keyboard shortcut.", payload_model=ShortcutRequest, handler=self._keyboard_shortcut, tags=("interface", "keyboard")))
+        registry.register(ActionDefinition(name="interface.focus_window", description="Focus a desktop window by title or handle.", payload_model=FocusWindowRequest, handler=self._focus_window, tags=("interface", "window"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="interface.write_text", description="Write text into the active window.", payload_model=WriteTextRequest, handler=self._write_text, tags=("interface", "typing"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="interface.insert_blocks", description="Insert text by blocks into the active window.", payload_model=InsertBlocksRequest, handler=self._insert_blocks, tags=("interface", "typing"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="interface.move_mouse", description="Move the mouse pointer.", payload_model=MoveMouseRequest, handler=self._move_mouse, tags=("interface", "mouse"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="interface.click_mouse", description="Perform a mouse click.", payload_model=ClickRequest, handler=self._click_mouse, tags=("interface", "mouse"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="interface.keyboard_shortcut", description="Send a keyboard shortcut.", payload_model=ShortcutRequest, handler=self._keyboard_shortcut, tags=("interface", "keyboard"), risk=ActionRisk.SENSITIVE, idempotent=False))
         registry.register(ActionDefinition(name="interface.cancel", description="Cancel an in-flight UI operation.", payload_model=CancellationRequest, handler=self._cancel_operation, tags=("interface", "control")))
-        registry.register(ActionDefinition(name="interface.contextual_direct_write", description="Recover semantic context and write directly into the active editor.", payload_model=ContextualDirectWritePayload, handler=self._contextual_direct_write, tags=("interface", "typing", "semantic")))
+        registry.register(ActionDefinition(name="interface.contextual_direct_write", description="Recover semantic context and write directly into the active editor.", payload_model=ContextualDirectWritePayload, handler=self._contextual_direct_write, tags=("interface", "typing", "semantic"), risk=ActionRisk.SENSITIVE, idempotent=False))
 
     def register_tools(self, registry: ToolRegistry) -> None:
         registry.register(ToolDefinition(name="desktop.active_window", description="Get the active desktop window.", input_model=ActiveWindowPayload, handler=self._tool_active_window, tags=("interface", "state")))

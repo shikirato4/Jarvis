@@ -35,7 +35,6 @@ def _settings(tmp_path: Path) -> Settings:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -173,7 +172,9 @@ def test_sensitive_window_observation_degrades_without_crashing(tmp_path: Path) 
             raise RuntimeError("capture blocked for a sensitive window")
 
         def _sensitive_screen(_request):
-            raise RuntimeError("screen capture blocked for a sensitive window")
+            raise AssertionError(
+                "sensitive active-window refusal must not broaden to full screen"
+            )
 
         app.runtime_service.vision_describe_active_window = _sensitive_window  # type: ignore[method-assign]
         app.runtime_service.vision_ui_awareness = _sensitive_screen  # type: ignore[method-assign]

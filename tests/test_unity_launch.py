@@ -27,7 +27,6 @@ def test_unity_launch_project_executes_direct_editor(monkeypatch, tmp_path: Path
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         unity_discovery_roots=(tmp_path,),
         unity_known_locations={"editor": str(editor)},

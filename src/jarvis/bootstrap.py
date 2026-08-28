@@ -6,6 +6,20 @@ from dataclasses import dataclass
 
 from jarvis.actions.registry import ActionRegistry
 from jarvis.actions.router import ActionRouter
+from jarvis.action_executor import ActionExecutor, TypedActionSecurityGate
+from jarvis.agent_runtime import AgentController
+from jarvis.attachments import (
+    AttachmentService,
+    AttachmentTypeRegistry,
+    AudioProcessor,
+    ImageProcessor,
+    LocalMediaAdapters,
+    MultimodalPipeline,
+    ProcessorRegistry,
+    RequestScopedAttachmentStorage,
+    TextDocumentProcessor,
+    VideoProcessor,
+)
 from jarvis.autonomy import (
     AutonomyService,
     MissionControlService,
@@ -23,7 +37,6 @@ from jarvis.cognition.context import RetrievedContextFormatter
 from jarvis.core.metacommands import MetaCommandParser
 from jarvis.core.capabilities import CapabilityRegistry
 from jarvis.desktop_agent_runtime import DesktopAgentRuntimeService
-from jarvis.core.diagnostics import DiagnosticsAggregator
 from jarvis.core.models import AutoRecoveryPolicy, HealthStatus
 from jarvis.core.modes import ModeManager
 from jarvis.core.operations import AdmissionController, OperationRegistry, OperationWatchdog
@@ -37,8 +50,11 @@ from jarvis.core.telemetry import TelemetryRecorder
 from jarvis.cognition.orchestrator import CognitiveOrchestrator
 from jarvis.config import Settings
 from jarvis.core.events import EventBus
+from jarvis.runtime_activity import RuntimeActivityStore
 from jarvis.core.modules import ModuleRegistry
 from jarvis.jarvis_logging import configure_logging, shutdown_logging
+from jarvis.legacy_model_config import detect_legacy_model_configuration
+from jarvis.local_runtime import LocalBackendRegistry, LocalHardwareDiagnostics, LocalRuntimeService, VllmBackendAdapter
 from jarvis.memory.repository import Database, MemoryRepository
 from jarvis.memory.service import MemoryService
 from jarvis.indexing_runtime import IndexingRepository, IndexingRuntimeService
@@ -49,7 +65,7 @@ from jarvis.memory_semantic.embeddings import (
     EmbeddingProviderRegistry,
     EmbeddingRouter,
     EmbeddingService,
-    OllamaEmbeddingProvider,
+    LocalHashEmbeddingProvider,
     build_default_embedding_profiles,
 )
 from jarvis.memory_semantic.index import RepositoryVectorIndex
@@ -57,8 +73,19 @@ from jarvis.memory_semantic.ranking import BasicHeuristicReranker, NoOpReranker
 from jarvis.memory_semantic.repository import SemanticMemoryRepository
 from jarvis.memory_semantic.retrieval import RetrievalPipeline
 from jarvis.memory_semantic.service import SemanticMemoryService
-from jarvis.models_runtime import GptOssProvider, ModelCatalog, ModelRouter, ModelService, ProviderRegistry, build_default_model_catalog
-from jarvis.models_runtime.ollama import OllamaProvider
+from jarvis.models_runtime import (
+    LLMMode,
+    ModelCatalog,
+    ModelRouter,
+    ModelService,
+    NemotronOmniLocalProvider,
+    NvidiaNimProvider,
+    PersistentModeStore,
+    ProviderCoordinator,
+    ProviderRegistry,
+    build_default_model_catalog,
+)
+from jarvis.security_runtime.secrets import NvidiaSecretManager
 from jarvis.modules.voice_interface_module import VoiceInterfaceModule
 from jarvis.modules.memory_module import MemoryModule
 from jarvis.modules.operations_module import OperationsModule
@@ -66,6 +93,9 @@ from jarvis.modules.research_module import ResearchModule
 from jarvis.modules.interface_module import InterfaceModule
 from jarvis.modules.indexing_module import IndexingModule
 from jarvis.modules.science_module import ScienceModule
+from jarvis.modules.calculator_module import CalculatorModule
+from jarvis.modules.data_module import DataModule
+from jarvis.modules.web_module import WebModule
 from jarvis.modules.security_module import SecurityModule
 from jarvis.modules.system_module import SystemModule
 from jarvis.modules.unity_module import UnityModule
@@ -77,6 +107,8 @@ from jarvis.modules.writer_module import WriterModule
 from jarvis.modules.desktop_agent_module import DesktopAgentModule
 from jarvis.writing_runtime import WritingAnalyzer, WritingContextResolver, WritingContinuationEngine, WritingEditor, WritingGenerator, WritingRepository, WritingRuntimeService, WritingStyleAnalyzer
 from jarvis.writing_runtime.base import WritingModelAdapter
+from jarvis.web_search import build_web_search_provider
+from jarvis.data_analyzer import DataAnalyzer
 from jarvis.routing.task_router import TaskRouter
 from jarvis.services.runtime import JarvisRuntimeService
 from jarvis.services.ops_runtime import OpsRuntimeService
@@ -179,16 +211,24 @@ class JarvisApplication:
     settings: Settings
     database: Database
     event_bus: EventBus
+    runtime_activity_store: RuntimeActivityStore
     mode_manager: ModeManager
     state_manager: RuntimeStateManager
     capability_registry: CapabilityRegistry
     action_registry: ActionRegistry
     action_router: ActionRouter
+    action_executor: ActionExecutor
+    agent_controller: AgentController
     tool_registry: ToolRegistry
     provider_registry: ProviderRegistry
     model_catalog: ModelCatalog
     model_router: ModelRouter
     model_service: ModelService
+    nvidia_secret_manager: NvidiaSecretManager
+    attachment_service: AttachmentService
+    multimodal_pipeline: MultimodalPipeline
+    local_hardware_diagnostics: LocalHardwareDiagnostics
+    local_runtime_service: LocalRuntimeService
     embedding_provider_registry: EmbeddingProviderRegistry
     embedding_router: EmbeddingRouter
     embedding_service: EmbeddingService
@@ -439,6 +479,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         backup_count=settings.log_file_backup_count,
     )
     logger = logging.getLogger("jarvis.app")
+    detect_legacy_model_configuration()
     database = Database(settings.sqlalchemy_database_url, settings.sqlalchemy_engine_options())
     repository = MemoryRepository(database)
     semantic_repository = SemanticMemoryRepository(database)
@@ -448,6 +489,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     writing_repository = WritingRepository(database)
     memory_service = MemoryService(repository)
     event_bus = EventBus(history_limit=settings.ops_event_history_limit)
+    runtime_activity_store = RuntimeActivityStore(event_bus)
     mode_manager = ModeManager(settings.default_mode)
     state_manager = RuntimeStateManager(
         settings.app_name,
@@ -507,16 +549,47 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     capability_registry = CapabilityRegistry()
     provider_registry = ProviderRegistry()
-    if settings.ollama_enabled:
-        provider_registry.register(OllamaProvider(settings))
-    if settings.gpt_oss_enabled:
-        provider_registry.register(GptOssProvider(settings))
+    fallback_secret = settings.nvidia_api_key.get_secret_value() if settings.nvidia_api_key is not None else None
+    nvidia_secret_manager = NvidiaSecretManager.from_system(fallback_value=fallback_secret)
+    nvidia_provider = NvidiaNimProvider(settings, secret_manager=nvidia_secret_manager)
+    local_nemotron_provider = NemotronOmniLocalProvider(settings)
+    provider_registry.register(nvidia_provider)
+    provider_registry.register(local_nemotron_provider)
+    attachment_service = AttachmentService(
+        AttachmentTypeRegistry(),
+        RequestScopedAttachmentStorage(
+            settings.resolved_data_dir / "attachments",
+            max_file_bytes=settings.attachment_max_file_bytes,
+            max_request_bytes=settings.attachment_max_request_bytes,
+            max_files_per_request=settings.attachment_max_files_per_request,
+        ),
+    )
+    local_backend_registry = LocalBackendRegistry()
+    local_backend_registry.register(VllmBackendAdapter())
+    local_hardware_diagnostics = LocalHardwareDiagnostics()
+    local_runtime_service = LocalRuntimeService(local_backend_registry)
     model_catalog = build_default_model_catalog(settings)
     model_router = ModelRouter(model_catalog, mode_manager)
-    model_service = ModelService(settings, mode_manager, provider_registry, model_catalog, model_router, event_bus, logger=logger, resilience_controller=resilience)
+    provider_coordinator = ProviderCoordinator(
+        settings,
+        nvidia_provider=nvidia_provider,
+        local_provider=local_nemotron_provider,
+        mode_store=PersistentModeStore(default_mode=LLMMode(settings.llm_mode)),
+    )
+    model_service = ModelService(
+        settings,
+        mode_manager,
+        provider_registry,
+        model_catalog,
+        model_router,
+        event_bus,
+        logger=logger,
+        resilience_controller=resilience,
+        coordinator=provider_coordinator,
+    )
     embedding_provider_registry = EmbeddingProviderRegistry()
     if settings.embeddings_enabled:
-        embedding_provider_registry.register(OllamaEmbeddingProvider(settings))
+        embedding_provider_registry.register(LocalHashEmbeddingProvider(settings))
     embedding_router = EmbeddingRouter(build_default_embedding_profiles(settings), mode_manager)
     embedding_service = EmbeddingService(
         settings,
@@ -559,6 +632,17 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     action_registry = ActionRegistry()
     router = ActionRouter(action_registry, settings, memory_service, model_service, event_bus, logger=logger)
+    action_executor = ActionExecutor(
+        router,
+        security_gate=TypedActionSecurityGate(),
+        event_sink=event_bus.publish,
+    )
+    agent_controller = AgentController(
+        infer_model=model_service.infer,
+        action_executor=action_executor,
+        event_sink=event_bus.publish,
+        max_repeated_signature=settings.agent_max_repeated_action_signature,
+    )
     tool_registry = ToolRegistry(settings, memory_service, router, model_service, event_bus, logger=logger)
     meta_command_parser = MetaCommandParser()
     process_runner = SyncProcessRunner()
@@ -587,8 +671,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         capture_registry.register(WindowsScreenCaptureBackend(ui_backend))
     ocr_registry = OCRProviderRegistry()
     ocr_registry.register(InMemoryOCRProvider())
-    if settings.vision_ocr_provider_default == "tesseract_ocr" or "tesseract_ocr" in settings.vision_ocr_provider_fallback_order:
-        ocr_registry.register(TesseractOCRProvider())
+    ocr_registry.register(TesseractOCRProvider())
     analyzer_registry = VisionAnalyzerRegistry()
     analyzer_registry.register(HeuristicVisionAnalyzer())
     analyzer_registry.register(WindowsUIAwarenessBackend(ui_backend))
@@ -776,7 +859,15 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     research_repository.create_schema()
     research_model_adapter = ModelServiceResearchAdapter(model_service)
-    research_retriever = ResearchRetriever(settings, semantic_memory_service, memory_service, vision_runtime_service, system_runtime_service, logger=logger)
+    research_retriever = ResearchRetriever(
+        settings,
+        semantic_memory_service,
+        memory_service,
+        vision_runtime_service,
+        system_runtime_service,
+        web_provider=build_web_search_provider(),
+        logger=logger,
+    )
     research_analyzer = ResearchAnalyzer(research_model_adapter)
     research_synthesizer = ResearchSynthesizer(research_model_adapter)
     research_pipeline = ResearchPipeline(
@@ -847,6 +938,15 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     module_registry.register(IndexingModule(indexing_runtime_service))
     module_registry.register(ResearchModule(research_runtime_service))
     module_registry.register(ScienceModule(science_runtime_service))
+    module_registry.register(CalculatorModule())
+    module_registry.register(
+        DataModule(
+            DataAnalyzer(
+                output_dir=settings.resolved_data_dir / "artifacts" / "data"
+            )
+        )
+    )
+    module_registry.register(WebModule())
     module_registry.register(SecurityModule(security_runtime_service))
     module_registry.register(WriterModule())
     module_registry.register(WritingModule(writing_runtime_service))
@@ -905,6 +1005,8 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         state_manager=state_manager,
         task_router=task_router,
         action_router=router,
+        action_executor=action_executor,
+        agent_controller=agent_controller,
         tool_registry=tool_registry,
         provider_registry=provider_registry,
         model_catalog=model_catalog,
@@ -932,7 +1034,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         desktop_agent_runtime_service=None,
         image_runtime_service=None,
     )
-    image_runtime_service = ImageGenerationService(settings=settings, logger=logger)
+    image_runtime_service = ImageGenerationService(
+        settings=settings,
+        logger=logger,
+        event_bus=event_bus,
+    )
     desktop_agent_runtime_service = DesktopAgentRuntimeService(
         settings=settings,
         runtime=runtime_service,
@@ -1064,20 +1170,41 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     state_manager.register_service("writing_runtime")
     state_manager.register_service("image_runtime")
     state_manager.register_service("desktop_agent_runtime")
+    processor_registry = ProcessorRegistry()
+    local_media_adapters = LocalMediaAdapters(
+        vision_service=vision_runtime_service,
+        voice_service=voice_runtime_service,
+        temp_root=settings.resolved_data_dir / "multimodal_work",
+        timeout_seconds=settings.attachment_processing_timeout_seconds,
+        max_video_frames=settings.attachment_video_max_frames,
+    )
+    processor_registry.register(TextDocumentProcessor(context_char_budget=settings.semantic_context_char_budget))
+    processor_registry.register(ImageProcessor(ocr=local_media_adapters.ocr))
+    processor_registry.register(AudioProcessor(transcriber=local_media_adapters.transcribe))
+    processor_registry.register(VideoProcessor(analyzer=local_media_adapters.analyze_video))
+    multimodal_pipeline = MultimodalPipeline(attachment_service, processor_registry)
     return JarvisApplication(
         settings=settings,
         database=database,
         event_bus=event_bus,
+        runtime_activity_store=runtime_activity_store,
         mode_manager=mode_manager,
         state_manager=state_manager,
         capability_registry=capability_registry,
         action_registry=action_registry,
         action_router=router,
+        action_executor=action_executor,
+        agent_controller=agent_controller,
         tool_registry=tool_registry,
         provider_registry=provider_registry,
         model_catalog=model_catalog,
         model_router=model_router,
         model_service=model_service,
+        nvidia_secret_manager=nvidia_secret_manager,
+        attachment_service=attachment_service,
+        multimodal_pipeline=multimodal_pipeline,
+        local_hardware_diagnostics=local_hardware_diagnostics,
+        local_runtime_service=local_runtime_service,
         embedding_provider_registry=embedding_provider_registry,
         embedding_router=embedding_router,
         embedding_service=embedding_service,

@@ -18,7 +18,6 @@ def test_security_analyze_detects_python_issues(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     jarvis = build_application(settings)
@@ -48,7 +47,6 @@ def test_security_blocks_dangerous_requests(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     jarvis = build_application(settings)
@@ -65,7 +63,6 @@ def test_security_api_routes(monkeypatch, tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     test_app = build_application(settings)
@@ -98,7 +95,6 @@ dependencies = ["PyYAML>=6.0", "Flask<2.0"]
         data_dir=tmp_path / "runtime",
         workspace_root=project,
         research_allowed_roots=(project,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     jarvis = build_application(settings)
@@ -118,7 +114,6 @@ def test_security_local_port_scan_restricted_to_localhost(tmp_path: Path) -> Non
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     jarvis = build_application(settings)
@@ -141,7 +136,6 @@ def test_security_cli_commands(monkeypatch, tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     runner = CliRunner()

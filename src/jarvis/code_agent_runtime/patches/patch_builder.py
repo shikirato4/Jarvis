@@ -5,7 +5,7 @@ from hashlib import sha1
 from pathlib import Path
 from typing import Any
 
-from jarvis.code_agent_runtime.base import CodeActionKind, RiskLevel
+from jarvis.code_agent_runtime.base import RiskLevel
 from jarvis.code_agent_runtime.patches.diff_utils import sha256_text, unified_diff
 from jarvis.code_agent_runtime.patches.models import PATCH_NOTICE, PatchFileChange, ProposedPatch
 from jarvis.code_agent_runtime.patches.patch_store import PatchStore

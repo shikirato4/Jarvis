@@ -5,8 +5,8 @@ from hashlib import sha1
 from typing import Any
 
 from jarvis.code_agent_runtime.paths import is_sensitive_path
-from jarvis.code_agent_runtime.repo_library import REFERENCE_NOTICE, RepoLibraryIndex, RepoRecord
-from jarvis.code_agent_runtime.repo_learning import LEARNING_NOTICE, LearningEntry, RepoLearningRouter
+from jarvis.code_agent_runtime.repo_library import RepoLibraryIndex, RepoRecord
+from jarvis.code_agent_runtime.repo_learning import LearningEntry, RepoLearningRouter
 from jarvis.code_agent_runtime.search.models import SEARCH_NOTICE, SearchDocument, SearchResult
 from jarvis.code_agent_runtime.search.query_builder import SearchQueryBuilder
 from jarvis.code_agent_runtime.search.ranker import SearchRanker

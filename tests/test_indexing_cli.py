@@ -35,7 +35,6 @@ def test_indexing_cli_commands(monkeypatch, tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embedding_provider_default="indexing_cli_provider",
         embedding_provider_fallback_order=("indexing_cli_provider",),
         indexing_auto_sync_on_start=False,

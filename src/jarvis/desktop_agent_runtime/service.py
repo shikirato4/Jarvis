@@ -355,6 +355,30 @@ class DesktopAgentRuntimeService:
             mission.metrics["observe_latency"] = time.perf_counter() - started
             if self._should_stop(mission, control):
                 return self._save_mission(mission)
+            observation = observation_summary_from_world(world)
+            if observation.sensitive_blocked:
+                world.phase = DesktopAgentPhase.PARTIAL
+                world.last_error = observation.recoverable_error
+                mission.status = DesktopAgentPhase.PARTIAL
+                mission.current_phase = DesktopAgentPhase.PARTIAL
+                mission.success = False
+                mission.summary = (
+                    "Mision parcial: la observacion fue bloqueada por una "
+                    "ventana sensible o protegida."
+                )
+                mission.final_result = {
+                    "status": DesktopAgentPhase.PARTIAL.value,
+                    "success": False,
+                    "observation_blocked": True,
+                    "observation_summary": observation.to_dict(),
+                }
+                self._append_timeline(
+                    mission,
+                    DesktopAgentPhase.PARTIAL,
+                    "sensitive_observation_blocked",
+                    mission.summary,
+                )
+                return self._checkpoint_and_save(mission, world)
             mission.status = DesktopAgentPhase.OBSERVING
             mission.current_phase = DesktopAgentPhase.OBSERVING
             mission.summary = "Observando el estado actual del escritorio."

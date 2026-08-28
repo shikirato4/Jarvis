@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from jarvis.models.base import JarvisBaseModel
 
 from .errors import ModeTransitionError, SafetyViolationError
+
+if TYPE_CHECKING:
+    from .models import ModeSnapshot
 
 
 class ExecutionMode(StrEnum):

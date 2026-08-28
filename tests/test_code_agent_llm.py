@@ -45,25 +45,21 @@ def test_fake_provider_available_and_unavailable(monkeypatch) -> None:
 
 
 def test_llm_config_does_not_expose_api_key(monkeypatch) -> None:
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "openai-compatible")
-    monkeypatch.setenv("JARVIS_LLM_MODEL", "model-x")
-    monkeypatch.setenv("JARVIS_LLM_BASE_URL", "file:///tmp/secret")
-    monkeypatch.setenv("JARVIS_LLM_API_KEY", "sk-secret")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-secret")
+    monkeypatch.setenv("NVIDIA_BASE_URL", "file:///tmp/secret")
 
     config = LLMConfig.from_env()
     safe = config.safe_dict()
 
     assert safe["has_api_key"] is True
-    assert "sk-secret" not in str(safe)
+    assert "nvapi-secret" not in str(safe)
     assert safe["base_url"] == ""
-    assert "not allowed" in safe["warning"]
+    assert "invalid or blocked" in safe["warning"]
 
 
 def test_llm_config_redacts_url_userinfo_and_query(monkeypatch) -> None:
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "openai-compatible")
-    monkeypatch.setenv("JARVIS_LLM_MODEL", "model-x")
-    monkeypatch.setenv("JARVIS_LLM_BASE_URL", "https://user:pass@example.com/v1?api_key=secret-token")
-    monkeypatch.setenv("JARVIS_LLM_API_KEY", "sk-secret")
+    monkeypatch.setenv("NVIDIA_BASE_URL", "https://user:pass@example.com/v1?api_key=secret-token")
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-secret")
 
     safe = LLMConfig.from_env().safe_dict()
 
@@ -73,30 +69,33 @@ def test_llm_config_redacts_url_userinfo_and_query(monkeypatch) -> None:
     assert "secret-token" not in str(safe)
 
 
-def test_llm_config_ignores_official_openai_gemini_keys(monkeypatch) -> None:
-    monkeypatch.delenv("JARVIS_LLM_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-openai")
-    monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
-    monkeypatch.setenv("GOOGLE_API_KEY", "google-secret")
+def test_llm_config_ignores_unrelated_provider_keys(monkeypatch) -> None:
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
+    unrelated = {
+        "OPENAI_API_KEY": "unrelated-one",
+        "GEMINI_API_KEY": "unrelated-two",
+        "GOOGLE_API_KEY": "unrelated-three",
+    }
+    for name, value in unrelated.items():
+        monkeypatch.setenv(name, value)
 
     safe = LLMConfig.from_env().safe_dict()
 
     assert safe["has_api_key"] is False
     assert safe["external_api_keys_ignored"] is True
     assert "ignored" in safe["warning"].casefold()
-    assert "sk-real-openai" not in str(safe)
-    assert "gemini-secret" not in str(safe)
-    assert "google-secret" not in str(safe)
+    assert all(value not in str(safe) for value in unrelated.values())
 
 
-def test_llm_config_blocks_official_openai_and_gemini_hosts(monkeypatch) -> None:
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "openai-compatible")
-    monkeypatch.setenv("JARVIS_LLM_MODEL", "model-x")
-    monkeypatch.setenv("JARVIS_LLM_API_KEY", "custom-key")
-
-    monkeypatch.setenv("JARVIS_LLM_BASE_URL", "https://api.openai.com/v1")
+def test_llm_config_blocks_unapproved_remote_hosts(monkeypatch) -> None:
+    monkeypatch.setenv("NVIDIA_API_KEY", "custom-key")
+    blocked_hosts = (
+        "https://api.openai.com/v1",
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+    )
+    monkeypatch.setenv("NVIDIA_BASE_URL", blocked_hosts[0])
     openai_config = LLMConfig.from_env()
-    monkeypatch.setenv("JARVIS_LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+    monkeypatch.setenv("NVIDIA_BASE_URL", blocked_hosts[1])
     gemini_config = LLMConfig.from_env()
 
     assert openai_config.base_url == ""
@@ -105,17 +104,17 @@ def test_llm_config_blocks_official_openai_and_gemini_hosts(monkeypatch) -> None
     assert "blocked" in gemini_config.warning.casefold()
 
 
-def test_llm_config_blocks_official_provider_name(monkeypatch) -> None:
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "openai")
-    monkeypatch.setenv("JARVIS_LLM_MODEL", "gpt-x")
+def test_llm_config_ignores_deprecated_generic_provider_variables(monkeypatch) -> None:
+    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "deprecated-provider")
+    monkeypatch.setenv("JARVIS_LLM_MODEL", "deprecated-model")
     monkeypatch.setenv("JARVIS_LLM_BASE_URL", "https://example.com/v1")
     monkeypatch.setenv("JARVIS_LLM_API_KEY", "custom-key")
 
     config = LLMConfig.from_env()
     provider = build_llm_provider(config)
 
-    assert config.provider == "disabled"
-    assert config.mode == "disabled"
+    assert config.provider == "provider_coordinator"
+    assert config.mode == "auto"
     assert not provider.is_available()
 
 
@@ -177,8 +176,9 @@ def test_response_parser_blocks_outside_sensitive_and_low_confidence(tmp_path: P
 
 def test_llm_assisted_generates_reviewable_patch_without_applying(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "fake")
-    monkeypatch.setenv("JARVIS_LLM_FAKE_RESPONSE", _response())
+    monkeypatch.setenv("JARVIS_LLM_MODE", "local")
+    monkeypatch.setenv("JARVIS_LOCAL_PROVIDER", "fake")
+    monkeypatch.setenv("JARVIS_LOCAL_LLM_FAKE_RESPONSE", _response())
     target = tmp_path / "src" / "app.py"
     before = target.read_text(encoding="utf-8")
     service = CodeAgentRuntimeService(tmp_path)
@@ -193,8 +193,9 @@ def test_llm_assisted_generates_reviewable_patch_without_applying(tmp_path: Path
 
 def test_llm_assisted_falls_back_when_unavailable(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "fake")
-    monkeypatch.delenv("JARVIS_LLM_FAKE_RESPONSE", raising=False)
+    monkeypatch.setenv("JARVIS_LLM_MODE", "local")
+    monkeypatch.setenv("JARVIS_LOCAL_PROVIDER", "fake")
+    monkeypatch.delenv("JARVIS_LOCAL_LLM_FAKE_RESPONSE", raising=False)
     service = CodeAgentRuntimeService(tmp_path)
 
     result = service.change_propose("cambia hello por hola en src/app.py", llm_assisted=True)
@@ -205,8 +206,9 @@ def test_llm_assisted_falls_back_when_unavailable(tmp_path: Path, monkeypatch) -
 
 def test_agent_llm_assisted_generate_patch_does_not_apply(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "fake")
-    monkeypatch.setenv("JARVIS_LLM_FAKE_RESPONSE", _response())
+    monkeypatch.setenv("JARVIS_LLM_MODE", "local")
+    monkeypatch.setenv("JARVIS_LOCAL_PROVIDER", "fake")
+    monkeypatch.setenv("JARVIS_LOCAL_LLM_FAKE_RESPONSE", _response())
     target = tmp_path / "src" / "app.py"
     before = target.read_text(encoding="utf-8")
     service = CodeAgentRuntimeService(tmp_path)
@@ -220,8 +222,9 @@ def test_agent_llm_assisted_generate_patch_does_not_apply(tmp_path: Path, monkey
 
 def test_llm_memory_without_secrets(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "fake")
-    monkeypatch.setenv("JARVIS_LLM_FAKE_RESPONSE", _response())
+    monkeypatch.setenv("JARVIS_LLM_MODE", "local")
+    monkeypatch.setenv("JARVIS_LOCAL_PROVIDER", "fake")
+    monkeypatch.setenv("JARVIS_LOCAL_LLM_FAKE_RESPONSE", _response())
     monkeypatch.setenv("JARVIS_LLM_API_KEY", "sk-secret")
     service = CodeAgentRuntimeService(tmp_path)
 
@@ -236,9 +239,10 @@ def test_llm_memory_without_secrets(tmp_path: Path, monkeypatch) -> None:
 
 def test_llm_cli_status_config_and_change_propose(tmp_path: Path, monkeypatch) -> None:
     _make_project(tmp_path)
-    monkeypatch.setenv("JARVIS_LLM_PROVIDER", "fake")
-    monkeypatch.setenv("JARVIS_LLM_FAKE_RESPONSE", _response())
-    monkeypatch.setenv("JARVIS_LLM_API_KEY", "sk-secret")
+    monkeypatch.setenv("JARVIS_LLM_MODE", "local")
+    monkeypatch.setenv("JARVIS_LOCAL_PROVIDER", "fake")
+    monkeypatch.setenv("JARVIS_LOCAL_LLM_FAKE_RESPONSE", _response())
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-secret")
     runner = CliRunner()
 
     status = runner.invoke(app, ["code", "llm", "status", "--root", str(tmp_path)])
@@ -249,7 +253,7 @@ def test_llm_cli_status_config_and_change_propose(tmp_path: Path, monkeypatch) -
     assert status.exit_code == 0
     assert '"available": true' in status.stdout
     assert config.exit_code == 0
-    assert "sk-secret" not in config.stdout
+    assert "nvapi-secret" not in config.stdout
     assert propose.exit_code == 0
     assert '"proposed"' in propose.stdout
     assert agent.exit_code == 0

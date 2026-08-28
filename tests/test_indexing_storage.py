@@ -32,7 +32,6 @@ def test_indexing_storage_persists_documents_and_chunks(tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embedding_provider_default="indexing_storage_provider",
         embedding_provider_fallback_order=("indexing_storage_provider",),
         indexing_auto_sync_on_start=False,

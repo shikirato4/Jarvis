@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import threading
 import time
 from pathlib import Path
@@ -9,6 +10,7 @@ from typer.testing import CliRunner
 from jarvis.cli import app as cli_app
 from jarvis.config import Settings
 from jarvis.image_runtime import ImageGenerationRequest, ImageGenerationResult, ImageGenerationService, ImageJobStatus
+from jarvis.image_runtime.service import ImageModelManager, dependency_status
 from jarvis.image_runtime.prompting import build_image_request_from_text, is_image_generation_prompt
 
 
@@ -24,7 +26,6 @@ def _settings(tmp_path: Path) -> Settings:
         image_default_height=768,
         image_default_steps=25,
         image_timeout_seconds=1800,
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -56,6 +57,36 @@ class FakeImageBackend:
 
     def unload(self, pipeline: object | None) -> None:
         self.unload_count += 1
+
+
+def test_image_dependency_status_does_not_import_heavy_torch(monkeypatch) -> None:
+    real_import = builtins.__import__
+    imported: list[str] = []
+
+    def tracking_import(name, *args, **kwargs):
+        if name == "torch" or name.startswith("torch."):
+            imported.append(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", tracking_import)
+
+    status = dependency_status()
+
+    assert status["torch"] is True
+    assert status["torch_runtime_checked"] is False
+    assert imported == []
+
+
+def test_image_stop_without_loaded_pipeline_does_not_touch_backend() -> None:
+    backend = FakeImageBackend()
+    manager = ImageModelManager(
+        model_path=Path("unused.safetensors"),
+        backend=backend,
+    )
+
+    manager.unload()
+
+    assert backend.unload_count == 0
 
 
 def test_prompt_builder_detects_image_intent_and_blocks_sensitive_content(tmp_path: Path) -> None:
@@ -150,7 +181,6 @@ def test_default_image_model_path_resolves_inside_workspace(tmp_path: Path) -> N
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime, timezone
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .models import (
     FailureRecord,
@@ -400,8 +400,6 @@ class RuntimeStateManager:
         with self._lock:
             self._recent_recoveries.appendleft(RecoveryRecord.model_validate(payload))
 
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from jarvis.core.events import EventBus

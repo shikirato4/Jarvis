@@ -15,7 +15,6 @@ def test_autonomy_cli_plan(monkeypatch, tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     runner = CliRunner()
@@ -30,7 +29,6 @@ def test_autonomy_cli_control_commands(monkeypatch, tmp_path: Path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     runner = CliRunner()

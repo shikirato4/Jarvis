@@ -11,4 +11,4 @@ Use these extension seams:
 - Register the module in `src/jarvis/bootstrap.py`.
 
 Prefer action-plus-tool registration when a capability needs both structured workflow execution and direct low-level invocation.
-Prefer `ModelService` injection when a feature needs inference; do not couple modules directly to Ollama.
+Prefer `ModelService` injection when a feature needs inference; do not couple modules directly to NVIDIA, vLLM or any future backend.

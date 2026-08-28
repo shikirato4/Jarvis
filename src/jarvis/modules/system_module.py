@@ -4,7 +4,7 @@ import re
 
 from pydantic import BaseModel, Field
 
-from jarvis.actions.models import ActionResult, ActionStep
+from jarvis.actions.models import ActionResult, ActionRisk, ActionStep
 from jarvis.actions.registry import ActionContext, ActionDefinition, ActionRegistry
 from jarvis.core.capabilities import CapabilityDescriptor, CapabilityRegistry
 from jarvis.core.modes import ExecutionMode
@@ -61,10 +61,10 @@ class SystemModule:
     def register_actions(self, registry: ActionRegistry) -> None:
         registry.register(ActionDefinition(name="system.search_resources", description="Search system resources across roots and volumes.", payload_model=SystemSearchPayload, handler=self._search_resources, tags=("system", "search")))
         registry.register(ActionDefinition(name="system.resolve_target", description="Resolve an application, file, folder or URI without opening it.", payload_model=SystemResolvePayload, handler=self._resolve_target, tags=("system", "resolve")))
-        registry.register(ActionDefinition(name="system.open_target", description="Open a resolved system target using safe launch rules.", payload_model=SystemOpenPayload, handler=self._open_target, tags=("system", "open")))
-        registry.register(ActionDefinition(name="system.open_path", description="Open a path on the system using associations.", payload_model=SystemPathPayload, handler=self._open_path, tags=("system", "open", "path")))
-        registry.register(ActionDefinition(name="system.launch_application", description="Launch an application through the system runtime.", payload_model=SystemApplicationPayload, handler=self._launch_application, tags=("system", "application", "launch")))
-        registry.register(ActionDefinition(name="system.reveal_target", description="Reveal a file or folder in the system explorer.", payload_model=SystemPathPayload, handler=self._reveal_target, tags=("system", "reveal")))
+        registry.register(ActionDefinition(name="system.open_target", description="Open a resolved system target using safe launch rules.", payload_model=SystemOpenPayload, handler=self._open_target, tags=("system", "open"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="system.open_path", description="Open a path on the system using associations.", payload_model=SystemPathPayload, handler=self._open_path, tags=("system", "open", "path"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="system.launch_application", description="Launch an application through the system runtime.", payload_model=SystemApplicationPayload, handler=self._launch_application, tags=("system", "application", "launch"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="system.reveal_target", description="Reveal a file or folder in the system explorer.", payload_model=SystemPathPayload, handler=self._reveal_target, tags=("system", "reveal"), risk=ActionRisk.SENSITIVE, idempotent=False))
 
     def register_capabilities(self, registry: CapabilityRegistry) -> None:
         registry.register(

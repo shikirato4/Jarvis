@@ -24,7 +24,6 @@ def test_reactor_widget_and_window_boot(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     backend, desktop = build_desktop_runtime(settings)
@@ -62,7 +61,6 @@ def test_window_geometry_fits_available_screen(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     backend, desktop = build_desktop_runtime(settings)
@@ -92,7 +90,6 @@ def test_window_geometry_defaults_are_safe_for_full_hd(tmp_path, monkeypatch) ->
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     backend, desktop = build_desktop_runtime(settings)
@@ -122,7 +119,6 @@ def test_window_refresh_skips_full_repaint_when_state_is_unchanged(tmp_path) -> 
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
@@ -157,7 +153,6 @@ def test_stitch_inspired_shell_maps_real_jarvis_surfaces(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     backend, desktop = build_desktop_runtime(settings)
@@ -168,7 +163,7 @@ def test_stitch_inspired_shell_maps_real_jarvis_surfaces(tmp_path) -> None:
 
         assert set(window._nav_buttons) == {"chat", "agent", "web", "context", "memory", "code", "learning", "settings"}  # noqa: SLF001
         assert window._mode_badge.text().startswith("MODE")  # noqa: SLF001
-        assert "gpt-oss" in window._model_badge.text()  # noqa: SLF001
+        assert "Nemotron" in window._model_badge.text()  # noqa: SLF001
         assert "BLOCKED" in window._openai_badge.text()  # noqa: SLF001
         assert "BLOCKED" in window._gemini_badge.text()  # noqa: SLF001
         assert window._right_tabs.count() >= 7  # noqa: SLF001
@@ -188,7 +183,6 @@ def test_agent_mode_is_visible_and_guided_controls_are_available(tmp_path) -> No
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     backend, desktop = build_desktop_runtime(settings)
@@ -220,7 +214,6 @@ def test_image_studio_is_visible_with_local_generation_controls(tmp_path) -> Non
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         image_model_path=tmp_path / "model.safetensors",
         image_output_dir=tmp_path / "outputs",

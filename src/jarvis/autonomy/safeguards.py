@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 
-from .base import AutonomousMission, MissionStatus, RetryDecision, StopReason
+from .base import AutonomousMission, StopReason
 
 
 def detect_loop(mission: AutonomousMission, *, repetition_limit: int = 3) -> bool:

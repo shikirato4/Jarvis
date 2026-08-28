@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -217,7 +216,11 @@ class OperationRegistry:
             record = self._operations.get(operation_id)
             if record is None:
                 return
-            record.last_heartbeat_at = _utcnow()
+            heartbeat_at = _utcnow()
+            record.last_heartbeat_at = heartbeat_at
+            record.updated_at = heartbeat_at
+            if record.timeout_ms is not None:
+                record.deadline_at = heartbeat_at + timedelta(milliseconds=record.timeout_ms)
             if progress_message is not None:
                 record.progress_message = progress_message
             if metadata:
@@ -361,7 +364,7 @@ class OperationWatchdog:
     ) -> None:
         self._registry = registry
         self._event_bus = event_bus
-        self._poll_interval_seconds = max(poll_interval_seconds, 0.2)
+        self._poll_interval_seconds = max(poll_interval_seconds, 0.01)
         self._hard_timeout_callback = hard_timeout_callback
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None

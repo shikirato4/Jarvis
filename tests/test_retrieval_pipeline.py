@@ -42,7 +42,6 @@ def test_semantic_retrieval_filters_by_collection_and_source_type(tmp_path: Path
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embedding_provider_default="semantic_fake",
         embedding_provider_fallback_order=("semantic_fake",),
         embedding_model_default="semantic-test",
@@ -84,7 +83,6 @@ def test_retrieval_degrades_to_lexical_search_without_embedding_provider(tmp_pat
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         embeddings_enabled=False,
     )
     app = build_application(settings)

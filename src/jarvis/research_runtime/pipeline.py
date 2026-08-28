@@ -44,6 +44,22 @@ class ResearchPipeline:
         sources, evidence = self._retriever.retrieve(task, request, correlation_id=correlation_id)
         task.sources = sources
         task.evidence = evidence
+        retrieval_kinds = {
+            "semantic_memory": ResearchStepKind.SEMANTIC_MEMORY_RETRIEVAL,
+            "memory": ResearchStepKind.MEMORY_RETRIEVAL,
+            "workspace": ResearchStepKind.WORKSPACE_RETRIEVAL,
+            "web": ResearchStepKind.WEB_RETRIEVAL,
+        }
+        for trace in self._retriever.last_trace:
+            kind = retrieval_kinds.get(str(trace.get("stage")))
+            if kind is not None:
+                self._record_step(
+                    task,
+                    kind,
+                    f"Retrieve {trace['stage']} evidence",
+                    {"query_present": bool(task.query)},
+                    dict(trace),
+                )
         self._record_step(task, ResearchStepKind.RETRIEVAL, "Retrieve evidence", {"query": task.query}, {"source_count": len(sources), "evidence_count": len(evidence)})
         self._heartbeat(operation_handle, "retrieval completed")
 
@@ -74,8 +90,39 @@ class ResearchPipeline:
 
         self._check_cancelled(operation_handle, task)
         confidence = round(sum(item.confidence for item in task.findings) / len(task.findings), 3) if task.findings else 0.0
-        task.report = self._synthesizer.synthesize(task, task.findings, task.conflicts, confidence=confidence, correlation_id=correlation_id)
-        self._record_step(task, ResearchStepKind.SYNTHESIS, "Synthesize report", {"finding_count": len(task.findings)}, {"confidence": confidence})
+        try:
+            task.report = self._synthesizer.synthesize(
+                task,
+                task.findings,
+                task.conflicts,
+                confidence=confidence,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:
+            task.report = self._synthesizer.build_partial(
+                task,
+                task.findings,
+                task.conflicts,
+                confidence=confidence,
+                correlation_id=correlation_id,
+                error_type=type(exc).__name__,
+            )
+            task.metadata["partial_results"] = True
+            self._record_step(
+                task,
+                ResearchStepKind.SYNTHESIS,
+                "Synthesize report",
+                {"finding_count": len(task.findings)},
+                {"confidence": confidence, "partial_results": True},
+                status=ResearchStepStatus.FAILED,
+            )
+            if self._logger is not None:
+                self._logger.warning(
+                    "research_synthesis_partial",
+                    extra={"task_id": task.task_id, "error_type": type(exc).__name__},
+                )
+        else:
+            self._record_step(task, ResearchStepKind.SYNTHESIS, "Synthesize report", {"finding_count": len(task.findings)}, {"confidence": confidence})
         self._record_step(task, ResearchStepKind.REPORT_GENERATION, "Generate report", {"task_id": task.task_id}, {"report_id": task.report.report_id})
 
         if request.persist_results and task.report is not None:
@@ -108,7 +155,7 @@ class ResearchPipeline:
         if task.report is None:
             return
         settings = getattr(self._semantic_memory, "_settings", None)
-        if settings is not None and (not getattr(settings, "ollama_enabled", True) or not getattr(settings, "embeddings_enabled", True)):
+        if settings is not None and not getattr(settings, "embeddings_enabled", True):
             return
         try:
             self._semantic_memory.ingest_document(
@@ -125,7 +172,15 @@ class ResearchPipeline:
             return
 
     @staticmethod
-    def _record_step(task: ResearchTask, kind: ResearchStepKind, title: str, input_payload: dict, output_payload: dict) -> None:
+    def _record_step(
+        task: ResearchTask,
+        kind: ResearchStepKind,
+        title: str,
+        input_payload: dict,
+        output_payload: dict,
+        *,
+        status: ResearchStepStatus = ResearchStepStatus.COMPLETED,
+    ) -> None:
         now = datetime.now(timezone.utc)
         task.steps.append(
             ResearchStep(
@@ -134,7 +189,7 @@ class ResearchPipeline:
                 kind=kind,
                 title=title,
                 description=title,
-                status=ResearchStepStatus.COMPLETED,
+                status=status,
                 input_payload=input_payload,
                 output_payload=output_payload,
                 started_at=now,

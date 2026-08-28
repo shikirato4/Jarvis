@@ -13,7 +13,6 @@ def test_hud_api_routes_render_and_return_json(monkeypatch, tmp_path: Path) -> N
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         indexing_auto_sync_on_start=False,
         ui_backend_kind="in_memory",
     )

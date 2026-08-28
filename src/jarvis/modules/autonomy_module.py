@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from jarvis.actions.models import ActionResult, ActionStep
+from jarvis.actions.models import ActionResult, ActionRisk, ActionStep
 from jarvis.actions.registry import ActionContext, ActionDefinition, ActionRegistry
 from jarvis.autonomy.base import MissionControlRequest, MissionPlanRequest, MissionRequest
 from jarvis.autonomy.service import AutonomyService
@@ -27,9 +27,9 @@ class AutonomyModule:
 
     def register_actions(self, registry: ActionRegistry) -> None:
         registry.register(ActionDefinition(name="autonomy.plan_mission", description="Build an autonomous mission plan.", payload_model=AutonomyGoalPayload, handler=self._plan_mission, tags=("autonomy", "planning")))
-        registry.register(ActionDefinition(name="autonomy.start_mission", description="Start an autonomous mission.", payload_model=AutonomyGoalPayload, handler=self._start_mission, tags=("autonomy", "execution")))
-        registry.register(ActionDefinition(name="autonomy.step_mission", description="Advance a mission by one step.", payload_model=MissionControlRequest, handler=self._step_mission, tags=("autonomy", "execution")))
-        registry.register(ActionDefinition(name="autonomy.stop_mission", description="Stop an autonomous mission.", payload_model=MissionControlRequest, handler=self._stop_mission, tags=("autonomy", "control")))
+        registry.register(ActionDefinition(name="autonomy.start_mission", description="Start an autonomous mission.", payload_model=AutonomyGoalPayload, handler=self._start_mission, tags=("autonomy", "execution"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="autonomy.step_mission", description="Advance a mission by one step.", payload_model=MissionControlRequest, handler=self._step_mission, tags=("autonomy", "execution"), risk=ActionRisk.SENSITIVE, idempotent=False))
+        registry.register(ActionDefinition(name="autonomy.stop_mission", description="Stop an autonomous mission.", payload_model=MissionControlRequest, handler=self._stop_mission, tags=("autonomy", "control"), risk=ActionRisk.SENSITIVE, idempotent=False))
 
     def register_tools(self, registry: ToolRegistry) -> None:
         registry.register(ToolDefinition(name="autonomy.plan", description="Plan an autonomous mission.", input_model=AutonomyGoalPayload, handler=self._tool_plan, tags=("autonomy", "planning")))

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 import wave
 
 import numpy
+import pytest
 from jarvis.bootstrap import build_application
 from jarvis.config import Settings
 from jarvis.core.errors import ServiceUnavailableError
@@ -13,9 +16,11 @@ from jarvis.core.events import EventBus
 from jarvis.core.modes import ModeManager
 from jarvis.desktop import build_desktop_runtime
 from jarvis.desktop_runtime.voice import DesktopVoiceController
-from jarvis.voice_runtime.backends import InMemorySTTProvider, InMemoryTTSProvider
+from jarvis.voice_runtime.backends import AudioOutputRegistry, InMemoryAudioOutputBackend, InMemorySTTProvider, InMemoryTTSProvider
 from jarvis.voice_runtime.backends import TTSProviderRegistry
+from jarvis.voice_runtime.backends import _WindowsSpeechEngineManager
 from jarvis.voice_runtime.coqui_tts import CoquiXTTSProvider
+from jarvis.voice_runtime.playback import PlaybackController
 from jarvis.voice_runtime.base import CancellationToken, PlaybackHandle, SynthesisRequest, SynthesisResult, TranscriptionRequest
 from jarvis.voice_runtime.spoken import build_tts_segments, clean_tts_text, prepare_spoken_text, resolve_voice_profile, split_tts_text, spoken_response_normalization, standard_spoken_phrase
 from jarvis.voice_runtime.tts import TTSService
@@ -56,6 +61,18 @@ class CountingUnavailableTTSProvider(InMemoryTTSProvider):
     def synthesize(self, request):
         self.calls += 1
         raise RuntimeError("package not installed")
+
+
+class CountingCudaUnavailableTTSProvider(InMemoryTTSProvider):
+    provider_name = "cuda_unavailable_tts"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def synthesize(self, request):
+        self.calls += 1
+        raise RuntimeError("CUDA requested but unavailable")
 
 
 class RecordingPlaybackHandle:
@@ -109,6 +126,16 @@ class SlowRecordingAudioOutputBackend(RecordingAudioOutputBackend):
         handle = SlowRecordingPlaybackHandle(cancellation)
         self.handles.append(handle)
         return handle
+
+
+class FailingAudioOutputBackend:
+    backend_name = "pyttsx3"
+
+    def health_check(self) -> dict[str, object]:
+        return {"backend_name": self.backend_name, "healthy": False}
+
+    def play(self, result: SynthesisResult, *, cancellation: CancellationToken | None = None) -> PlaybackHandle:
+        raise RuntimeError("audio backend unavailable")
 
 
 class RecordingCoquiModel:
@@ -208,7 +235,6 @@ def test_stt_service_applies_fallback_between_providers(tmp_path: Path) -> None:
         workspace_root=tmp_path,
         voice_stt_provider_default="failing_stt",
         voice_stt_provider_fallback_order=("in_memory",),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -226,7 +252,6 @@ def test_tts_service_applies_fallback_between_providers(tmp_path: Path) -> None:
         workspace_root=tmp_path,
         voice_tts_provider_default="failing_tts",
         voice_tts_provider_fallback_order=("in_memory",),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -234,6 +259,23 @@ def test_tts_service_applies_fallback_between_providers(tmp_path: Path) -> None:
     result = app.voice_runtime_service._tts.synthesize(SynthesisRequest(text="respuesta"))  # noqa: SLF001
     assert result.text_payload == "respuesta"
     assert result.fallback_used is True
+
+
+def test_playback_controller_falls_back_when_preferred_backend_fails() -> None:
+    registry = AudioOutputRegistry()
+    registry.register(FailingAudioOutputBackend())
+    fallback = InMemoryAudioOutputBackend()
+    registry.register(fallback)
+    controller = PlaybackController(registry, "pyttsx3")
+    result = SynthesisResult(provider_name="in_memory", provider_kind="local", text_payload="respuesta", audio_format="text")
+
+    handle = controller.play(result)
+
+    assert handle.playback_id
+    assert result.backend_name == "in_memory"
+    assert result.metadata["playback_fallback_from"] == "pyttsx3"
+    assert result.metadata["playback_fallback_reason"] == "audio backend unavailable"
+    assert len(fallback.played) == 1
 
 
 def test_coqui_provider_falls_back_cleanly_when_unavailable(tmp_path: Path) -> None:
@@ -244,7 +286,7 @@ def test_coqui_provider_falls_back_cleanly_when_unavailable(tmp_path: Path) -> N
         voice_tts_provider_fallback_order=("in_memory",),
         voice_audio_output_backend_default="in_memory",
         voice_coqui_speaker_wav=None,
-        ollama_enabled=False,
+        voice_clone_sample_path=None,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -291,14 +333,20 @@ def test_coqui_provider_requires_speaker_wav_and_skips_invalid_synthesis(tmp_pat
         voice_tts_provider_fallback_order=("in_memory",),
         voice_audio_output_backend_default="in_memory",
         voice_coqui_speaker_wav=None,
-        ollama_enabled=False,
+        voice_clone_sample_path=None,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
     coqui = app.voice_runtime_service._tts._registry.get("coqui_xtts")  # noqa: SLF001
     assert coqui is not None
-    model = RecordingCoquiModel()
-    coqui._ensure_model_loaded = lambda: model  # type: ignore[attr-defined]  # noqa: SLF001
+    model_load_attempts = 0
+
+    def _unexpected_model_load():
+        nonlocal model_load_attempts
+        model_load_attempts += 1
+        raise AssertionError("an invalid synthesis request must not load the XTTS model")
+
+    coqui._ensure_model_loaded = _unexpected_model_load  # type: ignore[attr-defined]  # noqa: SLF001
     result = app.voice_runtime_service._tts.synthesize(  # noqa: SLF001
         SynthesisRequest(
             text="respuesta local",
@@ -307,13 +355,57 @@ def test_coqui_provider_requires_speaker_wav_and_skips_invalid_synthesis(tmp_pat
             metadata={"speaker_name": "jarvis", "speaker_wav": None, "speaking_rate": 0.92},
         )
     )
-    assert model.calls == []
+    assert model_load_attempts == 0
     assert result.provider_name == "in_memory"
     assert result.fallback_used is True
     assert result.metadata["fallback_reason"] == "missing speaker_wav"
     log_text = settings.resolved_log_file.read_text(encoding="utf-8")
     assert "coqui_xtts_missing_speaker_wav" in log_text
     assert "missing speaker_wav" in log_text
+
+
+def test_coqui_provider_rejects_unavailable_explicit_cuda(monkeypatch) -> None:
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    provider = CoquiXTTSProvider(device_preference="cuda")
+
+    with pytest.raises(RuntimeError, match="CUDA requested but unavailable"):
+        provider._select_device()  # noqa: SLF001
+
+
+def test_cuda_unavailable_provider_is_detected_once_then_backed_off() -> None:
+    settings = Settings(
+        _env_file=None,
+        voice_tts_provider_default="cuda_unavailable_tts",
+        voice_tts_provider_fallback_order=("in_memory",),
+    )
+    registry = TTSProviderRegistry()
+    unavailable = CountingCudaUnavailableTTSProvider()
+    registry.register(unavailable)
+    registry.register(InMemoryTTSProvider())
+    service = TTSService(
+        settings,
+        ModeManager(),
+        registry,
+        EventBus(),
+    )
+
+    first = service.synthesize(SynthesisRequest(text="uno"))
+    second = service.synthesize(SynthesisRequest(text="dos"))
+
+    assert unavailable.calls == 1
+    assert first.provider_name == "in_memory"
+    assert second.provider_name == "in_memory"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows SAPI only")
+def test_windows_sapi_recovers_from_stale_comtypes_typelib_without_disk_regeneration() -> None:
+    engine = _WindowsSpeechEngineManager().current()
+
+    voices = engine.getProperty("voices")
+
+    assert voices
+    assert all(getattr(voice, "name", "") for voice in voices)
 
 
 def test_tts_service_prefers_coqui_when_available(tmp_path: Path) -> None:
@@ -325,7 +417,6 @@ def test_tts_service_prefers_coqui_when_available(tmp_path: Path) -> None:
         voice_tts_provider_fallback_order=("in_memory",),
         voice_coqui_speaker_wav=speaker_wav,
         voice_coqui_speaker_name="jarvis",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -358,7 +449,6 @@ def test_voice_runtime_records_effective_provider_and_profile_details(tmp_path: 
         voice_profile_default="jarvis_premium",
         voice_coqui_speaker_wav=speaker_wav,
         voice_coqui_speaker_name="jarvis",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -398,7 +488,6 @@ def test_tts_service_logs_fallback_reason_for_coqui(tmp_path: Path) -> None:
         voice_tts_provider_default="coqui_xtts",
         voice_tts_provider_fallback_order=("in_memory",),
         voice_audio_output_backend_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -430,7 +519,6 @@ def test_tts_service_rehydrates_speaker_wav_when_provider_returns_none(tmp_path:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -459,7 +547,6 @@ def test_voice_runtime_uses_coqui_without_fallback_when_speaker_wav_is_configure
         voice_profile_default="jarvis_premium",
         voice_coqui_speaker_wav=speaker_wav,
         voice_coqui_speaker_name="jarvis",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -490,7 +577,7 @@ def test_voice_runtime_uses_coqui_without_fallback_when_speaker_wav_is_configure
 
 
 def test_desktop_test_voice_uses_active_profile_and_phrase(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ollama_enabled=False, ui_backend_kind="in_memory")
+    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ui_backend_kind="in_memory")
     runtime = StubVoiceRuntime()
     controller = DesktopVoiceController(runtime, settings, command_handler=lambda *_args, **_kwargs: None)
     controller.test_voice()
@@ -520,7 +607,6 @@ def test_voice_speak_is_non_blocking_and_updates_speaking_status(tmp_path: Path)
         voice_tts_provider_default="slow_tts",
         voice_tts_provider_fallback_order=("in_memory",),
         voice_audio_output_backend_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -541,13 +627,102 @@ def test_voice_speak_is_non_blocking_and_updates_speaking_status(tmp_path: Path)
         app.stop()
 
 
+def test_lightweight_voice_status_does_not_probe_or_initialize_backends(
+    tmp_path: Path,
+) -> None:
+    settings = Settings(
+        _env_file=None,
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        voice_tts_provider_default="in_memory",
+        voice_audio_output_backend_default="in_memory",
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    called: list[str] = []
+    registries = (
+        (app.voice_runtime_service._input_registry, "list_backends"),  # noqa: SLF001
+        (app.voice_runtime_service._output_registry, "list_backends"),  # noqa: SLF001
+        (app.voice_runtime_service._stt._registry, "list_providers"),  # noqa: SLF001
+        (app.voice_runtime_service._tts._registry, "list_providers"),  # noqa: SLF001
+    )
+    for registry, list_method in registries:
+        for provider in getattr(registry, list_method)():
+            provider.health_check = lambda: called.append("health")  # type: ignore[method-assign]
+
+    status = app.voice_runtime_service.status(lightweight_voice_clone=True)
+
+    assert called == []
+    assert status["tts_providers"]
+    assert all(item["status"] == "not_probed" for item in status["tts_providers"])
+
+
+def test_replacement_speech_never_runs_two_tts_jobs_concurrently(tmp_path: Path) -> None:
+    from threading import Event, Lock
+
+    class TrackingTTSProvider:
+        provider_name = "tracking_tts"
+        provider_kind = "local"
+
+        def __init__(self) -> None:
+            self.lock = Lock()
+            self.entered = Event()
+            self.active = 0
+            self.max_active = 0
+
+        def health_check(self):
+            return {"provider_name": self.provider_name, "healthy": True}
+
+        def synthesize(self, request):
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+                self.entered.set()
+            time.sleep(0.15)
+            with self.lock:
+                self.active -= 1
+            return SynthesisResult(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                text_payload=request.text,
+                latency_ms=150,
+                duration_seconds=0,
+                audio_format="text",
+            )
+
+    settings = Settings(
+        _env_file=None,
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        voice_tts_provider_default="tracking_tts",
+        voice_tts_provider_fallback_order=(),
+        voice_audio_output_backend_default="in_memory",
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    provider = TrackingTTSProvider()
+    app.voice_runtime_service._tts._registry.register(provider)  # noqa: SLF001
+    app.voice_runtime_service.speak("primera respuesta", correlation_id="speech-one")
+    assert provider.entered.wait(timeout=1.0)
+
+    app.voice_runtime_service.speak("segunda respuesta", correlation_id="speech-two")
+    worker = app.voice_runtime_service._speech_worker  # noqa: SLF001
+    assert worker is not None
+    worker.join(timeout=3.0)
+
+    assert not worker.is_alive()
+    assert provider.max_active == 1
+    assert app.voice_runtime_service.status(lightweight_voice_clone=True)[
+        "last_speech_result"
+    ]["correlation_id"] == "speech-two"
+
+
 def test_voice_speak_admission_rejection_logs_clean_skip(tmp_path: Path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -592,7 +767,6 @@ def test_voice_run_speech_cancelled_before_start_does_not_begin_operation(tmp_pa
         workspace_root=tmp_path,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -628,7 +802,6 @@ def test_voice_run_speech_cancel_after_admission_releases_operation(tmp_path: Pa
         workspace_root=tmp_path,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -710,7 +883,7 @@ def test_split_tts_text_segments_long_response_without_losing_tail() -> None:
 
 
 def test_build_tts_segments_assigns_pause_metadata_and_preserves_tail(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ollama_enabled=False, ui_backend_kind="in_memory")
+    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ui_backend_kind="in_memory")
     profile = resolve_voice_profile(settings, "jarvis_cinematic")
     segments = build_tts_segments(
         "Primera idea, con pausa interna. Segunda idea extensa para validar el final completo sin recortes.",
@@ -725,7 +898,7 @@ def test_build_tts_segments_assigns_pause_metadata_and_preserves_tail(tmp_path: 
 
 
 def test_voice_profile_defaults_to_jarvis_premium(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ollama_enabled=False, ui_backend_kind="in_memory")
+    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ui_backend_kind="in_memory")
     profile = resolve_voice_profile(settings)
     assert profile.name == "jarvis_premium"
     assert profile.rate == settings.voice_tts_rate
@@ -734,7 +907,7 @@ def test_voice_profile_defaults_to_jarvis_premium(tmp_path: Path) -> None:
 
 
 def test_voice_profile_loads_cinematic_variant(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ollama_enabled=False, ui_backend_kind="in_memory")
+    settings = Settings(data_dir=tmp_path / "runtime", workspace_root=tmp_path, ui_backend_kind="in_memory")
     profile = resolve_voice_profile(settings, "jarvis_cinematic")
     assert profile.name == "jarvis_cinematic"
     assert 0.88 <= float(profile.speaking_rate or 0.0) <= 0.9
@@ -802,7 +975,6 @@ def test_voice_clone_manager_resolves_clone_profile_and_preprocessed_sample(tmp_
         voice_clone_enabled=True,
         voice_clone_sample_path=sample,
         voice_clone_profile_default="jarvis_premium",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     profile = VoiceCloneManager(settings).resolve_profile()
@@ -823,7 +995,6 @@ def test_voice_clone_manager_caches_preprocessed_profile_for_status_refresh(tmp_
         voice_clone_enabled=True,
         voice_clone_sample_path=sample,
         voice_clone_profile_default="jarvis_premium",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     manager = VoiceCloneManager(settings)
@@ -855,7 +1026,6 @@ def test_voice_clone_manager_lightweight_status_does_not_preprocess(tmp_path: Pa
         voice_clone_enabled=True,
         voice_clone_sample_path=sample,
         voice_clone_profile_default="jarvis_premium",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     manager = VoiceCloneManager(settings)
@@ -887,7 +1057,6 @@ def test_desktop_shell_state_uses_lightweight_voice_status(tmp_path: Path, monke
         voice_clone_profile_default="jarvis_premium",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
@@ -920,7 +1089,6 @@ def test_voice_speak_still_resolves_clone_profile_lazily(tmp_path: Path, monkeyp
         voice_clone_profile_default="jarvis_premium",
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -966,7 +1134,6 @@ def test_invalid_sample_does_not_crash_clone_manager(tmp_path: Path) -> None:
         voice_clone_enabled=True,
         voice_clone_sample_path=sample,
         voice_clone_profile_default="jarvis_premium",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     profile = VoiceCloneManager(settings).resolve_profile()
@@ -995,7 +1162,6 @@ def test_optional_clone_backend_absence_does_not_break_system(tmp_path: Path) ->
         workspace_root=tmp_path,
         voice_clone_openvoice_enabled=True,
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -1020,7 +1186,6 @@ def test_tts_service_uses_voice_watchdog_timeout_for_synthesis(tmp_path: Path) -
         workspace_root=tmp_path,
         voice_watchdog_timeout_ms=45000,
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     registry = TTSProviderRegistry()
@@ -1038,7 +1203,6 @@ def test_tts_service_backs_off_unavailable_provider_between_requests(tmp_path: P
         workspace_root=tmp_path,
         voice_tts_provider_default="counting_unavailable_tts",
         voice_tts_provider_fallback_order=("in_memory",),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     registry = TTSProviderRegistry()
@@ -1061,7 +1225,6 @@ def test_voice_runtime_cancels_previous_audio_before_starting_new_one(tmp_path: 
         workspace_root=tmp_path,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -1091,7 +1254,6 @@ def test_voice_runtime_segments_long_speech_and_plays_all_segments_in_order(tmp_
         workspace_root=tmp_path,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
@@ -1128,7 +1290,6 @@ def test_muting_voice_stops_active_audio(tmp_path: Path) -> None:
         workspace_root=tmp_path,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)

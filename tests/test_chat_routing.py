@@ -11,6 +11,7 @@ from jarvis.modules.security_module import SecurityModule
 from jarvis.modules.system_module import SystemModule
 from jarvis.modules.vision_module import VisionModule
 from jarvis.modules.voice_interface_module import VoiceInterfaceModule
+from jarvis.models_runtime.base import ModelResponse, ModelToolCall, ProviderKind
 
 
 class _NoOpDependency:
@@ -83,15 +84,44 @@ def test_chat_engine_routes_research_request(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)
+    requests = []
+
+    def infer(request):
+        requests.append(request)
+        if request.messages[-1].role == "tool":
+            return ModelResponse(
+                provider_name="nemotron-test",
+                provider_kind=ProviderKind.LOCAL,
+                logical_model=request.logical_model or "general_assistant",
+                model_name="nemotron-test",
+                content="Investigación completada.",
+                latency_ms=1.0,
+            )
+        return ModelResponse(
+            provider_name="nemotron-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model=request.logical_model or "general_assistant",
+            model_name="nemotron-test",
+            tool_calls=[
+                ModelToolCall(
+                    id="research-1",
+                    name="research.run_task",
+                    arguments={"query": "agujeros negros"},
+                )
+            ],
+            latency_ms=1.0,
+        )
+
+    app.agent_controller._infer_model = infer  # noqa: SLF001
     try:
         response = desktop.send_chat("investiga agujeros negros")
         assert response.message.content
         assert "orchestrated" not in response.message.content
         assert response.raw_result.get("task_id")
+        assert [request.messages[-1].role for request in requests] == ["user", "tool"]
     finally:
         app.stop()
 
@@ -101,7 +131,6 @@ def test_chat_engine_returns_writing_guard_feedback(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
     )
     app, desktop = build_desktop_runtime(settings)

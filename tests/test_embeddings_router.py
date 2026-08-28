@@ -34,9 +34,9 @@ class FakeEmbeddingProvider:
 
 
 def test_embedding_router_filters_by_allowed_provider_kind() -> None:
-    app = build_application(Settings(ollama_enabled=False, embeddings_enabled=False))
+    app = build_application(Settings(embeddings_enabled=False))
     router = EmbeddingRouter(build_default_embedding_profiles(Settings()), app.mode_manager)
-    profiles = router.route(EmbeddingRequest(texts=("hola",), task_type="retrieval"), preferred_provider_order=("ollama_embeddings",))
+    profiles = router.route(EmbeddingRequest(texts=("hola",), task_type="retrieval"), preferred_provider_order=("local_hash_embeddings",))
     assert profiles
     assert all(profile.provider_kind == "local" for profile in profiles)
 
@@ -45,7 +45,6 @@ def test_embedding_service_applies_provider_fallback(tmp_path: Path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
-        ollama_enabled=False,
         embeddings_enabled=False,
         embedding_provider_default="primary_embeddings",
         embedding_provider_fallback_order=("primary_embeddings", "secondary_embeddings"),

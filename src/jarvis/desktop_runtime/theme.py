@@ -47,6 +47,11 @@ QFrame#ChromeCard, QFrame#PanelCard, QFrame#ChatComposer, QFrame#MetricsStrip, Q
 QFrame#HistoryCard {{
     background: rgba(4, 13, 24, 0.98);
 }}
+QFrame#AttachmentPreview {{
+    background: rgba(5, 20, 32, 0.92);
+    border: 1px solid rgba(117, 232, 255, 0.18);
+    border-radius: 14px;
+}}
 QFrame#ConversationSurface {{
     background:
         qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(7, 21, 34, 0.99), stop:1 rgba(4, 13, 24, 0.99));
@@ -223,6 +228,21 @@ QPushButton#PrimaryActionButton {{
 QPushButton#PrimaryActionButton:hover {{
     background: rgba(13, 78, 106, 1.0);
 }}
+QPushButton#AttachButton {{
+    background: rgba(7, 37, 55, 0.96);
+    border: 1px solid rgba(124, 232, 255, 0.52);
+    border-radius: 27px;
+    padding: 0;
+    font-size: 22pt;
+    font-weight: 400;
+}}
+QPushButton#AttachmentChip {{
+    background: rgba(8, 42, 60, 0.9);
+    border: 1px solid rgba(117, 232, 255, 0.28);
+    border-radius: 11px;
+    padding: 6px 10px;
+    font-size: 9pt;
+}}
 QPushButton#DangerActionButton {{
     background: rgba(72, 26, 34, 0.9);
     border: 1px solid rgba(255, 112, 112, 0.42);
@@ -250,7 +270,7 @@ QPushButton:disabled {{
     color: rgba(205, 238, 248, 0.48);
     border: 1px solid rgba(124, 232, 255, 0.12);
 }}
-QLineEdit#ChatInput {{
+QLineEdit#ChatInput, QPlainTextEdit#ChatInput {{
     background: rgba(3, 10, 18, 0.96);
     border: 1px solid rgba(124, 232, 255, 0.22);
     border-radius: 20px;
@@ -258,7 +278,7 @@ QLineEdit#ChatInput {{
     font-size: 11pt;
     selection-background-color: rgba(67, 214, 255, 0.28);
 }}
-QLineEdit#ChatInput:focus {{
+QLineEdit#ChatInput:focus, QPlainTextEdit#ChatInput:focus {{
     border: 1px solid {palette.border_bright};
 }}
 QLabel#ThinkingLabel {{

@@ -36,7 +36,11 @@ class OCRService:
         return [provider.health_check() for provider in self._registry.list_providers()]
 
     def extract_text(self, request: OCRRequest, *, capture: ScreenCaptureResult | None = None) -> OCRResult:
-        candidates = self._candidate_providers(request.provider_name)
+        if request.metadata.get("strict_provider") and request.provider_name:
+            strict_provider = self._registry.get(request.provider_name)
+            candidates = [strict_provider] if strict_provider is not None else []
+        else:
+            candidates = self._candidate_providers(request.provider_name)
         if not candidates:
             raise CapabilityUnavailableError("no ocr providers available", component="vision_runtime")
         last_error: Exception | None = None

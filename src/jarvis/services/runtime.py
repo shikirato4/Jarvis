@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from jarvis.actions.router import ActionRouter
+from jarvis.action_executor import ActionExecutor
+from jarvis.agent_runtime import AgentController, AgentRunRequest
 from jarvis.autonomy.base import MissionApprovalRequest, MissionControlActionRequest, MissionPlanRequest, MissionRequest
 from jarvis.autonomy.service import AutonomyService
 from jarvis.automation.service import AutomationDefinition, AutomationService
@@ -72,6 +74,8 @@ class JarvisRuntimeService(RuntimeServiceContract):
         state_manager: RuntimeStateManager,
         task_router: TaskRouter,
         action_router: ActionRouter,
+        action_executor: ActionExecutor,
+        agent_controller: AgentController,
         tool_registry: ToolRegistry,
         provider_registry: ProviderRegistry,
         model_catalog: ModelCatalog,
@@ -104,6 +108,8 @@ class JarvisRuntimeService(RuntimeServiceContract):
         self._state_manager = state_manager
         self._task_router = task_router
         self._action_router = action_router
+        self._action_executor = action_executor
+        self._agent_controller = agent_controller
         self._tool_registry = tool_registry
         self._provider_registry = provider_registry
         self._model_catalog = model_catalog
@@ -186,9 +192,35 @@ class JarvisRuntimeService(RuntimeServiceContract):
         self._ensure_started()
         return self._model_service.infer(ModelRequest.model_validate(request))
 
-    def stream_model(self, request: ModelRequest | dict[str, Any], *, cancel_check=None):
+    def agent_run(self, request: AgentRunRequest | dict[str, Any]):
         self._ensure_started()
-        yield from self._model_service.stream(ModelRequest.model_validate(request), cancel_check=cancel_check)
+        validated = AgentRunRequest.model_validate(request)
+        if validated.max_steps == AgentRunRequest.model_fields["max_steps"].default:
+            validated = validated.model_copy(
+                update={"max_steps": self._settings.agent_max_steps}
+            )
+        if (
+            validated.timeout_seconds
+            == AgentRunRequest.model_fields["timeout_seconds"].default
+        ):
+            validated = validated.model_copy(
+                update={"timeout_seconds": self._settings.agent_timeout_seconds}
+            )
+        return self._agent_controller.run(validated)
+
+    def stream_model(
+        self,
+        request: ModelRequest | dict[str, Any],
+        *,
+        cancel_check=None,
+        execution_context=None,
+    ):
+        self._ensure_started()
+        yield from self._model_service.stream(
+            ModelRequest.model_validate(request),
+            cancel_check=cancel_check,
+            execution_context=execution_context,
+        )
 
     def model_health(self):
         self._ensure_started()
@@ -237,6 +269,18 @@ class JarvisRuntimeService(RuntimeServiceContract):
     def indexing_reindex(self, request: IndexRunRequest | dict[str, Any]):
         self._ensure_started()
         return self._indexing_runtime_service.reindex(IndexRunRequest.model_validate(request))
+
+    def indexing_pause(self) -> dict[str, object]:
+        self._ensure_started()
+        return self._indexing_runtime_service.pause()
+
+    def indexing_resume(self) -> dict[str, object]:
+        self._ensure_started()
+        return self._indexing_runtime_service.resume()
+
+    def indexing_cancel_pending(self) -> dict[str, object]:
+        self._ensure_started()
+        return self._indexing_runtime_service.cancel_pending()
 
     def indexing_add_source(self, request: IndexSourceCreateRequest | dict[str, Any]):
         self._ensure_started()
@@ -707,6 +751,13 @@ class JarvisRuntimeService(RuntimeServiceContract):
     def voice_speak(self, text: str):
         self._ensure_started()
         return self._voice_runtime_service.speak(text)
+
+    def voice_wait_for_speech(self, correlation_id: str, timeout_seconds: float):
+        self._ensure_started()
+        return self._voice_runtime_service.wait_for_speech(
+            correlation_id,
+            timeout_seconds=timeout_seconds,
+        )
 
     def voice_dictate(self, request: VoiceSessionRequest | dict[str, Any]):
         self._ensure_started()

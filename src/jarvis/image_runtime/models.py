@@ -67,7 +67,9 @@ class ImageGenerationJob(JarvisBaseModel):
     cfg: float
     seed: int | None = None
     status: ImageJobStatus = ImageJobStatus.PENDING
-    progress: float = 0.0
+    progress: float | None = None
+    current_step: int | None = None
+    total_steps: int | None = None
     output_paths: list[Path] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=utcnow)
     completed_at: datetime | None = None

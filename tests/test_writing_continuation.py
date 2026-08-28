@@ -31,7 +31,6 @@ def test_writing_continuation_uses_phase_specific_ui_write_timeout(tmp_path) -> 
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         ui_watchdog_timeout_ms=500,
         writing_ui_write_timeout_ms=3_000,
@@ -74,7 +73,6 @@ def test_writing_timeout_reports_generation_phase_clearly(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         writing_generation_timeout_ms=20,
     )
@@ -105,7 +103,6 @@ def test_writing_timeout_reports_ui_write_phase_clearly(tmp_path) -> None:
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
-        ollama_enabled=False,
         ui_backend_kind="in_memory",
         writing_ui_write_timeout_ms=20,
     )

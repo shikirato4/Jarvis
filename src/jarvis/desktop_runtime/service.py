@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path
 from threading import Event, Lock, RLock, Timer
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
 from jarvis.code_agent_runtime import CodeAgentRuntimeService
+from jarvis.attachments import enrich_model_request
+from jarvis.attachments.pipeline import ProcessingMode
+from jarvis.conversation_context import (
+    ConversationContextBuilder,
+    context_fragments_from_retrieved_context,
+)
 from jarvis.environment import detect_environment
 from .actions import DesktopQuickActionExecutor, build_quick_actions
 from .base import DesktopChatMessage, DesktopPanelSnapshot, DesktopShellState, DesktopVoiceState
@@ -16,14 +23,23 @@ from .chat import DesktopChatEngine
 from .panels import DesktopPanelComposer
 from .voice import DesktopVoiceController
 from jarvis.identity import sanitize_assistant_identity
-from jarvis.ollama_diagnostics import classify_local_model_error, local_model_failure_message
+from jarvis.image_runtime.presentation import image_job_content, reconcile_image_job_message
+from jarvis.models_runtime.errors import (
+    classify_provider_failure,
+    provider_failure_message,
+)
+from jarvis.models_runtime.nemotron_identity import local_model_policy_description
+from jarvis.models_runtime.hybrid import RequestExecutionContext
+from jarvis.models_runtime.base import ModelMessage, ModelRequest
+from jarvis.memory_semantic.base import SemanticSearchQuery
+from jarvis.local_runtime import LocalLaunchProfile, LocalRuntimeIncompatibleError
 from jarvis.services import (
     summarize_autonomy_view,
     summarize_research_task,
     summarize_system_operation,
     summarize_writing_receipt,
 )
-from jarvis.web_search import build_web_search_provider, should_use_web_search
+from jarvis.web_search import build_web_search_provider
 
 
 class DesktopRuntimeService:
@@ -36,7 +52,16 @@ class DesktopRuntimeService:
         self._bridge = DesktopRuntimeBridge(jarvis_app)
         self._panels = DesktopPanelComposer(self._bridge)
         self._actions = DesktopQuickActionExecutor(self._bridge)
-        self._chat = DesktopChatEngine(self._bridge, self._panels, self._actions, jarvis_app.settings)
+        event_sink = getattr(getattr(jarvis_app, "event_bus", None), "publish", None)
+        self._context_builder = ConversationContextBuilder(event_sink=event_sink)
+        self._chat = DesktopChatEngine(
+            self._bridge,
+            self._panels,
+            self._actions,
+            jarvis_app.settings,
+            context_builder=self._context_builder,
+            agent_controller=jarvis_app.agent_controller,
+        )
         self._voice = DesktopVoiceController(
             jarvis_app.voice_runtime_service,
             jarvis_app.settings,
@@ -58,6 +83,7 @@ class DesktopRuntimeService:
                 content="JARVIS desktop interface online. All runtimes remain delegated to the existing backend.",
             )
         ]
+        self._model_context_by_message_id: dict[str, ModelMessage] = {}
         self._busy = False
         self._activity_label = "STARTING" if not jarvis_app.started else "IDLE"
         self._performance: dict[str, float | str | int | None] = {
@@ -83,9 +109,13 @@ class DesktopRuntimeService:
             "action": "none",
             "summary": "Code Agent listo. Genera patches revisables; nada se aplica automaticamente.",
         }
+        self._attachment_request_id = f"desktop-draft-{uuid4()}"
 
     def is_ready(self) -> bool:
         return bool(self._jarvis.started)
+
+    def activity_snapshot(self):
+        return self._jarvis.runtime_activity_store.snapshot()
 
     def set_environment_status(self, env_status) -> None:
         self._env_status = env_status
@@ -120,8 +150,14 @@ class DesktopRuntimeService:
             state = self._loading_shell_state()
         else:
             snapshot = self._jarvis.runtime_service.snapshot(include_history=True)
-            conversation = self._conversation_snapshot()
             dev_runtime = self._dev_runtime_state()
+            image_runtime = dev_runtime.get("image_runtime") if isinstance(dev_runtime.get("image_runtime"), dict) else {}
+            latest_image_job = image_runtime.get("latest_job") if isinstance(image_runtime.get("latest_job"), dict) else {}
+            if latest_image_job:
+                with self._state_lock:
+                    reconcile_image_job_message(self._conversation, latest_image_job)
+            conversation = self._conversation_snapshot()
+            llm_status = self.llm_status()
             state = DesktopShellState(
                 app_name=snapshot.app_name,
                 environment=snapshot.environment,
@@ -132,8 +168,11 @@ class DesktopRuntimeService:
                 panel_snapshot=self._panel_snapshot(force=force),
                 conversation=conversation,
                 voice=self._voice_status(force=force),
-                llm_mode=getattr(self, "_env_status", None).recommended_mode if getattr(self, "_env_status", None) else "disabled",
-                llm_provider=getattr(self, "_env_status", None).recommended_local_provider or "none" if getattr(self, "_env_status", None) else "none",
+                llm_mode=llm_status["selected_mode"],
+                llm_provider=llm_status["active_provider"] or "none",
+                llm_model=llm_status["active_model"],
+                llm_status=llm_status,
+                pending_attachments=self.pending_attachments(),
                 dev_runtime=dev_runtime,
             )
         elapsed_ms = (perf_counter() - started_at) * 1000
@@ -142,8 +181,244 @@ class DesktopRuntimeService:
             state.performance = dict(self._performance)
         return state
 
+    def llm_status(self) -> dict[str, Any]:
+        selection = self._jarvis.model_service.provider_selection()
+        return {
+            "selected_mode": selection.selected_mode.value,
+            "active_provider": selection.active_provider,
+            "request_provider": selection.request_provider,
+            "active_model": selection.active_model,
+            "provider_status": selection.provider_status.model_dump(mode="json"),
+            "fallback_reason": selection.fallback_reason,
+            "persistence_warning": selection.persistence_warning,
+            "capabilities": selection.capabilities.model_dump(mode="json"),
+            "key_status": self._jarvis.nvidia_secret_manager.status().model_dump(mode="json"),
+        }
+
+    def set_llm_mode(self, mode: str) -> dict[str, Any]:
+        self._jarvis.model_service.set_llm_mode(mode)
+        return self.llm_status()
+
+    def save_nvidia_api_key(self, value: str) -> dict[str, Any]:
+        return self._jarvis.nvidia_secret_manager.save(value).model_dump(mode="json")
+
+    def delete_nvidia_api_key(self) -> dict[str, Any]:
+        return self._jarvis.nvidia_secret_manager.delete().model_dump(mode="json")
+
+    def test_nvidia_connection(self) -> dict[str, Any]:
+        provider = self._jarvis.provider_registry.get("nvidia_nim")
+        return provider.status_check().model_dump(mode="json")
+
+    def local_runtime_status(self) -> dict[str, Any]:
+        diagnostic = self._jarvis.local_hardware_diagnostics.inspect(
+            self._jarvis.settings.local_llm_base_url
+        )
+        profile = LocalLaunchProfile.from_settings(self._jarvis.settings)
+        command: tuple[str, ...] | None = None
+        launch_error: str | None = None
+        try:
+            command = self._jarvis.local_runtime_service.build_launch_command(
+                "vllm",
+                profile,
+                diagnostic,
+            )
+        except LocalRuntimeIncompatibleError as exc:
+            launch_error = str(exc)
+        return {
+            "diagnostic": diagnostic.model_dump(mode="json"),
+            "profile": profile.model_dump(mode="json"),
+            "launch_command": list(command) if command is not None else None,
+            "launch_error": launch_error,
+        }
+
+    def add_attachment_paths(self, paths: list[str | Path]) -> list[dict[str, Any]]:
+        return [
+            self._jarvis.attachment_service.add_path(self._attachment_request_id, path).model_dump(mode="json")
+            for path in paths
+        ]
+
+    def add_attachment_bytes(
+        self,
+        name: str,
+        data: bytes,
+        claimed_mime: str | None = None,
+    ) -> dict[str, Any]:
+        return self._jarvis.attachment_service.add_bytes(
+            self._attachment_request_id,
+            name,
+            data,
+            claimed_mime,
+        ).model_dump(mode="json")
+
+    def pending_attachments(self) -> list[dict[str, Any]]:
+        return [
+            item.model_dump(mode="json")
+            for item in self._jarvis.attachment_service.list_for_request(self._attachment_request_id)
+        ]
+
+    def cancel_attachment(self, attachment_id: str) -> dict[str, Any]:
+        return self._jarvis.attachment_service.cancel(
+            attachment_id,
+            request_id=self._attachment_request_id,
+        ).model_dump(mode="json")
+
+    def retry_attachment(self, attachment_id: str) -> dict[str, Any]:
+        return self._jarvis.attachment_service.retry(
+            attachment_id,
+            request_id=self._attachment_request_id,
+        ).model_dump(mode="json")
+
+    def remove_attachment(self, attachment_id: str) -> None:
+        self._jarvis.attachment_service.remove(
+            attachment_id,
+            request_id=self._attachment_request_id,
+        )
+
+    def _prepare_model_request_attachments(self, request, attachment_ids: list[str]):
+        requested_ids = list(dict.fromkeys(str(item) for item in attachment_ids if str(item)))
+        if not requested_ids:
+            return request
+        descriptors_by_id = {
+            item.id: item
+            for item in self._jarvis.attachment_service.list_for_request(
+                self._attachment_request_id
+            )
+        }
+        missing = [attachment_id for attachment_id in requested_ids if attachment_id not in descriptors_by_id]
+        if missing:
+            raise ValueError("Uno o más adjuntos ya no pertenecen a la solicitud actual.")
+        descriptors = [descriptors_by_id[attachment_id] for attachment_id in requested_ids]
+        mode = ProcessingMode(self._jarvis.model_service.provider_selection().selected_mode.value)
+        capabilities = self._attachment_provider_capabilities(mode)
+        prepared = self._jarvis.multimodal_pipeline.prepare(
+            descriptors,
+            request_id=self._attachment_request_id,
+            mode=mode,
+            capabilities=capabilities,
+        )
+        return enrich_model_request(
+            request,
+            prepared,
+            attachment_service=self._jarvis.attachment_service,
+            request_id=self._attachment_request_id,
+            context_char_budget=(
+                self._jarvis.settings.conversation_context_attachment_char_budget
+            ),
+        )
+
+    def _attachment_request_transform(self, attachment_ids: list[str]):
+        def transform(request):
+            return self._prepare_model_request_attachments(request, attachment_ids)
+
+        return transform
+
+    def _attachment_provider_capabilities(self, mode: ProcessingMode):
+        local_provider = self._jarvis.provider_registry.get("nemotron_omni_local")
+        nvidia_provider = self._jarvis.provider_registry.get("nvidia_nim")
+        if mode is ProcessingMode.LOCAL:
+            return local_provider.capabilities
+        if mode is ProcessingMode.NVIDIA_API:
+            return nvidia_provider.capabilities
+        cloud_status = nvidia_provider.status_check()
+        return nvidia_provider.capabilities if cloud_status.healthy else local_provider.capabilities
+
+    def _remove_completed_attachments(self, attachment_ids: list[str]) -> None:
+        for attachment_id in dict.fromkeys(attachment_ids):
+            try:
+                self._jarvis.attachment_service.remove(
+                    attachment_id,
+                    request_id=self._attachment_request_id,
+                )
+            except (KeyError, ValueError, OSError):
+                continue
+        if not self._jarvis.attachment_service.list_for_request(self._attachment_request_id):
+            self._attachment_request_id = f"desktop-draft-{uuid4()}"
+
     def refresh(self) -> DesktopShellState:
         return self.shell_state()
+
+    def _model_history_snapshot(self) -> list[ModelMessage]:
+        with self._state_lock:
+            conversation = tuple(self._conversation)
+            private_context = dict(self._model_context_by_message_id)
+        history: list[ModelMessage] = []
+        for message in conversation:
+            if message.role not in {"user", "assistant"}:
+                continue
+            if message.role == "assistant" and message.metadata.get("streaming"):
+                status = str(message.metadata.get("status") or "")
+                if status not in {"completed", "cancelled", "error"}:
+                    continue
+            private_message = private_context.get(message.message_id)
+            if private_message is not None:
+                model_message = private_message.model_copy(deep=True)
+            else:
+                model_message = ModelMessage(
+                    role=message.role,
+                    content=message.content,
+                )
+            metadata = dict(model_message.metadata)
+            metadata["message_id"] = message.message_id
+            history.append(model_message.model_copy(update={"metadata": metadata}))
+        return history
+
+    def _remember_finalized_user_context(
+        self,
+        message_id: str,
+        request: ModelRequest,
+    ) -> None:
+        current = next(
+            (message for message in reversed(request.messages) if message.role == "user"),
+            None,
+        )
+        if current is None:
+            return
+        metadata = dict(current.metadata)
+        metadata["message_id"] = message_id
+        with self._state_lock:
+            self._model_context_by_message_id[message_id] = current.model_copy(
+                update={"metadata": metadata},
+                deep=True,
+            )
+            live_ids = {message.message_id for message in self._conversation}
+            stale_ids = [
+                stored_id
+                for stored_id in self._model_context_by_message_id
+                if stored_id not in live_ids
+            ]
+            for stored_id in stale_ids:
+                self._model_context_by_message_id.pop(stored_id, None)
+
+    def _memory_candidates_for(
+        self,
+        text: str,
+        *,
+        correlation_id: str | None,
+    ):
+        settings = self._jarvis.settings
+        if not settings.embeddings_enabled or settings.conversation_context_memory_top_k <= 0:
+            return []
+        try:
+            context = self._jarvis.semantic_memory_service.retrieve_context(
+                SemanticSearchQuery(
+                    query=text,
+                    top_k=settings.conversation_context_memory_top_k,
+                    correlation_id=correlation_id,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._logger.warning(
+                "conversation_memory_retrieval_failed",
+                extra={
+                    "correlation_id": correlation_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return []
+        return context_fragments_from_retrieved_context(
+            context,
+            limit=settings.conversation_context_memory_top_k,
+        )
 
     def send_chat(self, text: str, *, source: str = "text", correlation_id: str | None = None, metadata: dict | None = None):
         self.start_backend()
@@ -154,6 +429,11 @@ class DesktopRuntimeService:
                 self._logger.info("desktop_chat_deduplicated_completed", extra={"correlation_id": correlation_id, "source": source})
                 return cached
         queued_at = perf_counter()
+        history = self._model_history_snapshot()
+        memory_candidates = self._memory_candidates_for(
+            text,
+            correlation_id=correlation_id,
+        )
         user_message = DesktopChatMessage(
             message_id=str(uuid4()),
             role="user",
@@ -166,8 +446,30 @@ class DesktopRuntimeService:
         self._set_busy_state(True, "PROCESSING")
         self._invalidate_caches()
         started_at = perf_counter()
+        attachment_ids = list((metadata or {}).get("attachment_ids") or [])
+        request_transform = None
+        if attachment_ids:
+            request_transform = self._attachment_request_transform(attachment_ids)
+        def request_finalized(request: ModelRequest) -> None:
+            self._remember_finalized_user_context(user_message.message_id, request)
         with self._request_lock:
-            response = self._chat.handle(text)
+            if request_transform is None:
+                response = self._chat.handle(
+                    text,
+                    history=history,
+                    memory_candidates=memory_candidates,
+                    correlation_id=correlation_id,
+                    request_finalized=request_finalized,
+                )
+            else:
+                response = self._chat.handle(
+                    text,
+                    request_transform=request_transform,
+                    history=history,
+                    memory_candidates=memory_candidates,
+                    correlation_id=correlation_id,
+                    request_finalized=request_finalized,
+                )
         elapsed_ms = (perf_counter() - started_at) * 1000
         response.message.metadata.setdefault("source", source)
         if correlation_id is not None:
@@ -199,6 +501,8 @@ class DesktopRuntimeService:
                 self._voice.speak_literal(response.spoken_content or response.message.content)
             else:
                 self._voice.speak_response(response.spoken_content or response.message.content)
+        if attachment_ids and response.raw_result.get("ok", True) is not False:
+            self._remove_completed_attachments(attachment_ids)
         return response
 
     def send_chat_async(self, text: str, *, source: str = "text", correlation_id: str | None = None, metadata: dict | None = None) -> Future:
@@ -214,9 +518,16 @@ class DesktopRuntimeService:
                 self._logger.info("desktop_chat_deduplicated_inflight", extra={"correlation_id": request_id, "source": source})
                 return existing
         use_stream = bool((metadata or {}).get("stream"))
+        stream_cancel_event: Event | None = None
         future: Future = Future()
         with self._state_lock:
             self._request_futures[request_id] = future
+            if use_stream:
+                if self._active_stream_cancel is not None:
+                    self._active_stream_cancel.set()
+                stream_cancel_event = Event()
+                self._active_stream_id = request_id
+                self._active_stream_cancel = stream_cancel_event
         self._set_busy_state(True, "STREAMING" if use_stream else "PROCESSING")
 
         def _cleanup(*, key: str = request_id) -> None:
@@ -241,7 +552,14 @@ class DesktopRuntimeService:
                 _cleanup()
                 return
             if use_stream:
-                worker_future = self._executor.submit(self.send_chat_streaming, text, source=source, correlation_id=request_id, metadata=metadata)
+                worker_future = self._executor.submit(
+                    self.send_chat_streaming,
+                    text,
+                    source=source,
+                    correlation_id=request_id,
+                    metadata=metadata,
+                    _admitted_cancel_event=stream_cancel_event,
+                )
             else:
                 worker_future = self._executor.submit(self.send_chat, text, source=source, correlation_id=request_id, metadata=metadata)
             worker_future.add_done_callback(_copy_result)
@@ -249,15 +567,29 @@ class DesktopRuntimeService:
         Timer(0.01, _start_worker).start()
         return future
 
-    def send_chat_streaming(self, text: str, *, source: str = "text", correlation_id: str | None = None, metadata: dict | None = None):
+    def send_chat_streaming(
+        self,
+        text: str,
+        *,
+        source: str = "text",
+        correlation_id: str | None = None,
+        metadata: dict | None = None,
+        _admitted_cancel_event: Event | None = None,
+    ):
         self.start_backend()
         correlation_id = correlation_id or f"desktop-stream-{uuid4().hex[:12]}"
-        cancel_event = Event()
-        with self._state_lock:
-            if self._active_stream_cancel is not None:
-                self._active_stream_cancel.set()
-            self._active_stream_id = correlation_id
-            self._active_stream_cancel = cancel_event
+        history = self._model_history_snapshot()
+        memory_candidates = self._memory_candidates_for(
+            text,
+            correlation_id=correlation_id,
+        )
+        cancel_event = _admitted_cancel_event or Event()
+        if _admitted_cancel_event is None:
+            with self._state_lock:
+                if self._active_stream_cancel is not None:
+                    self._active_stream_cancel.set()
+                self._active_stream_id = correlation_id
+                self._active_stream_cancel = cancel_event
         queued_at = perf_counter()
         user_message = DesktopChatMessage(
             message_id=str(uuid4()),
@@ -268,7 +600,7 @@ class DesktopRuntimeService:
         assistant_message = DesktopChatMessage(
             message_id=str(uuid4()),
             role="assistant",
-            content="Pensando localmente con gpt-oss...",
+            content="Seleccionando el proveedor Nemotron para esta solicitud...",
             metadata={"source": source, "correlation_id": correlation_id, "streaming": True, "status": "thinking"},
         )
         with self._state_lock:
@@ -281,17 +613,39 @@ class DesktopRuntimeService:
         full_text = ""
         raw_result: dict[str, Any] = {"status": "streaming", "streaming": True}
         spoken_content: str | None = None
+        attachment_ids = list((metadata or {}).get("attachment_ids") or [])
+        execution_context = RequestExecutionContext(request_id=correlation_id)
+        for attachment_id in attachment_ids:
+            execution_context.register_file(str(attachment_id))
         try:
             with self._request_lock:
-                if should_use_web_search(text, mode="auto"):
-                    self._replace_conversation_message(
-                        assistant_message.message_id,
-                        "Buscando fuentes con Brave...",
-                        metadata={"streaming": True, "status": "searching_web"},
-                    )
                 prepared = self._chat.prepare_streaming_request(text.strip())
                 if prepared is None:
-                    response = self._chat.handle(text)
+                    request_transform = None
+                    if attachment_ids:
+                        request_transform = self._attachment_request_transform(attachment_ids)
+                    def request_finalized(request: ModelRequest) -> None:
+                        self._remember_finalized_user_context(
+                            user_message.message_id,
+                            request,
+                        )
+                    if request_transform is None:
+                        response = self._chat.handle(
+                            text,
+                            history=history,
+                            memory_candidates=memory_candidates,
+                            correlation_id=correlation_id,
+                            request_finalized=request_finalized,
+                        )
+                    else:
+                        response = self._chat.handle(
+                            text,
+                            request_transform=request_transform,
+                            history=history,
+                            memory_candidates=memory_candidates,
+                            correlation_id=correlation_id,
+                            request_finalized=request_finalized,
+                        )
                     raw_result = response.raw_result
                     spoken_content = response.spoken_content or response.message.content
                     self._replace_conversation_message(
@@ -307,23 +661,52 @@ class DesktopRuntimeService:
                     spoken_content = response.spoken_content or response.message.content
                     return response
                 request, web_result = prepared
+                if attachment_ids:
+                    request = self._prepare_model_request_attachments(request, attachment_ids)
+                    raw_result["attachments"] = list(
+                        request.metadata.get("attachment_routes") or []
+                    )
                 if web_result is not None:
                     self._replace_conversation_message(
                         assistant_message.message_id,
-                        f"Encontre {len(web_result.hits)} fuentes. Redactando localmente con gpt-oss...",
+                        f"Encontré {len(web_result.hits)} fuentes. Redactando con el proveedor asignado...",
                         metadata={"streaming": True, "status": "synthesizing", "web_search": web_result.model_dump(mode="json")},
                     )
                     raw_result["web_search"] = web_result.model_dump(mode="json")
+                request = request.model_copy(update={"correlation_id": correlation_id})
+                request = self._chat.finalize_model_request(
+                    request,
+                    history=history,
+                    memory_candidates=memory_candidates,
+                )
+                self._remember_finalized_user_context(
+                    user_message.message_id,
+                    request,
+                )
                 chunks = 0
                 first_token_ms: float | None = None
-                for chunk in self._jarvis.runtime_service.stream_model(request, cancel_check=cancel_event.is_set):
+                for chunk in self._jarvis.runtime_service.stream_model(
+                    request,
+                    cancel_check=cancel_event.is_set,
+                    execution_context=execution_context,
+                ):
                     if not self._is_active_stream(correlation_id) or cancel_event.is_set():
                         raw_result["status"] = "cancelled"
                         return self._stream_response(assistant_message, "", raw_result, cancelled=True)
                     if chunk.error:
-                        reason = classify_local_model_error(Exception(chunk.error))
-                        message = local_model_failure_message(reason, web_sources=len(getattr(web_result, "hits", []) or []))
-                        raw_result.update({"status": "error", "error": reason})
+                        failure = classify_provider_failure(chunk.error)
+                        message = provider_failure_message(
+                            failure,
+                            selected_mode=self.llm_status()["selected_mode"],
+                            partial_output=full_text or None,
+                        )
+                        raw_result.update(
+                            {
+                                "status": "error",
+                                "error": failure.detail,
+                                "error_code": failure.code,
+                            }
+                        )
                         self._replace_conversation_message(assistant_message.message_id, message, metadata={"streaming": False, "status": "error", "result": raw_result})
                         return self._stream_response(assistant_message, message, raw_result)
                     if chunk.text:
@@ -354,23 +737,41 @@ class DesktopRuntimeService:
             self._replace_conversation_message(assistant_message.message_id, final_text, metadata={"streaming": False, "status": "completed", "result": raw_result})
             return self._stream_response(assistant_message, final_text, raw_result)
         except Exception as exc:  # noqa: BLE001
-            reason = classify_local_model_error(exc)
-            message = local_model_failure_message(reason, web_sources=0)
-            raw_result.update({"status": "error", "error": reason})
+            failure = classify_provider_failure(exc)
+            message = provider_failure_message(
+                failure,
+                selected_mode=self.llm_status()["selected_mode"],
+                partial_output=full_text or None,
+            )
+            raw_result.update(
+                {
+                    "status": "error",
+                    "error": failure.detail,
+                    "error_code": failure.code,
+                }
+            )
             self._replace_conversation_message(assistant_message.message_id, message, metadata={"streaming": False, "status": "error", "result": raw_result})
             return self._stream_response(assistant_message, message, raw_result)
         finally:
             elapsed_ms = (perf_counter() - started_at) * 1000
+            released_active_stream = False
             with self._state_lock:
                 self._performance["last_request_ms"] = round(elapsed_ms, 2)
                 self._performance["model_latency_ms"] = raw_result.get("latency_ms")
                 self._performance["requests_completed"] = int(self._performance["requests_completed"] or 0) + 1
-                if self._active_stream_id == correlation_id:
+                if (
+                    self._active_stream_id == correlation_id
+                    and self._active_stream_cancel is cancel_event
+                ):
                     self._active_stream_id = None
                     self._active_stream_cancel = None
+                    released_active_stream = True
                 self._completed_chat_requests[correlation_id] = self._stream_response(assistant_message, spoken_content or full_text, raw_result)
-            self._set_busy_state(False, "IDLE")
+            if released_active_stream:
+                self._set_busy_state(False, "IDLE")
             if raw_result.get("status") == "completed" and spoken_content:
+                if attachment_ids:
+                    self._remove_completed_attachments(attachment_ids)
                 self._voice.speak_response(spoken_content)
 
     def _replace_conversation_message(self, message_id: str, content: str, *, metadata: dict[str, Any] | None = None) -> None:
@@ -587,10 +988,7 @@ class DesktopRuntimeService:
                 raise RuntimeError(built.reason)
             job = self._jarvis.runtime_service.image_generate(built.request)
             result = job.model_dump(mode="json")
-            summary = (
-                "Estoy generando una imagen local con JuggernautXL. "
-                "La primera carga puede tardar varios minutos; no uso Fooocus ni internet para generar."
-            )
+            summary = image_job_content(result)
         except Exception as exc:  # noqa: BLE001
             self._logger.warning("desktop_image_generate_failed", extra={"exception_type": type(exc).__name__, "exception_message": str(exc)})
             result = {"status": "failed", "message": self._sanitize_dev_value(str(exc)), "error_type": type(exc).__name__}
@@ -603,7 +1001,12 @@ class DesktopRuntimeService:
                     message_id=str(uuid4()),
                     role="assistant",
                     content=summary,
-                    metadata={"image_action": "generate", "result": self._sanitize_dev_value(result)},
+                    metadata={
+                        "image_action": "generate",
+                        "image_job_id": result.get("job_id"),
+                        "image_job_status": result.get("status"),
+                        "result": self._sanitize_dev_value(result),
+                    },
                 )
             )
             self._performance["last_quick_action_ms"] = elapsed_ms
@@ -785,37 +1188,41 @@ class DesktopRuntimeService:
 
     def _dev_runtime_state(self) -> dict[str, Any]:
         now = perf_counter()
+        hybrid_status = self.llm_status()
+        env_status = getattr(self, "_env_status", None)
+        active_provider = hybrid_status.get("active_provider") or "pending"
+        active_model = hybrid_status.get("active_model") or self._jarvis.settings.local_llm_model
         with self._state_lock:
             if self._dev_runtime_cache is not None and (now - self._dev_runtime_cached_at) < self._DEV_RUNTIME_CACHE_TTL_SECONDS:
                 return dict(self._dev_runtime_cache)
             if self._active_stream_id is not None or (self._busy and self._activity_label == "STREAMING"):
                 return {
-                    "llm_mode": getattr(self, "_env_status", None).recommended_mode if getattr(self, "_env_status", None) else "disabled",
-                    "llm_provider": getattr(self, "_env_status", None).recommended_local_provider if getattr(self, "_env_status", None) else "none",
-                    "llm_model": getattr(self, "_env_status", None).recommended_local_model if getattr(self, "_env_status", None) else None,
-                    "ollama_available": bool(getattr(self, "_env_status", None).ollama.available) if getattr(self, "_env_status", None) else False,
+                    "llm_mode": hybrid_status["selected_mode"],
+                    "llm_provider": active_provider,
+                    "llm_model": active_model,
+                    "local_endpoint_available": bool(env_status.local_endpoint.available) if env_status else False,
                     "status": "streaming",
                     "last_result": dict(self._last_dev_result),
                 }
-        env_status = getattr(self, "_env_status", None)
         web_status = build_web_search_provider().status()
         try:
             image_status = self._jarvis.runtime_service.image_status()
         except Exception as exc:  # noqa: BLE001
             image_status = {"enabled": False, "status": "unavailable", "message": str(exc)}
         state = {
-            "llm_mode": env_status.recommended_mode if env_status else "disabled",
-            "llm_provider": env_status.recommended_local_provider if env_status else "none",
-            "llm_model": env_status.recommended_local_model if env_status else None,
-            "ollama_available": bool(env_status.ollama.available) if env_status else False,
+            "llm_mode": hybrid_status["selected_mode"],
+            "llm_provider": active_provider,
+            "llm_model": active_model,
+            "local_endpoint_available": bool(env_status.local_endpoint.available) if env_status else False,
             "web_search": web_status.model_dump(mode="json"),
             "image_runtime": image_status,
             "policy": {
                 "identity": "Jarvis",
                 "openai": "blocked",
                 "gemini": "blocked",
-                "online_llm": "disabled",
-                "online_search": "Brave + local Ollama",
+                "nvidia_nim": "enabled_by_selected_mode",
+                "local_llm": local_model_policy_description(),
+                "online_search": "Brave + assigned Nemotron provider",
             },
             "last_result": dict(self._last_dev_result),
         }
@@ -830,7 +1237,7 @@ class DesktopRuntimeService:
         task = str(payload.get("task") or "").strip()
         patch_id = str(payload.get("patch_id") or "").strip()
         llm_mode = str(payload.get("llm_mode") or "auto").strip() or "auto"
-        allow_online = llm_mode == "online"
+        allow_online = llm_mode in {"auto", "nvidia_api"}
         if action_id == "plan":
             if not task:
                 return {"status": "blocked", "message": "Escribe una tarea para planear."}
@@ -871,24 +1278,31 @@ class DesktopRuntimeService:
         if action_id == "memory":
             return {"status": "ok", "summary": code.memory_summary(max_chars=2500)}
         if action_id == "doctor":
-            env = detect_environment()
-            llm = code.llm_status()
+            env = detect_environment(
+                local_base_url=self._jarvis.settings.local_llm_base_url,
+                local_model=self._jarvis.settings.local_llm_model,
+                nvidia_configured=self._jarvis.nvidia_secret_manager.status().configured,
+            )
+            code_llm = code.llm_status()
+            hybrid_llm = self.llm_status()
             web_status = build_web_search_provider().status()
             return {
                 "status": "ok",
                 "internet_available": env.internet_available,
-                "ollama_available": env.ollama.available,
-                "ollama_models": env.ollama.models[:8],
+                "local_endpoint_available": env.local_endpoint.available,
+                "local_endpoint_models": env.local_endpoint.models[:8],
                 "recommended_mode": env.recommended_mode,
                 "recommended_local_provider": env.recommended_local_provider,
                 "recommended_local_model": env.recommended_local_model,
-                "llm": llm,
+                "llm": code_llm,
+                "hybrid_llm": hybrid_llm,
                 "web_search": web_status.model_dump(mode="json"),
                 "policy": {
                     "openai": "blocked",
                     "gemini": "blocked",
-                    "online_llm": "disabled",
-                    "online_search": "Brave + local Ollama",
+                    "nvidia_nim": "enabled_by_selected_mode",
+                    "local_llm": local_model_policy_description(),
+                    "online_search": "Brave + assigned Nemotron provider",
                 },
                 "warnings": env.warnings,
             }

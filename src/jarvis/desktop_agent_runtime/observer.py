@@ -152,17 +152,27 @@ class DesktopAgentObserver:
                     errors.append(f"{mode}:{exc.component}:{exc.code}:{exc.message}")
                 else:
                     errors.append(f"{mode}:{type(exc).__name__}:{exc}")
+                # A sensitive-window refusal is a security boundary, not a
+                # recoverable backend failure. Falling back from the active
+                # window to a full-screen capture could expose the same
+                # protected pixels through a broader target.
+                if _looks_sensitive_error(errors[-1]):
+                    return self._sensitive_window_observation(errors)
         joined = " | ".join(errors) if errors else "no capture backend available"
         if any(_looks_sensitive_error(error) for error in errors):
-            return (
-                SimpleNamespace(
-                    data={"summary": "No pude capturar esa ventana porque parece sensible o protegida."},
-                    awareness_result=None,
-                ),
-                "degraded:sensitive_window",
-                errors,
-            )
+            return self._sensitive_window_observation(errors)
         raise RuntimeError(f"desktop observation failed: {joined}")
+
+    @staticmethod
+    def _sensitive_window_observation(errors: list[str]):
+        return (
+            SimpleNamespace(
+                data={"summary": "No pude capturar esa ventana porque parece sensible o protegida."},
+                awareness_result=None,
+            ),
+            "degraded:sensitive_window",
+            errors,
+        )
 
     @staticmethod
     def _derive_context_signals(

@@ -49,7 +49,6 @@ def _build_app(tmp_path: Path, workspace: Path | None = None):
         data_dir=tmp_path / "runtime",
         workspace_root=workspace,
         research_allowed_roots=(workspace,),
-        ollama_enabled=False,
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
     )

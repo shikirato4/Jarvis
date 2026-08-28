@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from difflib import SequenceMatcher
-from typing import Any
-
 from jarvis.vision_runtime.base import TextLocationRequest, UIAwarenessRequest
 
 from .base import (

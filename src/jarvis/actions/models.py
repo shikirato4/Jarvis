@@ -15,6 +15,12 @@ class ExecutionStatus(StrEnum):
     ROLLED_BACK = "rolled_back"
 
 
+class ActionRisk(StrEnum):
+    SAFE = "safe"
+    SENSITIVE = "sensitive"
+    DESTRUCTIVE = "destructive"
+
+
 class ActionResult(JarvisBaseModel):
     status: ExecutionStatus = ExecutionStatus.SUCCESS
     message: str
