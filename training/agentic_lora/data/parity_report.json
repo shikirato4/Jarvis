@@ -1,0 +1,60 @@
+{
+  "b4_required": "Run text-backbone model instantiation, PEFT target inventory, save/load, and adapter conversion smoke tests before optimizer steps.",
+  "checks": {
+    "chat_template_production_capture": {
+      "pass": true,
+      "sha256": "7f0e529032c25183bcd66c7f238da2d377f43be754a94e2725a58c4e16d2ed67"
+    },
+    "chat_template_upstream_equal": {
+      "note": "False is expected; compiler uses production capture.",
+      "pass": false
+    },
+    "eos_token_id": {
+      "gguf": 248044,
+      "pass": true,
+      "upstream": 248044
+    },
+    "hidden_size": {
+      "gguf": 4096,
+      "pass": true,
+      "upstream": 4096
+    },
+    "im_end_id": {
+      "gguf": 248046,
+      "pass": true,
+      "upstream": 248046
+    },
+    "im_start_id": {
+      "gguf": 248045,
+      "pass": true,
+      "upstream": 248045
+    },
+    "layers": {
+      "gguf": 32,
+      "pass": true,
+      "upstream": 32
+    },
+    "model_family": {
+      "gguf": "qwen35",
+      "pass": true,
+      "upstream": "qwen3_5"
+    },
+    "production_modalities": {
+      "pass": true,
+      "vision": false
+    },
+    "vocabulary_size": {
+      "gguf": 248320,
+      "pass": true,
+      "upstream": 248320
+    }
+  },
+  "material_mismatch": false,
+  "model_id": "Qwen/Qwen3.5-9B",
+  "production_gguf_architecture": "qwen35 text-only GGUF",
+  "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+  "status": "PASS_WITH_CONTROLLED_TEXT_ONLY_OVERRIDE",
+  "template_override": "production_chat_template.jinja",
+  "text_backbone_parity": true,
+  "upstream_wrapper": "Qwen3_5ForConditionalGeneration"
+}

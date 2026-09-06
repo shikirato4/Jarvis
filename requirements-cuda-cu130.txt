@@ -1,0 +1,5 @@
+# NVIDIA CUDA runtime for the local image/voice stack (Python 3.12, Windows).
+# Install this file inside .venv before installing optional voice dependencies.
+--index-url https://download.pytorch.org/whl/cu130
+torch==2.13.0+cu130
+torchvision==0.28.0+cu130

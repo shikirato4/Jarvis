@@ -36,15 +36,16 @@ class DiffusersImageBackend:
             use_safetensors=True,
         )
         if device == "cuda":
-            pipe = pipe.to("cuda")
+            # Keep the denoising path consistently in half precision.  In
+            # particular, do not combine ``to(cuda)`` with CPU offload: the
+            # latter can dispatch individual SDXL components with different
+            # dtypes and leads to Half/Float matmul failures.
+            pipe = pipe.to(device="cuda", dtype=torch_dtype)
+            _normalize_cuda_components(pipe, torch_dtype)
             if hasattr(pipe, "enable_attention_slicing"):
                 pipe.enable_attention_slicing()
             if hasattr(pipe, "enable_vae_slicing"):
                 pipe.enable_vae_slicing()
-            try:
-                pipe.enable_model_cpu_offload()
-            except Exception:  # noqa: BLE001
-                pass
         return pipe
 
     def generate(self, pipeline: object, request: ImageGenerationRequest, output_dir: Path, *, cancel_event: threading.Event, progress_callback=None) -> ImageGenerationResult:
@@ -54,6 +55,22 @@ class DiffusersImageBackend:
         generator = None
         try:
             import torch
+
+            _log_pipeline_dtypes(pipeline, logging.getLogger("jarvis.image_runtime"))
+            # With text prompts and no user-supplied embeddings, Diffusers
+            # creates embeddings/latents internally. Record the dtypes they
+            # are expected to use so a live run is diagnosable without
+            # logging prompt content.
+            unet_dtype = _module_dtype(getattr(pipeline, "unet", None))
+            logging.getLogger("jarvis.image_runtime").info(
+                "image_inference_tensor_dtypes prompt_embeds=%s negative_prompt_embeds=%s "
+                "pooled_prompt_embeds=%s negative_pooled_prompt_embeds=%s latents=%s",
+                _module_dtype(getattr(pipeline, "text_encoder", None)),
+                _module_dtype(getattr(pipeline, "text_encoder", None)),
+                _module_dtype(getattr(pipeline, "text_encoder_2", None)),
+                _module_dtype(getattr(pipeline, "text_encoder_2", None)),
+                unet_dtype,
+            )
 
             if request.seed is not None:
                 generator = torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu").manual_seed(request.seed)
@@ -443,6 +460,42 @@ def _torch_device_and_dtype() -> tuple[str, object | None]:
     except Exception:  # noqa: BLE001
         pass
     return "cpu", None
+
+
+def _module_dtype(module: object) -> object | None:
+    """Return the first parameter dtype without assuming a diffusers class."""
+    try:
+        parameter = next(module.parameters())  # type: ignore[attr-defined]
+    except (AttributeError, StopIteration, TypeError):
+        return None
+    return getattr(parameter, "dtype", None)
+
+
+def _normalize_cuda_components(pipe: object, dtype: object | None) -> None:
+    """Normalize SDXL compute components while preserving VAE upcasting.
+
+    Diffusers intentionally upcasts some VAEs to float32 (``force_upcast``),
+    so only the UNet and text encoders are normalized here.  Prompt/pooled
+    embeddings are then produced in the same dtype as their encoders.
+    """
+    if dtype is None:
+        return
+    for name in ("unet", "text_encoder", "text_encoder_2"):
+        component = getattr(pipe, name, None)
+        if component is not None and hasattr(component, "to"):
+            component.to(dtype=dtype)
+
+
+def _log_pipeline_dtypes(pipe: object, logger: logging.Logger) -> None:
+    """Emit safe, non-content dtype diagnostics immediately before inference."""
+    fields = {
+        "device": getattr(pipe, "_execution_device", None) or getattr(pipe, "device", None),
+        "unet_dtype": _module_dtype(getattr(pipe, "unet", None)),
+        "text_encoder_dtype": _module_dtype(getattr(pipe, "text_encoder", None)),
+        "text_encoder_2_dtype": _module_dtype(getattr(pipe, "text_encoder_2", None)),
+        "vae_dtype": _module_dtype(getattr(pipe, "vae", None)),
+    }
+    logger.info("image_inference_dtypes %s", fields)
 
 
 def _human_load_error(exc: Exception) -> str:

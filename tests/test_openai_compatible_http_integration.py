@@ -31,11 +31,34 @@ class _OpenAICompatibleHandler(BaseHTTPRequestHandler):
         payload = json.loads(self.rfile.read(length))
         type(self).requests.append(payload)
         if payload.get("stream"):
-            events = (
-                'data: {"choices":[{"delta":{"content":"hola "}}]}\n\n'
-                'data: {"choices":[{"delta":{"content":"local"}}]}\n\n'
-                "data: [DONE]\n\n"
-            ).encode("utf-8")
+            tool_names = [
+                item.get("function", {}).get("name")
+                for item in payload.get("tools") or []
+            ]
+            if (
+                "calculator.evaluate" in tool_names
+                and (payload.get("messages") or [{}])[-1].get("role") != "tool"
+            ):
+                events = (
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"calc-http-1","type":"function","function":{"name":"calculator.evaluate","arguments":"{\\"expression\\":\\"781 *"}}]}}]}\n\n'
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" 94\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'
+                    "data: [DONE]\n\n"
+                ).encode("utf-8")
+            elif (
+                "calculator.evaluate" in tool_names
+                and (payload.get("messages") or [{}])[-1].get("role") == "tool"
+            ):
+                events = (
+                    'data: {"choices":[{"delta":{"content":"El resultado "}}]}\n\n'
+                    'data: {"choices":[{"delta":{"content":"es 73414."},"finish_reason":"stop"}]}\n\n'
+                    "data: [DONE]\n\n"
+                ).encode("utf-8")
+            else:
+                events = (
+                    'data: {"choices":[{"delta":{"content":"hola "}}]}\n\n'
+                    'data: {"choices":[{"delta":{"content":"local"}}]}\n\n'
+                    "data: [DONE]\n\n"
+                ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(events)))
@@ -46,7 +69,10 @@ class _OpenAICompatibleHandler(BaseHTTPRequestHandler):
             {
                 "model": LOCAL_MODEL,
                 "choices": [
-                    {"message": {"role": "assistant", "content": "hola local"}}
+                    {
+                        "message": {"role": "assistant", "content": "hola local"},
+                        "finish_reason": "stop",
+                    }
                 ],
                 "usage": {
                     "prompt_tokens": 2,
@@ -121,6 +147,8 @@ def test_local_provider_against_real_openai_compatible_http_server() -> None:
 
     assert response.content == "hola local"
     assert response.usage.total_tokens == 4
+    assert response.metadata["finish_reason"] == "stop"
+    assert response.metadata["stream_closed_normally"] is True
     assert "".join(chunk.text for chunk in chunks) == "hola local"
     assert chunks[-1].done is True
     assert len(_OpenAICompatibleHandler.requests) == 2
@@ -203,3 +231,46 @@ def test_local_provider_serializes_tool_messages_without_internal_metadata() -> 
     ]
     assert "metadata" not in json.dumps(payload)
     assert "must-not-cross-provider-boundary" not in json.dumps(payload)
+
+
+def test_local_provider_normalizes_streamed_tool_call_argument_fragments() -> None:
+    with _fake_openai_server() as base_url:
+        settings = Settings(
+            _env_file=None,
+            local_llm_base_url=base_url,
+            local_llm_model=LOCAL_MODEL,
+        )
+        provider = NemotronOmniLocalProvider(settings)
+        request = ModelRequest(
+            task_type="agent",
+            prompt="calcula 781 por 94",
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "calculator.evaluate",
+                        "parameters": {"type": "object"},
+                    },
+                }
+            ],
+            tool_choice="auto",
+        )
+
+        chunks = list(
+            provider.stream_infer(
+                request,
+                model_name=LOCAL_MODEL,
+                temperature=0.0,
+                timeout_seconds=2,
+            )
+        )
+
+    tool_calls = [call for chunk in chunks for call in chunk.tool_calls]
+    assert tool_calls == [
+        ModelToolCall(
+            id="calc-http-1",
+            name="calculator.evaluate",
+            arguments={"expression": "781 * 94"},
+        )
+    ]
+    assert chunks[-1].done is True

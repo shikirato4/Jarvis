@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import Field
 
 from jarvis.models.base import JarvisBaseModel
+from jarvis.models_runtime.base import ModelMessage
 
 
 def _utcnow() -> datetime:
@@ -82,6 +83,11 @@ class DesktopChatResponse(JarvisBaseModel):
     spoken_mode: str = "prepared"
     panel_snapshot: DesktopPanelSnapshot | None = None
     raw_result: dict[str, Any] = Field(default_factory=dict)
+    context_messages: list[ModelMessage] = Field(
+        default_factory=list,
+        exclude=True,
+        repr=False,
+    )
 
 
 class DesktopVoiceState(JarvisBaseModel):

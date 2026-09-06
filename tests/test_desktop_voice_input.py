@@ -14,7 +14,12 @@ from jarvis.desktop_runtime.chat import PendingDesktopAction
 from jarvis.desktop_runtime.intent_router import DesktopIntentDecision
 from jarvis.desktop_runtime.voice_input import DesktopVoiceInputController
 from jarvis.desktop_runtime.window import JarvisDesktopWindow, create_qt_application, pyside_available
-from jarvis.models_runtime.base import ModelRequest, ModelResponse, ProviderKind
+from jarvis.models_runtime.base import (
+    ModelRequest,
+    ModelResponse,
+    ModelToolCall,
+    ProviderKind,
+)
 from jarvis.voice_runtime.backends import InMemorySTTProvider
 from jarvis.voice_runtime.base import AudioChunk
 
@@ -26,6 +31,7 @@ def _chunk(text: str, level: int = 8000) -> AudioChunk:
 
 def _settings(tmp_path) -> Settings:
     return Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
@@ -136,14 +142,71 @@ def test_desktop_voice_input_accepts_voice_confirmation(tmp_path) -> None:
 def test_desktop_voice_input_executes_open_and_type_flow(tmp_path) -> None:
     app, desktop = build_desktop_runtime(_settings(tmp_path))
     backend = app.ui_automation_service._backend  # noqa: SLF001
+    model_requests: list[ModelRequest] = []
+
+    def infer_model(request: ModelRequest) -> ModelResponse:
+        model_requests.append(request)
+        if len(model_requests) == 1:
+            tool_calls = [
+                ModelToolCall(
+                    id="voice-focus-word",
+                    name="interface.focus_window",
+                    arguments={"target": "Word", "approved": True},
+                )
+            ]
+            content = ""
+        elif len(model_requests) == 2:
+            tool_calls = [
+                ModelToolCall(
+                    id="voice-write-word",
+                    name="interface.write_text",
+                    arguments={
+                        "text": "hola por voz",
+                        "focus_target": "Word",
+                        "approved": True,
+                    },
+                )
+            ]
+            content = ""
+        else:
+            tool_calls = []
+            content = "Word está abierto y el texto fue escrito."
+        return ModelResponse(
+            provider_name="voice-agent-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model=request.logical_model or "general_assistant",
+            model_name="nemotron-test",
+            content=content,
+            tool_calls=tool_calls,
+            latency_ms=1.0,
+        )
+
+    app.agent_controller._infer_model = infer_model  # noqa: SLF001
     try:
         app.voice_runtime_service._input_registry.get("in_memory").push_chunk(_chunk("abre word y escribe esto hola por voz"))  # noqa: SLF001
+        desktop.start_voice_listening()
+        assert _wait_for(lambda: desktop._chat._pending_agent_confirmation is not None)  # noqa: SLF001
+        assert _wait_for(lambda: desktop.shell_state().voice.input_state == "IDLE")
+        assert backend.get_active_window().title == "Editor"
+        assert backend.typed_text == ""
+
+        app.voice_runtime_service._input_registry.get("in_memory").push_chunk(_chunk("si"))  # noqa: SLF001
+        desktop.start_voice_listening()
+        assert _wait_for(lambda: backend.get_active_window().title == "Word")
+        assert _wait_for(lambda: len(model_requests) >= 2)
+        assert _wait_for(lambda: desktop.shell_state().voice.input_state == "IDLE")
+        assert backend.typed_text == ""
+
+        app.voice_runtime_service._input_registry.get("in_memory").push_chunk(_chunk("si"))  # noqa: SLF001
         desktop.start_voice_listening()
         assert _wait_for(lambda: backend.typed_text.endswith("hola por voz"))
         assert _wait_for(lambda: any(message.metadata.get("source") == "voice" for message in desktop.shell_state().conversation))
         state = desktop.shell_state()
         assert any(message.metadata.get("source") == "voice" for message in state.conversation)
         assert backend.get_active_window().title == "Word"
+        assert len(model_requests) == 3
+        assert model_requests[1].messages[-1].role == "tool"
+        assert model_requests[2].messages[-1].role == "tool"
     finally:
         app.stop()
 
@@ -200,6 +263,14 @@ def test_window_reflects_voice_input_states(tmp_path) -> None:
 
         assert window._voice_badge.text() == "VOICE LISTENING"  # noqa: SLF001
         assert window._conversation._status.text() == "LISTENING"  # noqa: SLF001
+        mute_button = window._voice_mute_button  # noqa: SLF001
+        assert mute_button.accessibleName() == "Mute JARVIS voice"
+        assert mute_button.toolTip() == "Mute JARVIS voice"
+
+        state.voice.muted = True
+        window._render_header(state)  # noqa: SLF001
+        assert mute_button.accessibleName() == "Unmute JARVIS voice"
+        assert mute_button.toolTip() == "Unmute JARVIS voice"
 
         state.voice.input_state = "ERROR"
         state.voice.input_error = "Micrófono no disponible."

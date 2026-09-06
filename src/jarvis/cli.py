@@ -21,6 +21,7 @@ from jarvis.core.modes import ExecutionMode
 from jarvis.desktop_agent_runtime import DesktopAgentMissionRequest
 from jarvis.desktop_agent_runtime.models import DesktopAgentAutonomyMode, DesktopAgentSourceSurface
 from jarvis.image_runtime.prompting import build_image_request_from_text
+from jarvis.image_runtime.presentation import format_probe_status
 from jarvis.identity import jarvis_identity_prompt
 from jarvis.autonomy.base import MissionApprovalRequest, MissionControlActionRequest, MissionPlanRequest, MissionRequest
 from jarvis.indexing_runtime.models import IndexRunRequest, IndexSourceCreateRequest, IndexSourceKind, IndexingTrigger
@@ -135,8 +136,8 @@ def doctor() -> None:
     from jarvis.local_runtime import LocalHardwareDiagnostics
     from jarvis.models_runtime.coordinator import PersistentModeStore
     from jarvis.models_runtime.hybrid import LLMMode
-    from jarvis.models_runtime.nemotron_local import NemotronOmniLocalProvider
-    from jarvis.models_runtime.nemotron_identity import local_model_policy_description
+    from jarvis.models_runtime.qwen_local import QwenLocalProvider
+    from jarvis.models_runtime.qwen_identity import local_model_policy_description
     from jarvis.models_runtime.nvidia_nim import NvidiaNimProvider
     from jarvis.persistent_config import load_persistent_config
     from jarvis.security_runtime.secrets import NvidiaSecretManager
@@ -148,11 +149,12 @@ def doctor() -> None:
     env = detect_environment(
         local_base_url=p_config.local_base_url,
         local_model=p_config.local_model,
+        local_model_aliases=settings.local_llm_model_aliases,
         nvidia_configured=secret_manager.status().configured,
     )
     web_status = build_web_search_provider().status()
     nvidia_provider = NvidiaNimProvider(settings, secret_manager=secret_manager)
-    local_provider = NemotronOmniLocalProvider(settings)
+    local_provider = QwenLocalProvider(settings)
     selected_mode = PersistentModeStore(default_mode=LLMMode(settings.llm_mode)).load()
     local_hardware = LocalHardwareDiagnostics().inspect(settings.local_llm_base_url)
     image_service = ImageGenerationService(settings=settings)
@@ -351,8 +353,8 @@ def image_status(json_output: bool = typer.Option(False, "--json")) -> None:
                 f"Fooocus required: {str(bool(payload.get('fooocus_required'))).lower()}",
                 f"Internet required: {str(bool(payload.get('internet_required'))).lower()}",
                 f"Model status: {payload.get('model_status')}",
-                f"CUDA available: {str(bool(deps.get('torch_cuda_available'))).lower()}",
-                f"Torch CUDA compiled: {str(bool(deps.get('torch_cuda_compiled'))).lower()}",
+                f"CUDA available: {format_probe_status(deps.get('torch_cuda_available'))}",
+                f"Torch CUDA compiled: {format_probe_status(deps.get('torch_cuda_compiled'))}",
                 f"Missing dependencies: {', '.join(missing) if missing else 'none'}",
                 f"Output dir: {payload.get('output_dir')}",
             ]

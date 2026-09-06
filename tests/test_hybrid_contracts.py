@@ -18,7 +18,7 @@ from jarvis.persistent_config import PersistentConfig, load_persistent_config
 
 
 REMOTE_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
-LOCAL_MODEL = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
+LOCAL_MODEL = "Qwen3.5-9B-IQ4_XS"
 
 
 def test_hybrid_contracts_keep_mode_provider_and_capabilities_separate() -> None:
@@ -120,7 +120,7 @@ def test_settings_default_to_auto_and_exact_nemotron_models(monkeypatch) -> None
     assert settings.local_llm_model == LOCAL_MODEL
 
 
-def test_persistent_config_migrates_legacy_mode_and_provider_to_auto_nemotron(
+def test_persistent_config_migrates_legacy_mode_and_provider_to_auto_qwen(
     tmp_path,
 ) -> None:
     legacy_provider = "oll" + "ama"
@@ -142,17 +142,17 @@ def test_persistent_config_migrates_legacy_mode_and_provider_to_auto_nemotron(
     config = load_persistent_config(tmp_path)
 
     assert config.preferred_mode == "auto"
-    assert config.local_provider == "nemotron_omni_local"
-    assert config.local_base_url == "http://127.0.0.1:8000/v1"
+    assert config.local_provider == "qwen_local"
+    assert config.local_base_url == "http://127.0.0.1:8081/v1"
     assert config.local_model == LOCAL_MODEL
 
 
-def test_persistent_config_defaults_target_nemotron_local() -> None:
+def test_persistent_config_defaults_target_qwen_local() -> None:
     config = PersistentConfig.defaults()
 
     assert config.preferred_mode == "auto"
-    assert config.local_provider == "nemotron_omni_local"
-    assert config.local_base_url == "http://127.0.0.1:8000/v1"
+    assert config.local_provider == "qwen_local"
+    assert config.local_base_url == "http://127.0.0.1:8081/v1"
     assert config.local_model == LOCAL_MODEL
 
 

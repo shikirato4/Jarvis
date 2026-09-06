@@ -15,7 +15,9 @@ from jarvis.core.modes import ModeManager
 from .base import ModelRequest, ModelResponse, ProviderHealth
 from .catalog import ModelCatalog
 from .coordinator import HybridProviderUnavailableError, ProviderCoordinator
+from .errors import classify_provider_failure
 from .hybrid import LLMMode, ProviderSelection, RequestExecutionContext
+from .output_completion import OutputCompletionPolicy
 from .registry import ProviderRegistry
 from .router import ModelRouter
 
@@ -48,6 +50,7 @@ class ModelService:
         self._logger = logger or logging.getLogger("jarvis.models")
         self._resilience = resilience_controller
         self._coordinator = coordinator
+        self._output_completion = OutputCompletionPolicy(settings)
 
     def list_models(self) -> list[dict[str, Any]]:
         return [profile.model_dump(mode="json") for profile in self._catalog.list_profiles()]
@@ -73,6 +76,7 @@ class ModelService:
         *,
         execution_context: RequestExecutionContext | None = None,
     ) -> ModelResponse:
+        request = self._output_completion.prepare_request(request)
         if request.stream and not self._mode_manager.current_policy().streaming_allowed:
             raise CapabilityUnavailableError(
                 "streaming inference is not allowed in the current mode",
@@ -88,8 +92,31 @@ class ModelService:
                 request,
                 execution_context=execution_context,
             )
+            response = self._output_completion.complete_response(
+                request,
+                response,
+                infer_next=lambda continuation: self._coordinator.infer(
+                    continuation,
+                    execution_context=execution_context,
+                ),
+                event_sink=self._event_bus.publish,
+            )
         except HybridProviderUnavailableError as exc:
             self._log_route("model_request_failed", request_id=request_id)
+            failure = classify_provider_failure(exc.__cause__ or exc)
+            self._logger.error(
+                "model_provider_failure",
+                extra={
+                    "request_id": request_id,
+                    "provider": failure.provider,
+                    "category": failure.category.value,
+                    "status_code": failure.status_code,
+                    "retryable": failure.retryable,
+                    "fallback_eligible": failure.fallback_eligible,
+                    "retry_after_seconds": failure.retry_after_seconds,
+                    "safe_message": failure.detail,
+                },
+            )
             raise ModelProviderError(str(exc)) from exc
         self._log_route(
             "model_request_completed",
@@ -118,17 +145,23 @@ class ModelService:
         cancel_check=None,
         execution_context: RequestExecutionContext | None = None,
     ):
-        request = request.model_copy(update={"stream": True})
+        request = self._output_completion.prepare_request(
+            request.model_copy(update={"stream": True})
+        )
         request_id = (
             execution_context.request_id
             if execution_context is not None
             else request.correlation_id
         )
         try:
-            for chunk in self._coordinator.stream(
+            for chunk in self._output_completion.stream_completed(
                 request,
-                execution_context=execution_context,
-                cancel_check=cancel_check,
+                stream_once=lambda segment_request: self._coordinator.stream(
+                    segment_request,
+                    execution_context=execution_context,
+                    cancel_check=cancel_check,
+                ),
+                event_sink=self._event_bus.publish,
             ):
                 if chunk.done:
                     selection = self._coordinator.selection_snapshot()
@@ -142,7 +175,13 @@ class ModelService:
                             "model_name": selection.active_model,
                             "fallback_reason": selection.fallback_reason,
                             "route_generation": "coordinator",
-                            "incomplete": bool(chunk.error),
+                            "incomplete": bool(
+                                chunk.error or chunk.metadata.get("incomplete")
+                            ),
+                            "finish_reason": chunk.metadata.get("finish_reason"),
+                            "stream_closed_normally": chunk.metadata.get(
+                                "stream_closed_normally"
+                            ),
                         },
                     )
                 yield chunk

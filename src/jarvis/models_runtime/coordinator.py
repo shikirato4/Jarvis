@@ -22,7 +22,15 @@ from .hybrid import (
     ProviderStatus,
     RequestExecutionContext,
 )
-from .nvidia_nim import NvidiaInvalidKeyError, NvidiaRateLimitError
+from .nvidia_nim import (
+    NvidiaAuthenticationError,
+    NvidiaAuthorizationError,
+    NvidiaInvalidKeyError,
+    NvidiaInvalidRequestError,
+    NvidiaProtocolError,
+    NvidiaRateLimitError,
+)
+from .local_model_runtime import LocalModelRuntimeError
 from .openai_compatible import OpenAICompatibleError
 
 
@@ -164,6 +172,8 @@ class ProviderCoordinator:
             message="Todavía no se ha seleccionado un proveedor para una solicitud.",
         )
         self._statuses: dict[str, ProviderStatus] = {}
+        self._active_local_requests = 0
+        self._pending_local_shutdown = False
         self._cloud_circuit = CircuitBreaker(
             failure_threshold=settings.nvidia_circuit_failure_threshold,
             cooldown_seconds=settings.nvidia_circuit_cooldown_seconds,
@@ -178,6 +188,7 @@ class ProviderCoordinator:
     def set_mode(self, mode: LLMMode | str) -> LLMMode:
         resolved = LLMMode(mode)
         with self._lock:
+            previous = self._selected_mode
             self._selected_mode = resolved
             if self._mode_store is not None:
                 try:
@@ -189,7 +200,40 @@ class ProviderCoordinator:
                     )
                 else:
                     self._persistence_warning = None
+        if resolved is LLMMode.LOCAL:
+            prewarm = getattr(self._local, "prewarm", None)
+            if callable(prewarm):
+                prewarm()
+        elif previous is LLMMode.LOCAL:
+            self._request_local_shutdown()
         return resolved
+
+    def _request_local_shutdown(self) -> None:
+        with self._lock:
+            if self._active_local_requests:
+                self._pending_local_shutdown = True
+                return
+        self._stop_owned_local_runtime()
+
+    def _begin_local_request(self) -> None:
+        with self._lock:
+            self._active_local_requests += 1
+
+    def _end_local_request(self) -> None:
+        should_stop = False
+        with self._lock:
+            self._active_local_requests = max(self._active_local_requests - 1, 0)
+            should_stop = self._active_local_requests == 0 and self._pending_local_shutdown
+            if should_stop:
+                self._pending_local_shutdown = False
+        if should_stop:
+            self._stop_owned_local_runtime()
+
+    def _stop_owned_local_runtime(self) -> None:
+        manager = getattr(self._local, "runtime_manager", None)
+        stop = getattr(manager, "stop", None)
+        if callable(stop):
+            stop()
 
     def selection_snapshot(self) -> ProviderSelection:
         with self._lock:
@@ -224,6 +268,9 @@ class ProviderCoordinator:
             request_id=request.correlation_id or RequestExecutionContext().request_id
         )
         selection, provider = self._select_provider()
+        local_request = provider is self._local
+        if local_request:
+            self._begin_local_request()
         try:
             response = provider.infer(
                 request,
@@ -234,7 +281,11 @@ class ProviderCoordinator:
             if provider is self._nvidia:
                 self._cloud_circuit.record_success()
         except OpenAICompatibleError as exc:
-            if self.selected_mode is not LLMMode.AUTO or provider is not self._nvidia:
+            if (
+                self.selected_mode is not LLMMode.AUTO
+                or provider is not self._nvidia
+                or not self._fallback_eligible(exc)
+            ):
                 raise HybridProviderUnavailableError(str(exc)) from exc
             self._record_cloud_exception(exc)
             incompatibility = self._request_incompatibility(self._local, request)
@@ -246,6 +297,9 @@ class ProviderCoordinator:
                 fallback_reason=f"{self._nvidia.provider_name}: {exc}",
                 cloud_status=self._status_for_cloud_exception(exc),
             )
+            if not local_request:
+                self._begin_local_request()
+                local_request = True
             response = provider.infer(
                 request,
                 model_name=provider.configured_model,
@@ -253,6 +307,9 @@ class ProviderCoordinator:
                 timeout_seconds=request.timeout_seconds,
             )
             response.fallback_used = True
+        finally:
+            if local_request:
+                self._end_local_request()
         if selection.fallback_reason is not None:
             response.fallback_used = True
         response.metadata.update(self._selection_metadata(selection, context))
@@ -270,6 +327,9 @@ class ProviderCoordinator:
         )
         selection, provider = self._select_provider()
         emitted_content = False
+        local_request = provider is self._local
+        if local_request:
+            self._begin_local_request()
         try:
             for chunk in provider.stream_infer(
                 request,
@@ -288,6 +348,7 @@ class ProviderCoordinator:
             can_fallback = (
                 self.selected_mode is LLMMode.AUTO
                 and provider is self._nvidia
+                and self._fallback_eligible(exc)
                 and context.can_retry_stream(emitted_content=emitted_content)
                 and self._request_incompatibility(self._local, request) is None
             )
@@ -315,6 +376,9 @@ class ProviderCoordinator:
                     fallback_reason=f"{self._nvidia.provider_name}: {exc}",
                     cloud_status=self._status_for_cloud_exception(exc),
                 )
+                if not local_request:
+                    self._begin_local_request()
+                    local_request = True
                 for chunk in fallback_provider.stream_infer(
                     request,
                     model_name=fallback_provider.configured_model,
@@ -348,6 +412,9 @@ class ProviderCoordinator:
                         "confirmation_required": False,
                     },
                 )
+        finally:
+            if local_request:
+                self._end_local_request()
 
     def _select_provider(self) -> tuple[ProviderSelection, CoordinatedProvider]:
         mode = self.selected_mode
@@ -375,6 +442,12 @@ class ProviderCoordinator:
                     self._selection_for(self._nvidia, cloud_status), self._nvidia
                 )
             self._record_cloud_status(cloud_status)
+            if cloud_status.state is ProviderOperationalState.CLOUD_INVALID_KEY:
+                selection = self._selection_for(self._nvidia, cloud_status)
+                self._remember(selection)
+                raise HybridProviderUnavailableError(
+                    f"{self._nvidia.provider_name}: {cloud_status.message}"
+                )
         else:
             cloud_status = ProviderStatus(
                 provider_name=self._nvidia.provider_name,
@@ -397,6 +470,38 @@ class ProviderCoordinator:
         fallback_reason: str | None = None,
         cloud_status: ProviderStatus | None = None,
     ) -> tuple[ProviderSelection, CoordinatedProvider]:
+        ensure_ready = getattr(self._local, "ensure_runtime_ready", None)
+        if callable(ensure_ready):
+            try:
+                ensure_ready()
+            except LocalModelRuntimeError as exc:
+                local_status = ProviderStatus(
+                    provider_name=self._local.provider_name,
+                    state=ProviderOperationalState.LOCAL_UNAVAILABLE,
+                    healthy=False,
+                    message=str(exc),
+                )
+                self._remember_status(local_status)
+                if cloud_status is None:
+                    message = f"{self._local.provider_name}: {local_status.message}"
+                else:
+                    message = self._combined_message(
+                        cloud_status,
+                        f"{self._local.provider_name}: {local_status.message}",
+                    )
+                selection = ProviderSelection(
+                    selected_mode=self.selected_mode,
+                    provider_status=ProviderStatus(
+                        provider_name="hybrid",
+                        state=ProviderOperationalState.BOTH_UNAVAILABLE,
+                        healthy=False,
+                        message=message,
+                    ),
+                    capabilities=ProviderCapabilities(),
+                    fallback_reason=fallback_reason,
+                )
+                self._remember(selection)
+                raise HybridProviderUnavailableError(message) from exc
         local_status = self._local.status_check()
         self._remember_status(local_status)
         if not local_status.healthy:
@@ -465,8 +570,25 @@ class ProviderCoordinator:
     def _record_cloud_exception(self, error: OpenAICompatibleError) -> None:
         self._cloud_circuit.record_failure(
             retry_after_seconds=error.retry_after_seconds,
-            force_open=isinstance(error, NvidiaInvalidKeyError),
+            force_open=(
+                isinstance(error, NvidiaInvalidKeyError)
+                or self._fallback_eligible(error)
+            ),
         )
+
+    @staticmethod
+    def _fallback_eligible(error: OpenAICompatibleError) -> bool:
+        """AUTO may recover transient availability failures, not bad requests/auth."""
+        return not isinstance(
+            error,
+            (
+                NvidiaInvalidRequestError,
+                NvidiaAuthenticationError,
+                NvidiaAuthorizationError,
+                NvidiaInvalidKeyError,
+                NvidiaProtocolError,
+            ),
+        ) and error.status_code not in {400, 401, 403}
 
     def _status_for_cloud_exception(
         self, error: OpenAICompatibleError

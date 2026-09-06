@@ -34,12 +34,21 @@ class NeuralRouter:
             needs_agent_mode=selected in self._agent_intents,
         )
 
+    def tools_for_intent(self, intent: str) -> list[str]:
+        return list(self._tool_map.get(intent, ()))
+
 
 class ShadowRouter:
     def __init__(self, router: NeuralRouter, *, trace_limit: int = 1_000) -> None:
         self._router = router
         self._trace_limit = max(trace_limit, 1)
         self.traces: list[ShadowTrace] = []
+
+    def predict(self, text: str, *, top_k: int = 3) -> RouterPrediction:
+        return self._router.predict(text, top_k=top_k)
+
+    def tools_for_intent(self, intent: str) -> list[str]:
+        return self._router.tools_for_intent(intent)
 
     def observe(
         self,

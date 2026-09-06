@@ -1,0 +1,243 @@
+{
+  "benchmark_manifest_sha256": "fed74bb991d43b29342a7ea8cdc69ae883556ccf768c67b7a9f265120aa20cae",
+  "benchmark_sha256": "085989ef9480870f5c26e0fc72c0e34089d2bf9876109f884d7b8dfc87b9ef20",
+  "case_count": 600,
+  "completion_timestamp_utc": "2026-09-02T01:42:09.994937+00:00",
+  "critical_metrics": {
+    "action_vs_info_accuracy": 0.4167,
+    "action_vs_information": {
+      "correct": 5,
+      "rate": 0.4167,
+      "total": 12
+    },
+    "argument_accuracy": 1.0,
+    "argument_validity": {
+      "correct": 600,
+      "rate": 1.0,
+      "total": 600
+    },
+    "baseline_complete": true,
+    "benchmark_cases": 600,
+    "capability_absent_honesty": {
+      "correct": 0,
+      "rate": null,
+      "total": 0
+    },
+    "capability_present": {
+      "correct": 5,
+      "rate": 0.4167,
+      "total": 12
+    },
+    "category_metrics": {
+      "action_vs_information": {
+        "correct": 5,
+        "rate": 0.4167,
+        "total": 12
+      },
+      "argument_accuracy": {
+        "correct": 10,
+        "rate": 0.8333,
+        "total": 12
+      },
+      "capability_present": {
+        "correct": 5,
+        "rate": 0.4167,
+        "total": 12
+      },
+      "false_capability_denial": {
+        "correct": 6,
+        "rate": 0.5455,
+        "total": 11
+      },
+      "false_success": {
+        "correct": 12,
+        "rate": 0.5714,
+        "total": 21
+      },
+      "missing_required_tool": {
+        "correct": 10,
+        "rate": 0.4762,
+        "total": 21
+      },
+      "multi_tool": {
+        "correct": 8,
+        "rate": 0.7273,
+        "total": 11
+      },
+      "non_empty_final": {
+        "correct": 7,
+        "rate": 0.6364,
+        "total": 11
+      },
+      "observation_grounding": {
+        "correct": 13,
+        "rate": 0.619,
+        "total": 21
+      },
+      "output_completion": {
+        "correct": 40,
+        "rate": 0.6557,
+        "total": 61
+      },
+      "preservation": {
+        "correct": 35,
+        "rate": 0.7,
+        "total": 50
+      },
+      "scope_honesty": {
+        "correct": 15,
+        "rate": 0.7143,
+        "total": 21
+      },
+      "security_confirmation": {
+        "correct": 12,
+        "rate": 0.5714,
+        "total": 21
+      },
+      "security_denied": {
+        "correct": 8,
+        "rate": 0.381,
+        "total": 21
+      },
+      "tool_failure": {
+        "correct": 9,
+        "rate": 0.4286,
+        "total": 21
+      },
+      "tool_loop": {
+        "correct": 9,
+        "rate": 0.4286,
+        "total": 21
+      },
+      "tool_selection": {
+        "correct": 8,
+        "rate": 0.6667,
+        "total": 12
+      },
+      "unseen_tool": {
+        "correct": 174,
+        "rate": 0.725,
+        "total": 240
+      }
+    },
+    "completed_cases": 600,
+    "duration": {
+      "avg_ms": 4182.33,
+      "count": 600,
+      "median_ms": 3766.18,
+      "p90_ms": 7106.49,
+      "slowest_ms": 35513.65,
+      "total_ms": 2509396.65
+    },
+    "duration_by_track": {
+      "end_to_end": {
+        "avg_ms": 3681.25,
+        "count": 220,
+        "median_ms": 3462.77,
+        "p90_ms": 5972.57,
+        "slowest_ms": 9820.96,
+        "total_ms": 809875.53
+      },
+      "model_surface": {
+        "avg_ms": 4472.42,
+        "count": 380,
+        "median_ms": 4147.49,
+        "p90_ms": 7826.23,
+        "slowest_ms": 35513.65,
+        "total_ms": 1699521.12
+      }
+    },
+    "english_subset": {
+      "cases": 260,
+      "non_empty_final_rate": 1.0,
+      "tool_selection_accuracy": 0.6154
+    },
+    "failure_taxonomy": {
+      "action_vs_information": 12,
+      "argument_accuracy": 12,
+      "capability_present": 12,
+      "false_capability_denial": 11,
+      "false_success": 21,
+      "missing_required_tool": 21,
+      "multi_tool": 11,
+      "non_empty_final": 11,
+      "observation_grounding": 21,
+      "output_completion": 61,
+      "preservation": 50,
+      "scope_honesty": 21,
+      "security_confirmation": 21,
+      "security_denied": 21,
+      "tool_failure": 21,
+      "tool_loop": 21,
+      "tool_selection": 12,
+      "unseen_tool": 240
+    },
+    "false_capability_denial_rate": 0,
+    "false_success_rate": 0,
+    "finish_reason_length_rate": 0.0,
+    "invalid_structured_output_rate": 0.0,
+    "missing_required_tool_rate": 0.4762,
+    "mixed_subset": {
+      "cases": 0,
+      "non_empty_final_rate": null,
+      "tool_selection_accuracy": null
+    },
+    "multi_tool_success": 0.7273,
+    "non_empty_final_rate": 1.0,
+    "note": "Restart-safe frozen evidence; rows are persisted after every completed case. Run until completed_cases equals benchmark_cases before B4.",
+    "observation_grounding": null,
+    "result_sha256": "8468dc0d5c0e3ab9cc8b737a6e0dd9cce8cc523fb0c00911f46ecb742f9795ec",
+    "runtime_failures": 0,
+    "scoring_version": "agentic-eval-v1-score-v1",
+    "security_behavior": 0.4762,
+    "security_confirmation": {
+      "correct": 12,
+      "rate": 0.5714,
+      "total": 21
+    },
+    "security_denied": {
+      "correct": 8,
+      "rate": 0.381,
+      "total": 21
+    },
+    "spanish_subset": {
+      "cases": 340,
+      "non_empty_final_rate": 1.0,
+      "tool_selection_accuracy": 0.6647
+    },
+    "tool_loop_rate": 0,
+    "tool_selection": {
+      "correct": 386,
+      "rate": 0.6433,
+      "total": 600
+    },
+    "tool_selection_accuracy": 0.6433,
+    "track_counts": {
+      "end_to_end": 220,
+      "model_surface": 380
+    },
+    "unseen_tool_metric": {
+      "correct": 174,
+      "rate": 0.725,
+      "total": 240
+    },
+    "unseen_tool_success": 0.725
+  },
+  "freeze_schema": "jarvis.agentic_lora.base_freeze.v1",
+  "gguf_sha256": "7E918AECA06C52BCB528EA6B04B4EC957E75EE8C0A73138854C0DFCF371EA429",
+  "model": "Qwen3.5-9B-IQ4_XS",
+  "profile": "qwen35-9b-iq4-xs",
+  "results_sha256": "8468dc0d5c0e3ab9cc8b737a6e0dd9cce8cc523fb0c00911f46ecb742f9795ec",
+  "runtime": {
+    "context": 8192,
+    "llama_cpp": "b10516-b95502ba9",
+    "max_tokens": 768,
+    "parallel": 1,
+    "provider": "qwen_local",
+    "temperature": 0,
+    "thinking": "OFF",
+    "top_p": 1
+  },
+  "scoring_version": "agentic-eval-v1-score-v1",
+  "summary_sha256": "3cf723846acd7d6a260f0693d02d082ad26b1440cec3c17fe40abbbbfe70f9e7"
+}

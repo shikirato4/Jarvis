@@ -14,6 +14,7 @@ from jarvis.core.modes import ModeManager
 from jarvis.desktop_runtime.chat import DesktopChatEngine
 from jarvis.models_runtime.catalog import build_default_model_catalog
 from jarvis.models_runtime.coordinator import PersistentModeStore
+from jarvis.models_runtime.errors import classify_provider_failure, provider_failure_message
 from jarvis.models_runtime.hybrid import LLMMode
 from jarvis.models_runtime.registry import ProviderRegistry
 from jarvis.models_runtime.router import ModelRouter
@@ -28,12 +29,12 @@ from jarvis.persistent_config import (
 
 
 REMOTE_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
-LOCAL_MODEL = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
+LOCAL_MODEL = "Qwen3.5-9B-IQ4_XS"
 LEGACY_PROVIDER = "oll" + "ama"
 LEGACY_MODEL = "gpt" + "-oss:20b"
 
 
-def test_application_registers_only_nemotron_chat_providers(
+def test_application_registers_online_and_qwen_chat_providers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
@@ -53,7 +54,7 @@ def test_application_registers_only_nemotron_chat_providers(
     assert [
         provider.provider_name
         for provider in application.provider_registry.list_providers()
-    ] == ["nemotron_omni_local", "nvidia_nim"]
+    ] == ["nvidia_nim", "qwen_local"]
     assert application.model_service.provider_selection().selected_mode.value == "auto"
 
 
@@ -96,8 +97,8 @@ def test_legacy_configuration_migrates_to_auto_without_writing_on_read(
 
     assert first == second
     assert first.preferred_mode == "auto"
-    assert first.local_provider == "nemotron_omni_local"
-    assert first.local_base_url == "http://127.0.0.1:8000/v1"
+    assert first.local_provider == "qwen_local"
+    assert first.local_base_url == "http://127.0.0.1:8081/v1"
     assert first.local_model == LOCAL_MODEL
     assert config_path.read_text(encoding="utf-8") == original
 
@@ -165,6 +166,15 @@ class _FailingRuntime:
         raise RuntimeError("connection refused")
 
 
+class _FailingQwenRuntime:
+    def infer_model(self, _request):
+        raise RuntimeError("qwen_local: connection refused")
+
+    @staticmethod
+    def provider_selection():
+        return SimpleNamespace(selected_mode=LLMMode.LOCAL)
+
+
 class _Panels:
     @staticmethod
     def compose():
@@ -186,3 +196,27 @@ def test_desktop_chat_provider_failure_never_reports_legacy_model_names() -> Non
     assert "gpt" + "-oss" not in normalized
     assert "nemotron" in normalized
     assert response.raw_result["error"]["type"] == "RuntimeError"
+
+
+def test_local_qwen_failure_message_never_requests_legacy_nemotron_endpoint() -> None:
+    bridge = SimpleNamespace(runtime=_FailingQwenRuntime())
+    settings = Settings(_env_file=None, llm_mode="local")
+    engine = DesktopChatEngine(bridge, _Panels(), _Actions(), settings)
+
+    response = engine.handle("hola Jarvis")
+
+    normalized = response.message.content.casefold()
+    assert "qwen" in normalized
+    assert "nemotron" not in normalized
+    assert "nvfp4" not in normalized
+    failure = classify_provider_failure("qwen_local: connection refused")
+    assert failure.code == "local_unavailable"
+    assert "qwen" in provider_failure_message(failure, selected_mode="local").casefold()
+
+
+def test_local_qwen_failure_is_not_rewritten_as_cloud_fallback() -> None:
+    failure = classify_provider_failure("qwen_local: runtime failed")
+    message = provider_failure_message(failure, selected_mode="local")
+    assert failure.code == "local_unavailable"
+    assert "nemotron" not in message.casefold()
+    assert "endpoint" in message.casefold()

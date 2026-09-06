@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Callable
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -184,6 +185,45 @@ def _audio_inspect(context: ToolContext, payload: AudioInspectToolPayload) -> To
 
 
 def _shell_command(context: ToolContext, payload: ShellCommandToolPayload) -> ToolResult:
+    if context.dry_run:
+        receipt = context.action_router.execute(
+            "operations.run_command",
+            payload.model_dump(mode="json"),
+            correlation_id=context.correlation_id,
+            dry_run=True,
+            metadata={**context.metadata, "invoked_via": "tool"},
+        )
+        return ToolResult(message=receipt.message, data=receipt.data)
+    if context.action_executor is not None:
+        from jarvis.action_executor import ActionRequest, ActionStatus
+        from jarvis.tools.models import ToolExecutionStatus
+
+        observation = context.action_executor.execute(
+            ActionRequest(
+                run_id=context.correlation_id,
+                call_id=uuid4().hex,
+                action="operations.run_command",
+                arguments=payload.model_dump(mode="json"),
+                correlation_id=context.correlation_id,
+                metadata={**context.metadata, "invoked_via": "tool_registry"},
+            )
+        )
+        return ToolResult(
+            status=(
+                ToolExecutionStatus.SUCCESS
+                if observation.status is ActionStatus.SUCCESS
+                else ToolExecutionStatus.FAILED
+            ),
+            message=observation.message,
+            data={
+                **observation.data,
+                **(
+                    {"confirmation_id": observation.confirmation_id}
+                    if observation.confirmation_id
+                    else {}
+                ),
+            },
+        )
     receipt = context.action_router.execute(
         "operations.run_command",
         payload.model_dump(mode="json"),

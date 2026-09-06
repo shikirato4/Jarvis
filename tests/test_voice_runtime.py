@@ -4,6 +4,7 @@ import logging
 import sys
 import time
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 import wave
 
@@ -198,6 +199,25 @@ class StubVoiceRuntime:
 
     def set_command_callback(self, callback) -> None:
         self.command_callback = callback
+
+
+def test_stale_onedrive_voice_sample_migrates_to_canonical_workspace(tmp_path: Path) -> None:
+    checkout = tmp_path / "Jarvis"
+    sample = checkout / "voice_samples" / "jarvis.wav"
+    sample.parent.mkdir(parents=True)
+    sample.write_bytes(b"fixture")
+    stale = Path("C:/Users/example/OneDrive/Documentos/jarvis/voice_samples/jarvis.wav")
+    settings = Settings(
+        _env_file=None,
+        workspace_root=checkout,
+        voice_coqui_speaker_wav=stale,
+        voice_clone_sample_path=stale,
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+
+    assert settings.resolved_voice_coqui_speaker_wav == sample.resolve()
+    assert settings.resolved_voice_clone_sample_path == sample.resolve()
 
 
 def _write_test_wav(
@@ -601,29 +621,38 @@ def test_desktop_test_voice_uses_active_profile_and_phrase(tmp_path: Path) -> No
 
 
 def test_voice_speak_is_non_blocking_and_updates_speaking_status(tmp_path: Path) -> None:
+    synthesis_entered = Event()
+    release_synthesis = Event()
+
+    class BlockingTTSProvider(InMemoryTTSProvider):
+        provider_name = "blocking_tts"
+
+        def synthesize(self, request):
+            synthesis_entered.set()
+            release_synthesis.wait(timeout=5.0)
+            return super().synthesize(request)
+
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
-        voice_tts_provider_default="slow_tts",
+        voice_tts_provider_default="blocking_tts",
         voice_tts_provider_fallback_order=("in_memory",),
         voice_audio_output_backend_default="in_memory",
         ui_backend_kind="in_memory",
     )
     app = build_application(settings)
-    app.voice_runtime_service._tts._registry.register(SlowTTSProvider())  # noqa: SLF001
+    app.voice_runtime_service._tts._registry.register(BlockingTTSProvider())  # noqa: SLF001
     app.start()
     try:
-        started = time.perf_counter()
         receipt = app.voice_runtime_service.speak("respuesta no bloqueante")
-        elapsed = time.perf_counter() - started
         assert receipt.success is True
-        assert elapsed < 0.2
-        for _ in range(20):
-            if app.voice_runtime_service.status()["speaking"]:
-                break
-            time.sleep(0.03)
-        assert app.voice_runtime_service.status()["speaking"] is True
+        assert synthesis_entered.wait(timeout=2.0)
+        assert release_synthesis.is_set() is False
+        status = app.voice_runtime_service.status(lightweight_voice_clone=True)
+        assert status["speaking"] is True
     finally:
+        release_synthesis.set()
         app.stop()
 
 

@@ -1,0 +1,89 @@
+{
+  "schema": "jarvis.agentic_lora.b4a1.compatibility.v1",
+  "status": "PARTIAL",
+  "decision": "UPSTREAM_FIX_REQUIRED",
+  "production": {
+    "build": "b10516-b95502ba9",
+    "commit": "b95502ba9aa0eb73a2f4fc8878d7fbe6a847a0b9",
+    "gguf_sha256_before": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+    "gguf_sha256_after": "7e918aeca06c52bcb528ea6b04b4ec957e75ee8c0a73138854c0dfcf371ea429",
+    "qwen35_runtime": true,
+    "lora_flag": true,
+    "lora_scaled_flag": true,
+    "server_deferred_lora": true,
+    "converter_in_binary_bundle": false,
+    "export_lora_in_binary_bundle": false,
+    "converter_in_matching_source": true,
+    "export_lora_in_matching_source": true
+  },
+  "upstream": {
+    "commit": "b96806d96061049a5b574269b049bf6241d63d46",
+    "convert_lora_matches_production_source": true,
+    "runtime_adapter_loader_matches_production_source": true,
+    "qwen35_lora_out_projection_fix_present": false
+  },
+  "gguf": {
+    "architecture": "qwen35",
+    "tensor_count": 427,
+    "block_count": 32,
+    "embedding_length": 4096,
+    "feed_forward_length": 12288,
+    "vocabulary": 248320,
+    "full_attention_interval": 4,
+    "linear_attention_layers": [0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, 16, 17, 18, 20, 21, 22, 24, 25, 26, 28, 29, 30],
+    "full_attention_layers": [3, 7, 11, 15, 19, 23, 27, 31]
+  },
+  "target_mapping": [
+    {"logical": "linear_attn.in_proj_qkv", "gguf": "blk.{layer}.attn_qkv.weight", "count": 24, "official_conversion": "PASS"},
+    {"logical": "linear_attn.in_proj_z", "gguf": "blk.{layer}.attn_gate.weight", "count": 24, "official_conversion": "PASS"},
+    {"logical": "linear_attn.in_proj_b", "gguf": "blk.{layer}.ssm_beta.weight", "count": 24, "official_conversion": "PASS"},
+    {"logical": "linear_attn.in_proj_a", "gguf": "blk.{layer}.ssm_alpha.weight", "count": 24, "official_conversion": "PASS"},
+    {"logical": "linear_attn.out_proj", "gguf": "blk.{layer}.ssm_out.weight", "count": 24, "official_conversion": "FAIL"},
+    {"logical": "self_attn.q_proj", "gguf": "blk.{layer}.attn_q.weight", "count": 8, "official_conversion": "PASS"},
+    {"logical": "self_attn.k_proj", "gguf": "blk.{layer}.attn_k.weight", "count": 8, "official_conversion": "PASS"},
+    {"logical": "self_attn.v_proj", "gguf": "blk.{layer}.attn_v.weight", "count": 8, "official_conversion": "PASS"},
+    {"logical": "self_attn.o_proj", "gguf": "blk.{layer}.attn_output.weight", "count": 8, "official_conversion": "PASS"},
+    {"logical": "mlp.gate_proj", "gguf": "blk.{layer}.ffn_gate.weight", "count": 32, "official_conversion": "PASS"},
+    {"logical": "mlp.up_proj", "gguf": "blk.{layer}.ffn_up.weight", "count": 32, "official_conversion": "PASS"},
+    {"logical": "mlp.down_proj", "gguf": "blk.{layer}.ffn_down.weight", "count": 32, "official_conversion": "PASS"}
+  ],
+  "official_converter": {
+    "production_source_result": "FAIL",
+    "current_upstream_result": "FAIL",
+    "failing_target": "linear_attn.out_proj",
+    "failure": "LoraTorchTensor.reshape raises NotImplementedError while reordering input columns",
+    "issue": "https://github.com/ggml-org/llama.cpp/issues/21125",
+    "base_weights_required": false,
+    "required_base_artifacts": ["config.json", "tokenizer/config metadata"]
+  },
+  "isolated_diagnostic_patch": {
+    "production_modified": false,
+    "patch_committed": false,
+    "method": "replace reshape/permute/reshape head reordering with an equivalent direct index permutation",
+    "permutation_equivalence": "PASS",
+    "all_12_targets_converted": true,
+    "adapter_tensor_count": 24,
+    "adapter_size_bytes": 235520,
+    "adapter_sha256": "96e2e08dacbaa3574ea52a10aa9a8373021493ece4b9f5cadde96405a5c38881"
+  },
+  "runtime_smoke": {
+    "build": "b10516-b95502ba9",
+    "gpu": "NVIDIA GeForce RTX 5070 Laptop GPU",
+    "base_loaded": true,
+    "adapter_loaded": true,
+    "cuda_generation": true,
+    "exit_code": 0,
+    "generation_tokens_per_second": 47.4,
+    "owned_processes_remaining": 0
+  },
+  "cleanup": {
+    "owned_processes": "PASS",
+    "temporary_files": "BLOCKED_BY_EXECUTION_SAFETY_POLICY",
+    "temporary_root": "%TEMP%/jarvis-b4a1-c3d7367484b14e40a357d09821660f8e",
+    "remaining_bytes": 414658213
+  },
+  "cloud_started": false,
+  "cloud_cost_usd": 0,
+  "training_started": false,
+  "real_cloud_peft_round_trip_required": true
+}

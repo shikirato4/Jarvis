@@ -4,25 +4,34 @@ from pydantic import BaseModel
 
 from jarvis.action_executor import (
     ActionExecutor,
+    ActionObservation,
     ActionRequest,
     ActionStatus,
     TypedActionSecurityGate,
 )
-from jarvis.actions.models import ActionResult, ActionRisk
+from jarvis.actions.models import ActionResult, ActionRisk, ExecutionStatus
 from jarvis.actions.registry import ActionDefinition, ActionRegistry
 from jarvis.actions.router import ActionRouter
-from jarvis.agent_runtime import AgentController, AgentRunRequest, AgentRunStatus
+from jarvis.agent_runtime import (
+    AgentController,
+    AgentOutcomeCode,
+    AgentRunRequest,
+    AgentRunStatus,
+)
 from jarvis.config import Settings
 from jarvis.core.events import EventBus
 from jarvis.core.errors import JarvisError
 from jarvis.desktop_runtime.intent_router import DesktopIntentDecision, DesktopIntentRouter
 from jarvis.desktop_runtime.chat import DesktopChatEngine
 from jarvis.models_runtime.base import (
+    ModelMessage,
     ModelRequest,
     ModelResponse,
     ModelToolCall,
     ProviderKind,
+    StreamChunk,
 )
+from jarvis.models_runtime.output_completion import OutputCompletionPolicy
 from jarvis.modules.autonomy_module import AutonomyModule
 from jarvis.modules.desktop_agent_module import DesktopAgentModule
 from jarvis.modules.interface_module import InterfaceModule
@@ -80,7 +89,10 @@ def _executor(
 
 
 def _response(
-    *, content: str = "", tool_calls: list[ModelToolCall] | None = None
+    *,
+    content: str = "",
+    tool_calls: list[ModelToolCall] | None = None,
+    metadata: dict | None = None,
 ) -> ModelResponse:
     return ModelResponse(
         provider_name="nemotron-test",
@@ -90,7 +102,262 @@ def _response(
         content=content,
         tool_calls=tool_calls or [],
         latency_ms=1.0,
+        metadata=metadata or {},
     )
+
+
+class _ShadowObserver:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def observe(self, **payload):
+        self.calls.append(payload)
+        return list(payload["selected_tools"])
+
+
+def test_agent_reports_real_final_tool_selection_to_shadow_router() -> None:
+    class Payload(BaseModel):
+        value: int
+
+    executor, events = _executor(
+        [
+            ActionDefinition(
+                name="calculator.evaluate",
+                description="calculate",
+                payload_model=Payload,
+                handler=lambda _context, payload: ActionResult(
+                    message="done", data={"value": payload.value}
+                ),
+            )
+        ]
+    )
+    responses = iter(
+        [
+            _response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="calc-shadow-1",
+                        name="calculator.evaluate",
+                        arguments={"value": 73414},
+                    )
+                ]
+            ),
+            _response(content="73414"),
+        ]
+    )
+    shadow = _ShadowObserver()
+    controller = AgentController(
+        infer_model=lambda _request: next(responses),
+        action_executor=executor,
+        event_sink=events.publish,
+        shadow_observer=shadow,
+    )
+
+    result = controller.run(AgentRunRequest(user_message="calcula 781 por 94"))
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert len(shadow.calls) == 1
+    assert shadow.calls[0]["selected_tools"] == ["calculator.evaluate"]
+    assert shadow.calls[0]["success"] is True
+    assert shadow.calls[0]["step_count"] == 1
+    neural_events = [
+        event
+        for event in reversed(events.recent_events())
+        if event["event_name"].startswith("neural_router.")
+    ]
+    assert [event["event_name"] for event in neural_events] == [
+        "neural_router.started",
+        "neural_router.completed",
+    ]
+    assert "calcula 781 por 94" not in repr(neural_events)
+
+
+def test_agent_streams_model_tool_loop_and_final_answer() -> None:
+    class Payload(BaseModel):
+        expression: str
+
+    executor, events = _executor(
+        [
+            ActionDefinition(
+                name="calculator.evaluate",
+                description="calculate",
+                payload_model=Payload,
+                handler=lambda _context, _payload: ActionResult(
+                    message="done", data={"value": 73414}
+                ),
+            )
+        ]
+    )
+    requests = []
+
+    def stream(request, *, cancel_check=None):
+        requests.append(request)
+        assert cancel_check is not None
+        if request.messages[-1].role == "tool":
+            yield StreamChunk(
+                text="El resultado ",
+                metadata={"provider": "nemotron-test", "model": "nemotron-test"},
+            )
+            yield StreamChunk(
+                text="es 73414.",
+                metadata={"provider": "nemotron-test", "model": "nemotron-test"},
+            )
+            yield StreamChunk(
+                done=True,
+                metadata={
+                    "finish_reason": "stop",
+                    "stream_closed_normally": True,
+                },
+            )
+            return
+        yield StreamChunk(
+            tool_calls=[
+                ModelToolCall(
+                    id="calculator-stream-1",
+                    name="calculator.evaluate",
+                    arguments={"expression": "781 * 94"},
+                )
+            ],
+            metadata={"provider": "nemotron-test", "model": "nemotron-test"},
+        )
+        yield StreamChunk(
+            done=True,
+            metadata={
+                "finish_reason": "tool_calls",
+                "stream_closed_normally": True,
+            },
+        )
+
+    streamed: list[str] = []
+    controller = AgentController(
+        infer_model=lambda _request: (_ for _ in ()).throw(
+            AssertionError("streaming agent must not use synchronous inference")
+        ),
+        stream_model=stream,
+        action_executor=executor,
+        event_sink=events.publish,
+    )
+
+    result = controller.run(
+        AgentRunRequest(
+            user_message="calcula 781 por 94",
+            stream_callback=streamed.append,
+            cancellation_check=lambda: False,
+        )
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.final_answer == "El resultado es 73414."
+    assert streamed == ["El resultado ", "es 73414."]
+    assert len(requests) == 2
+    assert requests[0].tools
+    assert requests[1].messages[-2].tool_calls[0].name == "calculator.evaluate"
+    assert requests[1].messages[-1].role == "tool"
+    assert '"value":73414' in requests[1].messages[-1].content
+
+
+def test_agent_classifies_length_finish_as_truncated() -> None:
+    executor, _events = _executor([])
+    response = _response(content="respuesta parcial")
+    response.metadata = {
+        "completion_contract_enforced": True,
+        "finish_reason": "length",
+        "stream_closed_normally": True,
+        "incomplete": True,
+        "prompt_tokens": 4043,
+        "completion_tokens": 53,
+        "requested_max_tokens": 500,
+    }
+
+    result = AgentController(
+        infer_model=lambda _request: response,
+        action_executor=executor,
+    ).run(AgentRunRequest(user_message="continúa"))
+
+    assert result.status is AgentRunStatus.TRUNCATED
+    assert result.outcome_code is AgentOutcomeCode.MODEL_OUTPUT_TRUNCATED
+    assert result.error_type == "OutputTokenLimitReached"
+    assert result.final_answer == "respuesta parcial"
+    assert result.finish_reason == "length"
+    assert result.completion_tokens == 53
+
+
+def test_agent_rejects_missing_finish_reason() -> None:
+    executor, _events = _executor([])
+    response = _response(content="sin terminal")
+    response.metadata = {
+        "completion_contract_enforced": True,
+        "finish_reason": None,
+        "stream_closed_normally": True,
+        "incomplete": True,
+    }
+
+    result = AgentController(
+        infer_model=lambda _request: response,
+        action_executor=executor,
+    ).run(AgentRunRequest(user_message="hola"))
+
+    assert result.status is AgentRunStatus.INTERRUPTED
+    assert result.error_type == "MissingFinishReason"
+
+
+def test_file_observation_compaction_preserves_facts_and_marks_truncation() -> None:
+    compact = AgentController._compact_file_observation(  # noqa: SLF001
+        {
+            "operation": "files.read_file",
+            "path": "C:/fixture/report.txt",
+            "content": "x" * 2_500,
+            "items": [{"name": str(index)} for index in range(25)],
+            "metadata": {
+                "name": "report.txt",
+                "path": "C:/fixture/report.txt",
+                "exists": True,
+                "size": 2_500,
+                "unrelated": "omit",
+            },
+            "unrelated": "omit",
+        }
+    )
+
+    assert compact["path"] == "C:/fixture/report.txt"
+    assert compact["metadata"] == {
+        "name": "report.txt",
+        "path": "C:/fixture/report.txt",
+        "exists": True,
+        "size": 2_500,
+    }
+    assert len(compact["content"]) == 2_000
+    assert compact["content_truncated_for_model"] is True
+    assert compact["content_original_chars"] == 2_500
+    assert len(compact["items"]) == 20
+    assert compact["items"][0] == {"name": "0"}
+    assert compact["items_truncated_for_model"] is True
+    assert compact["item_count"] == 25
+    assert "unrelated" not in compact
+
+
+def test_agent_stream_eof_never_masquerades_as_completed() -> None:
+    executor, _events = _executor([])
+
+    def stream(_request, *, cancel_check=None):
+        yield StreamChunk(text="prefijo íntegro")
+        # Generator exits without a terminal chunk.
+
+    result = AgentController(
+        infer_model=lambda _request: _response(content="unused"),
+        stream_model=stream,
+        action_executor=executor,
+    ).run(
+        AgentRunRequest(
+            user_message="hola",
+            stream_callback=lambda _delta: None,
+        )
+    )
+
+    assert result.status is AgentRunStatus.INTERRUPTED
+    assert result.error_type == "AbnormalStreamTermination"
+    assert result.final_answer == "prefijo íntegro"
+    assert result.stream_closed_normally is False
 
 
 def test_os_and_ui_mutations_are_never_registered_as_safe_actions() -> None:
@@ -539,14 +806,204 @@ def test_agent_controller_runs_two_tools_then_returns_nemotron_final() -> None:
     assert agent_events == [
         "agent_controller.started",
         "agent_controller.model_requested",
+        "agent_controller.tool_calls_pending",
         "agent_controller.tool_requested",
         "agent_controller.tool_observed",
+        "agent_controller.continuation_started",
         "agent_controller.model_requested",
+        "agent_controller.tool_calls_pending",
         "agent_controller.tool_requested",
         "agent_controller.tool_observed",
+        "agent_controller.continuation_started",
         "agent_controller.model_requested",
         "agent_controller.completed",
     ]
+
+
+def test_agent_controller_retries_then_fails_when_required_tool_is_not_selected() -> None:
+    executor, events = _executor([])
+    requests: list[ModelRequest] = []
+
+    def infer(request: ModelRequest) -> ModelResponse:
+        requests.append(request)
+        return _response(content="Puedes ejecutar el comando manualmente.")
+
+    base_request = ModelRequest(
+        task_type="agent",
+        messages=[ModelMessage(role="user", content="ejecuta la acción")],
+        metadata={"agent_tool_required": True},
+    )
+    result = AgentController(
+        infer_model=infer,
+        action_executor=executor,
+        event_sink=events.publish,
+    ).run(
+        AgentRunRequest(
+            user_message="ejecuta la acción",
+            model_request=base_request,
+        )
+    )
+
+    assert len(requests) == 2
+    assert requests[1].messages[-1].role == "system"
+    assert result.status is AgentRunStatus.FAILED
+    assert result.outcome_code is AgentOutcomeCode.INVALID_MODEL_OUTPUT
+    assert result.error_type == "MissingRequiredToolCall"
+    assert result.final_answer == "Puedes ejecutar el comando manualmente."
+    event_names = {
+        event["event_name"] for event in events.recent_events()
+    }
+    assert "agent_controller.tool_selection_retry" in event_names
+
+
+def test_truncated_structured_tool_call_retries_without_executing_partial_call() -> None:
+    executions = 0
+
+    def handler(_context, payload: _ValuePayload) -> ActionResult:
+        nonlocal executions
+        executions += 1
+        return ActionResult(message="unexpected", data={"value": payload.value})
+
+    executor, _events = _executor(
+        [
+            ActionDefinition(
+                name="test.value",
+                description="Value tool.",
+                payload_model=_ValuePayload,
+                handler=handler,
+            )
+        ]
+    )
+    responses = iter(
+        [
+            _response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="partial-one", name="test.value", arguments={"value": 1}
+                    )
+                ],
+                metadata={
+                    "completion_contract_enforced": True,
+                    "finish_reason": "length",
+                    "stream_closed_normally": True,
+                    "incomplete": True,
+                },
+            ),
+            _response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="partial-two", name="test.value", arguments={"value": 2}
+                    )
+                ],
+                metadata={
+                    "completion_contract_enforced": True,
+                    "finish_reason": "length",
+                    "stream_closed_normally": True,
+                    "incomplete": True,
+                },
+            ),
+        ]
+    )
+    base_request = ModelRequest(
+        task_type="agent",
+        messages=[ModelMessage(role="user", content="ejecuta")],
+        metadata={"agent_tool_required": True},
+    )
+
+    result = AgentController(
+        infer_model=lambda _request: next(responses),
+        action_executor=executor,
+    ).run(
+        AgentRunRequest(
+            user_message="ejecuta",
+            model_request=base_request,
+        )
+    )
+
+    assert executions == 0
+    assert result.status is AgentRunStatus.FAILED
+    assert result.outcome_code is AgentOutcomeCode.INVALID_MODEL_OUTPUT
+    assert result.error_type == "TruncatedStructuredToolCall"
+    assert result.model_call_count == 2
+
+
+def test_agent_truncated_final_auto_continues_without_rerunning_tool() -> None:
+    executions = 0
+
+    def handler(_context, payload: _ValuePayload) -> ActionResult:
+        nonlocal executions
+        executions += 1
+        return ActionResult(message="ok", data={"value": payload.value})
+
+    executor, _events = _executor(
+        [
+            ActionDefinition(
+                name="test.value",
+                description="Value tool.",
+                payload_model=_ValuePayload,
+                handler=handler,
+            )
+        ]
+    )
+    raw_responses = iter(
+        [
+            _response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="tool-once", name="test.value", arguments={"value": 7}
+                    )
+                ],
+                metadata={
+                    "completion_contract_enforced": True,
+                    "finish_reason": "tool_calls",
+                    "stream_closed_normally": True,
+                    "incomplete": False,
+                },
+            ),
+            _response(
+                content="Resultado parcial ",
+                metadata={
+                    "completion_contract_enforced": True,
+                    "finish_reason": "length",
+                    "stream_closed_normally": True,
+                    "incomplete": True,
+                    "completion_tokens": 100,
+                },
+            ),
+            _response(
+                content="continuado.",
+                metadata={
+                    "completion_contract_enforced": True,
+                    "finish_reason": "stop",
+                    "stream_closed_normally": True,
+                    "incomplete": False,
+                    "completion_tokens": 40,
+                },
+            ),
+        ]
+    )
+    policy = OutputCompletionPolicy(Settings(_env_file=None))
+
+    def infer(request: ModelRequest) -> ModelResponse:
+        prepared = policy.prepare_request(request)
+        return policy.complete_response(
+            prepared,
+            next(raw_responses),
+            infer_next=lambda _continuation: next(raw_responses),
+        )
+
+    result = AgentController(
+        infer_model=infer,
+        action_executor=executor,
+    ).run(AgentRunRequest(user_message="usa la herramienta"))
+
+    assert executions == 1
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.final_answer == "Resultado parcial continuado."
+    assert result.auto_continuation_count == 1
+    assert result.model_request_count == 3
+    assert result.segment_finish_reasons == ["tool_calls", "length", "stop"]
+    assert result.segment_completion_tokens == [0, 100, 40]
 
 
 def test_agent_controller_replans_after_tool_failure() -> None:
@@ -703,3 +1160,165 @@ def test_agent_controller_blocks_repeated_action_loop() -> None:
         event["event_name"] == "agent_controller.blocked"
         for event in events.recent_events()
     )
+
+
+def test_empty_final_after_successful_tool_is_continuation_failure() -> None:
+    executor, _events = _executor(
+        [
+            ActionDefinition(
+                name="test.observe",
+                description="Return one observation.",
+                payload_model=_ValuePayload,
+                handler=lambda _context, payload: ActionResult(
+                    message="observed", data={"value": payload.value}
+                ),
+            )
+        ]
+    )
+    final = _response(content="")
+    final.metadata = {
+        "completion_contract_enforced": True,
+        "finish_reason": "stop",
+        "stream_closed_normally": True,
+        "incomplete": False,
+    }
+    responses = iter(
+        [
+            _response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="observe-1",
+                        name="test.observe",
+                        arguments={"value": 7},
+                    )
+                ]
+            ),
+            final,
+        ]
+    )
+
+    result = AgentController(
+        infer_model=lambda _request: next(responses),
+        action_executor=executor,
+    ).run(AgentRunRequest(user_message="observa"))
+
+    assert result.status is AgentRunStatus.FAILED
+    assert result.outcome_code is AgentOutcomeCode.MODEL_CONTINUATION_FAILURE
+    assert result.error_type == "EmptyContinuationFinal"
+    assert result.continuation_requested is True
+    assert result.assistant_final_present is False
+    text = DesktopChatEngine._agent_result_text(  # noqa: SLF001
+        DesktopChatEngine.__new__(DesktopChatEngine), result
+    )
+    assert "observación" in text
+    assert "salida valida" not in text
+
+
+def test_failed_tool_cannot_be_classified_as_success_even_if_model_claims_done() -> None:
+    executor, _events = _executor(
+        [
+            ActionDefinition(
+                name="test.fail",
+                description="Fail deliberately.",
+                payload_model=_ValuePayload,
+                handler=lambda _context, _payload: ActionResult(
+                    status=ExecutionStatus.FAILED,
+                    message="real tool failure",
+                ),
+            )
+        ]
+    )
+    responses = iter(
+        [
+            _response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="fail-1",
+                        name="test.fail",
+                        arguments={"value": 1},
+                    )
+                ]
+            ),
+            _response(content="Hecho."),
+        ]
+    )
+
+    result = AgentController(
+        infer_model=lambda _request: next(responses),
+        action_executor=executor,
+    ).run(AgentRunRequest(user_message="hazlo"))
+
+    assert result.status is AgentRunStatus.FAILED
+    assert result.outcome_code is AgentOutcomeCode.TOOL_EXECUTION_ERROR
+    assert result.observations[-1].status is ActionStatus.FAILED
+    visible = DesktopChatEngine._agent_result_text(  # noqa: SLF001
+        DesktopChatEngine.__new__(DesktopChatEngine), result
+    )
+    assert "herramienta no pudo completar" in visible
+
+
+def test_security_gate_denial_remains_a_structured_agent_outcome() -> None:
+    class _TerminalPayload(BaseModel):
+        command: str
+
+    executor, _events = _executor(
+        [
+            ActionDefinition(
+                name="operations.run_command",
+                description="Run a terminal command.",
+                payload_model=_TerminalPayload,
+                handler=lambda _context, _payload: ActionResult(message="should not run"),
+                risk=ActionRisk.SENSITIVE,
+            )
+        ]
+    )
+    responses = iter(
+        [
+            _response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="blocked-1",
+                        name="operations.run_command",
+                        arguments={"command": "Remove-Item C:/Windows -Recurse -Force"},
+                    )
+                ]
+            ),
+            _response(content="No se ejecutó."),
+        ]
+    )
+
+    result = AgentController(
+        infer_model=lambda _request: next(responses),
+        action_executor=executor,
+    ).run(AgentRunRequest(user_message="borra windows"))
+
+    assert result.status is AgentRunStatus.BLOCKED
+    assert result.outcome_code is AgentOutcomeCode.SECURITY_DENIED
+    assert result.observations[-1].status is ActionStatus.BLOCKED
+
+
+def test_file_final_omits_paths_not_present_in_real_observations() -> None:
+    observations = [
+        ActionObservation(
+            run_id="files-run",
+            call_id="files-call",
+            action="files.search",
+            status=ActionStatus.SUCCESS,
+            message="searched",
+            data={
+                "path": "C:/Users/example/Documents",
+                "items": [],
+                "scanned": 30,
+            },
+        )
+    ]
+    response = (
+        "No encontré coincidencias. Prueba en "
+        "`C:\\Users\\Example\\AppData\\Local\\InventedGame`."
+    )
+
+    grounded = AgentController._ground_file_paths(response, observations)  # noqa: SLF001
+
+    assert "InventedGame" not in grounded
+    assert "ruta no verificada omitida" in grounded
+    assert "no apareció en las observaciones" in grounded

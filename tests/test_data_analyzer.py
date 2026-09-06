@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import json
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,7 @@ from jarvis.core.events import EventBus
 from jarvis.data_analyzer import DataAnalysisError, DataAnalyzer
 from jarvis.models_runtime.base import ModelResponse, ModelToolCall, ProviderKind
 from jarvis.modules.data_module import DataModule
+from jarvis.modules.calculator_module import CalculatorModule
 
 
 def _xlsx_bytes() -> bytes:
@@ -36,6 +39,29 @@ def _xlsx_bytes() -> bytes:
                 <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
                 <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>10</v></c></row>
                 <row r="3"><c r="A3" t="s"><v>3</v></c><c r="B3"><v>25</v></c></row>
+              </sheetData>
+            </worksheet>""",
+        )
+    return output.getvalue()
+
+
+def _xlsx_date_bytes() -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr(
+            "xl/styles.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="14"/></cellXfs>
+            </styleSheet>""",
+        )
+        archive.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0" encoding="UTF-8"?>
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <sheetData>
+                <row r="1"><c r="A1" t="inlineStr"><is><t>when</t></is></c></row>
+                <row r="2"><c r="A2" s="1"><v>46023.5</v></c></row>
               </sheetData>
             </worksheet>""",
         )
@@ -117,6 +143,35 @@ def test_duplicate_headers_and_mixed_columns_are_explicit() -> None:
     assert table.columns == ["value", "value_2", "blank"]
     assert description["columns"]["value_2"]["type"] == "mixed"
     assert description["columns"]["blank"]["null_count"] == 2
+
+
+def test_filter_contains_accepts_typed_values_and_excludes_nulls() -> None:
+    analyzer = DataAnalyzer()
+    table = analyzer.load_bytes("typed.csv", b"value\n123\n\n456\n")
+
+    filtered = analyzer.filter(
+        table.table_id,
+        column="value",
+        operator="contains",
+        value=23,
+    )
+
+    assert filtered == [{"value": 123}]
+
+
+def test_malformed_csv_quotes_are_rejected() -> None:
+    analyzer = DataAnalyzer()
+
+    with pytest.raises(DataAnalysisError, match="corrupt"):
+        analyzer.load_bytes("broken.csv", b'name,value\n"unterminated,42\n')
+
+
+def test_xlsx_date_styles_are_decoded_without_executing_content() -> None:
+    analyzer = DataAnalyzer()
+    table = analyzer.load_bytes("dates.xlsx", _xlsx_date_bytes())
+
+    assert table.rows == [{"when": datetime(2026, 1, 1, 12, 0)}]
+    assert analyzer.describe(table.table_id)["columns"]["when"]["type"] == "date"
 
 
 def test_data_agent_can_describe_then_find_anomaly_before_final_answer() -> None:
@@ -208,3 +263,133 @@ def test_plot_reports_real_artifact_from_measurable_data() -> None:
     assert calls[0]["x"] == [1, 2]
     assert calls[0]["y"] == [10, 20]
     assert calls[0]["kind"] == "line"
+
+
+def test_data_agent_loads_analyzes_calculates_plots_and_explains(tmp_path) -> None:
+    source = tmp_path / "agent-e2e.csv"
+    source.write_text(
+        "index,category,value\n1,A,10\n2,A,11\n3,B,12\n4,B,250\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "outputs"
+    analyzer = DataAnalyzer(output_dir=output_dir)
+    registry = ActionRegistry()
+    DataModule(analyzer).register_actions(registry)
+    CalculatorModule().register_actions(registry)
+    events = EventBus()
+    memory = type("Memory", (), {"record_activity": lambda self, **payload: None})()
+    settings = Settings(
+        _env_file=None,
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+    )
+    executor = ActionExecutor(ActionRouter(registry, settings, memory, object(), events))
+    requests = []
+
+    def response(content="", tool_calls=None):
+        return ModelResponse(
+            provider_name="nemotron-test",
+            provider_kind=ProviderKind.LOCAL,
+            logical_model="general_assistant",
+            model_name="nemotron-test",
+            content=content,
+            tool_calls=tool_calls or [],
+            latency_ms=1.0,
+        )
+
+    def infer(request):
+        requests.append(request)
+        last = request.messages[-1]
+        if last.role == "user":
+            return response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="data-load-e2e",
+                        name="data.load_file",
+                        arguments={"path": str(source)},
+                    )
+                ]
+            )
+        observation = json.loads(last.content)
+        table_id = observation.get("data", {}).get("table_id")
+        if last.name == "data.load_file":
+            return response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="data-describe-e2e",
+                        name="data.describe",
+                        arguments={"table_id": table_id},
+                    )
+                ]
+            )
+        if last.name == "data.describe":
+            loaded = json.loads(requests[1].messages[-1].content)["data"]["table_id"]
+            return response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="data-anomalies-e2e",
+                        name="data.anomalies",
+                        arguments={"table_id": loaded, "column": "value"},
+                    )
+                ]
+            )
+        if last.name == "data.anomalies":
+            return response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="data-calculate-e2e",
+                        name="calculator.evaluate",
+                        arguments={"expression": "250 - 11"},
+                    )
+                ]
+            )
+        if last.name == "calculator.evaluate":
+            loaded = json.loads(requests[1].messages[-1].content)["data"]["table_id"]
+            return response(
+                tool_calls=[
+                    ModelToolCall(
+                        id="data-plot-e2e",
+                        name="data.plot",
+                        arguments={
+                            "table_id": loaded,
+                            "x_column": "index",
+                            "y_column": "value",
+                            "kind": "line",
+                        },
+                    )
+                ]
+            )
+        return response(
+            content=(
+                "El valor 250 es anómalo, supera por 239 al valor de referencia 11, "
+                "y guardé la gráfica solicitada."
+            )
+        )
+
+    result = AgentController(
+        infer_model=infer,
+        action_executor=executor,
+    ).run(
+        AgentRunRequest(
+            user_message="Analiza el CSV, encuentra la anomalía, calcula la diferencia y genera una gráfica.",
+            max_steps=5,
+        )
+    )
+
+    assert result.final_answer is not None and "239" in result.final_answer
+    assert [item.action for item in result.observations] == [
+        "data.load_file",
+        "data.describe",
+        "data.anomalies",
+        "calculator.evaluate",
+        "data.plot",
+    ]
+    assert result.observations[2].data["anomalies"] == [
+        {"row_index": 3, "value": 250.0}
+    ]
+    artifact = Path(result.observations[-1].artifacts[0])
+    assert artifact.is_file()
+    assert artifact.parent == output_dir
+    assert artifact.stat().st_size > 0
+    assert len(requests) == 6

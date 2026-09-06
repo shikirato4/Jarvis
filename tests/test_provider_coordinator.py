@@ -25,7 +25,6 @@ from jarvis.models_runtime.hybrid import (
     RequestExecutionContext,
 )
 from jarvis.models_runtime.nvidia_nim import (
-    NvidiaInvalidKeyError,
     NvidiaRateLimitError,
     NvidiaUnavailableError,
 )
@@ -71,6 +70,15 @@ class FakeProvider:
         self.stream_error: Exception | None = None
         self.stream_prefix = name
         self.retry_after_seconds: float | None = None
+        self.ensure_ready_calls = 0
+        self.prewarm_calls = 0
+        self.runtime_manager = None
+
+    def ensure_runtime_ready(self) -> None:
+        self.ensure_ready_calls += 1
+
+    def prewarm(self) -> None:
+        self.prewarm_calls += 1
 
     def status_check(self) -> ProviderStatus:
         self.status_calls += 1
@@ -166,6 +174,28 @@ def test_mode_change_updates_selected_mode_without_erasing_last_provider() -> No
 
     assert snapshot.selected_mode is LLMMode.LOCAL
     assert snapshot.active_provider == "nvidia_nim"
+    assert coordinator._local.prewarm_calls == 1  # noqa: SLF001
+
+
+def test_online_and_auto_mode_changes_do_not_prewarm_local_runtime() -> None:
+    coordinator, _, local = _coordinator("local")
+
+    coordinator.set_mode(LLMMode.NVIDIA_API)
+    coordinator.set_mode(LLMMode.AUTO)
+
+    assert local.prewarm_calls == 0
+
+
+def test_local_runtime_is_ensured_only_when_local_route_is_selected() -> None:
+    coordinator, cloud, local = _coordinator("auto")
+
+    coordinator.infer(ModelRequest(task_type="assistant", prompt="online"))
+    assert cloud.infer_calls == 1
+    assert local.ensure_ready_calls == 0
+
+    coordinator.set_mode(LLMMode.LOCAL)
+    coordinator.infer(ModelRequest(task_type="assistant", prompt="local"))
+    assert local.ensure_ready_calls == 1
 
 
 def test_auto_prefers_healthy_nvidia_and_records_request_provider() -> None:
@@ -185,10 +215,6 @@ def test_auto_prefers_healthy_nvidia_and_records_request_provider() -> None:
 @pytest.mark.parametrize(
     ("state", "error"),
     [
-        (
-            ProviderOperationalState.CLOUD_INVALID_KEY,
-            NvidiaInvalidKeyError("invalid", provider_name="nvidia_nim"),
-        ),
         (
             ProviderOperationalState.CLOUD_UNAVAILABLE,
             NvidiaUnavailableError("offline", provider_name="nvidia_nim"),
@@ -218,6 +244,17 @@ def test_auto_uses_local_for_cloud_health_failures(state, error) -> None:
     assert local.infer_calls == 1
 
 
+def test_auto_does_not_hide_invalid_nvidia_credentials_with_local_fallback() -> None:
+    coordinator, cloud, local = _coordinator()
+    cloud.state = ProviderOperationalState.CLOUD_INVALID_KEY
+    cloud.healthy = False
+
+    with pytest.raises(HybridProviderUnavailableError):
+        coordinator.infer(ModelRequest(task_type="assistant", prompt="hola"))
+
+    assert local.infer_calls == 0
+
+
 def test_explicit_nvidia_never_falls_back_to_local() -> None:
     coordinator, cloud, local = _coordinator("nvidia_api")
     cloud.healthy = False
@@ -230,6 +267,24 @@ def test_explicit_nvidia_never_falls_back_to_local() -> None:
     assert local.infer_calls == 0
 
 
+@pytest.mark.parametrize("target", ["auto", "nvidia_api"])
+def test_leaving_local_stops_owned_runtime(target: str) -> None:
+    coordinator, _, local = _coordinator("local")
+
+    class _RuntimeManager:
+        stop_calls = 0
+
+        def stop(self):
+            self.stop_calls += 1
+
+    manager = _RuntimeManager()
+    local.runtime_manager = manager
+
+    coordinator.set_mode(target)
+
+    assert manager.stop_calls == 1
+
+
 def test_local_mode_makes_zero_cloud_calls() -> None:
     coordinator, cloud, local = _coordinator("local")
 
@@ -239,6 +294,20 @@ def test_local_mode_makes_zero_cloud_calls() -> None:
     assert cloud.status_calls == 0
     assert cloud.infer_calls == 0
     assert local.infer_calls == 1
+
+
+def test_explicit_local_failure_does_not_retry_or_fallback_to_cloud() -> None:
+    coordinator, cloud, local = _coordinator("local")
+    local.infer_error = NvidiaUnavailableError(
+        "qwen_local runtime unavailable", provider_name=local.provider_name
+    )
+
+    with pytest.raises(HybridProviderUnavailableError, match="qwen_local"):
+        coordinator.infer(ModelRequest(task_type="assistant", prompt="hola"))
+
+    assert local.infer_calls == 1
+    assert cloud.status_calls == 0
+    assert cloud.infer_calls == 0
 
 
 def test_both_unavailable_provides_combined_diagnostic() -> None:

@@ -226,6 +226,11 @@ class JarvisRuntimeService(RuntimeServiceContract):
         self._ensure_started()
         return self._model_service.health()
 
+    def provider_selection(self):
+        """Return the coordinator's effective mode/provider selection."""
+        self._ensure_started()
+        return self._model_service.provider_selection()
+
     def list_models(self) -> list[dict[str, Any]]:
         self._ensure_started()
         return self._model_service.list_models()
@@ -569,6 +574,14 @@ class JarvisRuntimeService(RuntimeServiceContract):
     def writing_analyze(self, request: WritingContinuationRequest | dict[str, Any]):
         self._ensure_started()
         return self._writing_runtime_service.analyze(WritingContinuationRequest.model_validate(request))
+
+    def ui_window_access_advice(self, title: str | None, *, operation_name: str):
+        self._ensure_started()
+        return self._ui_automation_service.window_access_advice(title, operation_name=operation_name)
+
+    def writing_context_preflight(self, request: WritingContinuationRequest | dict[str, Any]):
+        self._ensure_started()
+        return self._writing_runtime_service.preflight_context(WritingContinuationRequest.model_validate(request))
 
     def writing_continue(self, request: WritingContinuationRequest | dict[str, Any]):
         self._ensure_started()

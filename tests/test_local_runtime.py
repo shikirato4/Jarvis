@@ -16,7 +16,7 @@ from jarvis.local_runtime.service import LocalRuntimeService
 from jarvis.local_runtime.vllm_backend import VllmBackendAdapter
 
 
-MODEL = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
+MODEL = "Qwen3.5-9B-IQ4_XS"
 
 
 def _diagnostic(

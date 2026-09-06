@@ -3,11 +3,11 @@ from __future__ import annotations
 from jarvis.neural_router import (
     BenchmarkResult,
     HashedTextFeatureExtractor,
+    LazyTrainingShadowRouter,
     NeuralRouter,
     NeuralRouterTrainingPipeline,
     NumpyMLPBackend,
     RouterLifecycleManager,
-    RouterExample,
     ShadowRouter,
     build_controlled_dataset,
     should_promote,
@@ -155,3 +155,49 @@ def test_checkpoint_promotion_and_rollback_use_backend_neutral_store() -> None:
         ("rollback",),
         ("load_active", "_BackendStub"),
     ]
+
+
+def test_lazy_shadow_trains_once_and_never_changes_runtime_tool_selection() -> None:
+    class Pipeline:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def train_and_evaluate(self, examples, *, seed):
+            self.calls += 1
+            assert examples
+            assert seed == 721
+            router = NeuralRouter(
+                backend=_BackendStub(),
+                feature_extractor=HashedTextFeatureExtractor(dimension=32),
+                tool_map={"calculator": ("calculator.evaluate",)},
+            )
+            return type("Result", (), {"router": router})()
+
+    pipeline = Pipeline()
+    shadow = LazyTrainingShadowRouter(
+        pipeline=pipeline,
+        dataset_factory=build_controlled_dataset,
+        seed=721,
+    )
+
+    first = shadow.observe(
+        text="calcula 2 por 3",
+        selected_tools=["web.search"],
+        success=True,
+        step_count=1,
+        latency_ms=2.0,
+        correction_required=False,
+    )
+    second = shadow.observe(
+        text="calcula 4 por 5",
+        selected_tools=["calculator.evaluate"],
+        success=True,
+        step_count=1,
+        latency_ms=2.0,
+        correction_required=False,
+    )
+
+    assert pipeline.calls == 1
+    assert first == ["web.search"]
+    assert second == ["calculator.evaluate"]
+    assert len(shadow.traces) == 2

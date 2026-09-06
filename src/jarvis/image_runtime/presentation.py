@@ -4,6 +4,13 @@ from collections.abc import MutableSequence
 from typing import Any
 
 
+def format_probe_status(value: object) -> str:
+    """Render tri-state hardware probes without turning unknown into false."""
+    if value is None:
+        return "not checked"
+    return str(bool(value)).lower()
+
+
 def format_image_progress(job: dict[str, Any]) -> str:
     """Return measured progress only when the runtime supplied step counts."""
 

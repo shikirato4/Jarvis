@@ -176,6 +176,32 @@ def test_nvidia_inference_uses_exact_model_and_normalizes_response() -> None:
     assert response.usage.total_tokens == 6
 
 
+def test_nemotron_chat_profile_reserves_tokens_for_visible_answer() -> None:
+    settings = _settings().model_copy(
+        update={"nvidia_reasoning_min_completion_tokens": 512}
+    )
+    provider = NvidiaNimProvider(settings, secret_manager=_manager(SECRET))
+
+    payload = provider._request_payload(  # noqa: SLF001
+        ModelRequest(
+            task_type="assistant",
+            prompt="hola",
+            max_tokens=160,
+            metadata={"generation_profile": "fast"},
+        ),
+        temperature=0.2,
+        stream=True,
+    )
+    direct_payload = provider._request_payload(  # noqa: SLF001
+        ModelRequest(task_type="assistant", prompt="hola", max_tokens=20),
+        temperature=0.2,
+        stream=False,
+    )
+
+    assert payload["max_tokens"] == 512
+    assert direct_payload["max_tokens"] == 20
+
+
 def test_nvidia_tool_calling_and_structured_output_are_forwarded_and_normalized() -> (
     None
 ):
@@ -243,6 +269,115 @@ def test_nvidia_tool_calling_and_structured_output_are_forwarded_and_normalized(
     assert response.tool_calls[0].id == "call-1"
     assert response.tool_calls[0].name == "read_status"
     assert response.tool_calls[0].arguments == {"scope": "local"}
+
+
+def test_nvidia_encodes_dotted_terminal_actions_and_restores_canonical_call() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "model": REMOTE_MODEL,
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "terminal-1",
+                            "type": "function",
+                            "function": {
+                                "name": "terminal__run",
+                                "arguments": '{"session_id":"s","command":"echo ok"}',
+                            },
+                        }],
+                    }
+                }],
+            },
+        )
+
+    provider = NvidiaNimProvider(
+        _settings(),
+        secret_manager=_manager(SECRET),
+        client=httpx.Client(
+            base_url="https://integrate.api.nvidia.test/v1",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    response = provider.infer(
+        ModelRequest(
+            task_type="agent",
+            prompt="usa terminal",
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "terminal.run",
+                    "description": "Run a terminal command",
+                    "parameters": {"type": "object"},
+                },
+            }],
+        ),
+        model_name=REMOTE_MODEL,
+        temperature=0.1,
+        timeout_seconds=2,
+    )
+
+    assert captured["tools"][0]["function"]["name"] == "terminal__run"
+    assert response.tool_calls[0].name == "terminal.run"
+
+
+def test_nvidia_encodes_and_restores_dotted_file_action() -> None:
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "model": REMOTE_MODEL,
+                "choices": [{
+                    "message": {
+                        "content": "",
+                        "tool_calls": [{
+                            "id": "files-1",
+                            "type": "function",
+                            "function": {
+                                "name": "files__search",
+                                "arguments": '{"pattern":"report.pdf"}',
+                            },
+                        }],
+                    }
+                }],
+            },
+        )
+
+    provider = NvidiaNimProvider(
+        _settings(),
+        secret_manager=_manager(SECRET),
+        client=httpx.Client(
+            base_url="https://integrate.api.nvidia.test/v1",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    response = provider.infer(
+        ModelRequest(
+            task_type="agent",
+            prompt="busca report.pdf",
+            tools=[{
+                "type": "function",
+                "function": {
+                    "name": "files.search",
+                    "description": "Search for a file",
+                    "parameters": {"type": "object"},
+                },
+            }],
+        ),
+        model_name=REMOTE_MODEL,
+        temperature=0.1,
+        timeout_seconds=2,
+    )
+    assert captured["tools"][0]["function"]["name"] == "files__search"
+    assert response.tool_calls[0].name == "files.search"
 
 
 @pytest.mark.parametrize("status_code", [401, 403])
@@ -345,6 +480,39 @@ def test_nvidia_streaming_normalizes_sse_chunks() -> None:
 
     assert "".join(chunk.text for chunk in chunks) == "Hola"
     assert chunks[-1].done is True
+
+
+def test_nvidia_reasoning_only_stream_is_not_reported_as_completed() -> None:
+    private_reasoning = "private chain must never become visible"
+    body = (
+        "data: "
+        + json.dumps(
+            {"choices": [{"delta": {"reasoning_content": private_reasoning}}]}
+        )
+        + "\n\ndata: [DONE]\n\n"
+    ).encode()
+    provider = NvidiaNimProvider(
+        _settings(),
+        secret_manager=_manager(SECRET),
+        client=httpx.Client(
+            base_url="https://integrate.api.nvidia.test/v1",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, content=body)
+            ),
+        ),
+    )
+
+    with pytest.raises(NvidiaUnavailableError) as captured:
+        list(
+            provider.stream_infer(
+                ModelRequest(task_type="assistant", prompt="hola", stream=True),
+                model_name=REMOTE_MODEL,
+                temperature=0.2,
+                timeout_seconds=2,
+            )
+        )
+
+    assert private_reasoning not in str(captured.value)
 
 
 def test_nvidia_image_transport_is_ephemeral_and_not_serialized_in_request_history() -> (

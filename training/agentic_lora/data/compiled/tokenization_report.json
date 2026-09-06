@@ -1,0 +1,59 @@
+{
+  "average": 426.03,
+  "by_split": {
+    "hard_regression": {
+      "average": 395.69,
+      "count": 80,
+      "maximum": 631,
+      "median": 379,
+      "over_1024": 0,
+      "p90": 437,
+      "p95": 456,
+      "p99": 601
+    },
+    "heldout": {
+      "average": 443.04,
+      "count": 200,
+      "maximum": 635,
+      "median": 439,
+      "over_1024": 0,
+      "p90": 480,
+      "p95": 580,
+      "p99": 618
+    },
+    "train": {
+      "average": 424.87,
+      "count": 800,
+      "maximum": 635,
+      "median": 429,
+      "over_1024": 0,
+      "p90": 472,
+      "p95": 541,
+      "p99": 612
+    },
+    "validation": {
+      "average": 425.65,
+      "count": 120,
+      "maximum": 626,
+      "median": 428,
+      "over_1024": 0,
+      "p90": 473,
+      "p95": 531,
+      "p99": 606
+    }
+  },
+  "chat_template_source": "production_chat_template.jinja",
+  "compiler_version": "compiler-v1",
+  "maximum": 635,
+  "median": 430,
+  "over_1024": 0,
+  "p90": 473,
+  "p95": 554,
+  "p99": 615,
+  "records": 1200,
+  "schema_version": "jarvis.agentic_lora.v1",
+  "sequence_limit": 1024,
+  "tokenizer_class": "Qwen2Tokenizer",
+  "tokenizer_path": "C:\\Users\\shiki\\Documents\\jarvis\\Jarvis\\training\\agentic_lora\\base_metadata",
+  "tokenizer_revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a"
+}

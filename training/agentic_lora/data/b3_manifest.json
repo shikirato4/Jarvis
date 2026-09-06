@@ -1,0 +1,52 @@
+{
+  "base_model": {
+    "full_bf16_downloaded_locally": false,
+    "id": "Qwen/Qwen3.5-9B",
+    "production_gguf": "models/llm/qwen3.5-9b/Qwen3.5-9B-IQ4_XS.gguf",
+    "production_profile": "qwen35-9b-iq4-xs",
+    "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a"
+  },
+  "baseline": {
+    "context": 8192,
+    "endpoint": "http://127.0.0.1:8081",
+    "max_tokens": 768,
+    "model": "Qwen3.5-9B-IQ4_XS",
+    "parallel": 1,
+    "results": "data/evaluation/baseline_results.jsonl",
+    "results_sha256": "c0071b09d31e7b317d4957d519553b755d1455691ed7b260d0c1b179871162a7",
+    "scoring_version": "agentic-eval-v1-score-v1",
+    "status": "partial_resumable",
+    "summary": "data/evaluation/baseline_summary.json",
+    "summary_sha256": "f9e6bef3f924b5eca8bf2f1416f6711926eb7f33cc6370350365345ab4f823aa",
+    "temperature": 0,
+    "thinking": "off",
+    "top_p": 1
+  },
+  "compiler_version": "compiler-v1",
+  "generator_version": "agentic-pilot-v1",
+  "hashes": {
+    "canonical_hard_regression": "4a1a8cf6521ad751c144393e80ee64a659c3791a0891fc5740b163bc55fac289",
+    "canonical_heldout": "033efe0837f7fca729adf7f19bfe2d5ae0745dad92b667d77ba78230fded074e",
+    "canonical_train": "b65dc7352d8960c3996a9b91dd3959a2beb75cca76a5c05e0812ca0440977e8b",
+    "canonical_validation": "aa0d2116e2c3f3588f28f8ce859ab9c2496da36235a163cd263cd6f0c37b1828",
+    "compiled_hard_regression": "5af08c4354f3a622989ba06442772f225043a0f3d64bf5e78ee9c62104bbaa23",
+    "compiled_heldout": "2fea0ee43e63711efe5a618b7cd871e48a13f959952dd295b0ae5b36eb30191c",
+    "compiled_train": "c48d05db88b85b2acb15bb5f8b178b7ad38434ca2498c7478a50cedf12af34bd",
+    "compiled_validation": "f4994819be616767bc91608162e858684ed5fb515c611b102acc0e1af31039d4",
+    "evaluation_benchmark": "085989ef9480870f5c26e0fc72c0e34089d2bf9876109f884d7b8dfc87b9ef20",
+    "parity_report": "5e2a7ec3a0cb48b7e2e86af4695c33ac923f7b11920fd40595d6fe545a7f2f43",
+    "pilot_config": "240c2da2b901ad8cbdbe78bc163d0b0d91abddc8777084787d9660bf9a526a7a",
+    "spot_audit": "913732a1bf8a5430ef6a1970b369fdc0d8a84eaa64d3e69a0e03c96e49274343",
+    "tokenization_report": "1497b821cfd3b71f0229ee42e2050045361bb43afb0265b404f639c7690f8b37",
+    "tokenizer_identity": "e8670de9405f95c1db432515da9d454f81803b660cd08cfaba650a5f11db9aa5",
+    "training_config": "f794551d2bfed6d565c43b850b7cdba5722ef1712afcaa80bbfb47fdc1be6034"
+  },
+  "manifest_version": "b3-manifest-v1",
+  "schema_version": "jarvis.agentic_lora.v1",
+  "seed": 20260831,
+  "training_environment": {
+    "platform": "Linux CUDA cloud, not provisioned in B3",
+    "requirements": "configs/requirements-linux-cu130.txt",
+    "target_gpu": "48 GB NVIDIA GPU"
+  }
+}

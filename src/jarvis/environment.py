@@ -7,13 +7,15 @@ from urllib.parse import urlparse, urlunparse
 
 import httpx
 
+from jarvis.models_runtime.qwen_identity import QwenIdentity
+
 
 @dataclass
 class LocalEndpointStatus:
     available: bool = False
     reachable: bool = False
     base_url: str = "http://127.0.0.1:8000/v1"
-    model: str = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
+    model: str = "Qwen3.5-9B-IQ4_XS"
     model_found: bool | None = None
     response_time_ms: float | None = None
     status: str = "unavailable"
@@ -28,9 +30,9 @@ class EnvironmentStatus:
     local_endpoint: LocalEndpointStatus = field(default_factory=LocalEndpointStatus)
     nvidia_configured: bool = False
     recommended_mode: str = "auto"
-    recommended_local_provider: str = "nemotron_omni_local"
+    recommended_local_provider: str = "qwen_local"
     recommended_local_model: str = (
-        "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
+        "Qwen3.5-9B-IQ4_XS"
     )
     warnings: list[str] = field(default_factory=list)
 
@@ -46,7 +48,8 @@ def detect_internet(timeout: float = 1.5) -> bool:
 def detect_local_endpoint(
     base_url: str = "http://127.0.0.1:8000/v1",
     *,
-    model: str = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4",
+    model: str = "Qwen3.5-9B-IQ4_XS",
+    model_aliases: tuple[str, ...] = (),
     timeout: float = 1.5,
     client: httpx.Client | None = None,
 ) -> LocalEndpointStatus:
@@ -70,9 +73,10 @@ def detect_local_endpoint(
             for item in body.get("data", [])
             if isinstance(item, dict) and item.get("id")
         ]
-        found = model in models
+        identity = QwenIdentity(model, model_aliases)
+        found = identity.select_advertised(models) is not None
         suggestions = [] if found else [
-            "Configura el endpoint para servir exactamente el modelo NVFP4 objetivo."
+            "Configura el endpoint para anunciar Qwen3.5-9B-IQ4_XS o un alias permitido."
         ]
         return LocalEndpointStatus(
             available=found,
@@ -82,7 +86,7 @@ def detect_local_endpoint(
             model_found=found,
             response_time_ms=round((time.perf_counter() - started_at) * 1000, 2),
             status="ok" if found else "model_missing",
-            error=None if found else "The configured NVFP4 model is not exposed by the endpoint.",
+            error=None if found else "The configured Qwen model is not exposed by the endpoint.",
             models=models,
             suggestions=suggestions,
         )
@@ -103,21 +107,26 @@ def detect_local_endpoint(
 
 def detect_environment(
     local_base_url: str = "http://127.0.0.1:8000/v1",
-    local_model: str = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4",
+    local_model: str = "Qwen3.5-9B-IQ4_XS",
+    local_model_aliases: tuple[str, ...] = (),
     *,
     nvidia_configured: bool = False,
 ) -> EnvironmentStatus:
     internet = detect_internet()
-    local = detect_local_endpoint(local_base_url, model=local_model)
+    local = detect_local_endpoint(
+        local_base_url,
+        model=local_model,
+        model_aliases=local_model_aliases,
+    )
     warnings: list[str] = []
     if not local.available:
-        warnings.append(local.error or "Local Nemotron endpoint unavailable.")
+        warnings.append(local.error or "Local Qwen endpoint unavailable.")
     if not nvidia_configured:
         warnings.append("NVIDIA API key is not configured.")
     if not internet:
         warnings.append("No internet connection detected; NVIDIA API may be unavailable.")
     if not local.available and not nvidia_configured:
-        warnings.append("Both configured Nemotron routes are currently unavailable.")
+        warnings.append("Both configured NVIDIA and Qwen routes are currently unavailable.")
     return EnvironmentStatus(
         internet_available=internet,
         local_endpoint=local,

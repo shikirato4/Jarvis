@@ -1,0 +1,40 @@
+{
+  "schema_version": "jarvis.agentic_lora.v1",
+  "generator_version": "agentic-pilot-v1",
+  "seed": 20260831,
+  "split_counts": {
+    "train": 800,
+    "validation": 120,
+    "heldout": 200,
+    "hard_regression": 80
+  },
+  "content_percent_targets": {
+    "real": 25,
+    "fictitious": 60,
+    "non_tool_control": 15
+  },
+  "language_percent_targets": {
+    "es-MX": 60,
+    "en-US": 35,
+    "mixed": 5
+  },
+  "train_families": [
+    "lab",
+    "warehouse",
+    "garden",
+    "robot",
+    "camera",
+    "vehicle",
+    "home_sim",
+    "factory_sim"
+  ],
+  "heldout_families": [
+    "spaceship",
+    "observatory",
+    "aquarium",
+    "museum",
+    "drone_sim",
+    "energy_grid_sim"
+  ],
+  "max_estimated_tokens": 1024
+}

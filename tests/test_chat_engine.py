@@ -462,8 +462,10 @@ def test_chat_engine_reports_clear_error_for_missing_application(tmp_path) -> No
         pending = desktop.send_chat("abre appinventada123")
         assert pending.raw_result.get("status") == "waiting_confirmation"
         response = desktop.send_chat("sí")
-        assert response.message.content.casefold() in {"no pude encontrar esa aplicacion.", "no pude encontrar esa aplicación."}
+        assert "no pude encontrar esa aplicaci" in response.message.content.casefold()
+        assert "herramienta no pudo completar" in response.message.content.casefold()
         assert response.raw_result.get("tool_status") == "failed"
+        assert response.raw_result.get("outcome_code") == "TOOL_EXECUTION_ERROR"
     finally:
         app.stop()
 
@@ -495,8 +497,9 @@ def test_chat_engine_reports_local_unavailability_and_recovers_next_request(tmp_
             except Exception:
                 pass
         blocked = desktop.send_chat("explícame qué es un agujero negro")
-        assert "estado: failed" in blocked.message.content.casefold()
+        assert "conexión con el proveedor" in blocked.message.content.casefold()
         assert blocked.raw_result.get("status") == "failed"
+        assert blocked.raw_result.get("outcome_code") == "PROVIDER_TRANSPORT_FAILURE"
 
         provider.fail = False
         recovered = desktop.send_chat("explícame qué es un agujero negro")
@@ -573,6 +576,8 @@ def test_desktop_intent_router_classifies_operational_prompts() -> None:
 
 
 def test_chat_engine_routes_writing_continue_to_runtime(tmp_path) -> None:
+    from jarvis.writing_runtime.models import WritingGeneratedBlock
+
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
@@ -587,6 +592,14 @@ def test_chat_engine_routes_writing_continue_to_runtime(tmp_path) -> None:
         backend = app.ui_automation_service._backend  # noqa: SLF001
         backend._active_window = backend.list_windows()[1].model_copy(update={"title": "Word - Mi libro"})  # noqa: SLF001
         backend.typed_text = "Capitulo uno. El protagonista observa la ciudad y recuerda la promesa que hizo al amanecer. " * 3
+        app.writing_runtime_service._continuation.continue_text = lambda *args, **kwargs: WritingGeneratedBlock(  # noqa: SLF001
+            index=1,
+            text="La ciudad despertó y el protagonista mantuvo viva la promesa del amanecer.",
+            word_count=12,
+            confidence=0.9,
+        )
+        style_analyzer = app.writing_runtime_service._style_analyzer  # noqa: SLF001
+        style_analyzer.analyze = lambda context, **kwargs: style_analyzer._fallback(context)  # noqa: SLF001
 
         desktop = DesktopRuntimeService(app)
         response = desktop.send_chat("continua mi libro")
@@ -604,6 +617,8 @@ def test_chat_engine_routes_writing_continue_to_runtime(tmp_path) -> None:
 
 
 def test_chat_engine_routes_writing_continue_in_assist_mode_for_word(tmp_path) -> None:
+    from jarvis.writing_runtime.models import WritingGeneratedBlock
+
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
@@ -617,6 +632,14 @@ def test_chat_engine_routes_writing_continue_in_assist_mode_for_word(tmp_path) -
         backend = app.ui_automation_service._backend  # noqa: SLF001
         backend._active_window = backend.list_windows()[1].model_copy(update={"title": "Word - Mi libro"})  # noqa: SLF001
         backend.typed_text = "Capitulo inicial con suficiente contexto narrativo para continuar sin pedir permisos. " * 3
+        app.writing_runtime_service._continuation.continue_text = lambda *args, **kwargs: WritingGeneratedBlock(  # noqa: SLF001
+            index=1,
+            text="El capítulo continuó con el mismo pulso narrativo y una nueva decisión.",
+            word_count=12,
+            confidence=0.9,
+        )
+        style_analyzer = app.writing_runtime_service._style_analyzer  # noqa: SLF001
+        style_analyzer.analyze = lambda context, **kwargs: style_analyzer._fallback(context)  # noqa: SLF001
 
         desktop = DesktopRuntimeService(app)
         response = desktop.send_chat("continua mi libro")
@@ -654,6 +677,8 @@ def test_chat_engine_inspects_word_context_in_assist_mode_without_mode_error(tmp
 
 
 def test_chat_engine_requests_confirmation_for_non_whitelisted_window_then_executes(tmp_path) -> None:
+    from jarvis.writing_runtime.models import WritingGeneratedBlock
+
     settings = Settings(
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
@@ -668,11 +693,29 @@ def test_chat_engine_requests_confirmation_for_non_whitelisted_window_then_execu
         backend = app.ui_automation_service._backend  # noqa: SLF001
         backend.typed_text = "El protagonista mira la ciudad mientras recuerda la promesa que hizo al amanecer. " * 3
         original_length = len(backend.typed_text)
+        generation_calls = 0
+
+        def _must_not_generate_before_confirmation(*args, **kwargs):
+            nonlocal generation_calls
+            generation_calls += 1
+            raise AssertionError("writing generation ran before the security confirmation")
+
+        app.writing_runtime_service._continuation.continue_text = _must_not_generate_before_confirmation  # noqa: SLF001
         desktop = DesktopRuntimeService(app)
 
         first = desktop.send_chat("continua mi libro")
         assert first.message.content == "Esta aplicación requiere permiso. ¿Deseas continuar?"
         assert desktop._chat.awaiting_confirmation is True  # noqa: SLF001
+        assert generation_calls == 0
+
+        app.writing_runtime_service._continuation.continue_text = lambda *args, **kwargs: WritingGeneratedBlock(  # noqa: SLF001
+            index=1,
+            text="La ciudad encendió sus luces mientras el protagonista renovaba aquella promesa.",
+            word_count=12,
+            confidence=0.9,
+        )
+        style_analyzer = app.writing_runtime_service._style_analyzer  # noqa: SLF001
+        style_analyzer.analyze = lambda context, **kwargs: style_analyzer._fallback(context)  # noqa: SLF001
 
         second = desktop.send_chat("sí")
         assert "acceso concedido" in second.message.content.casefold()

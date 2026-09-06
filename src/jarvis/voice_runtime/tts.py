@@ -82,11 +82,12 @@ class TTSService:
                         "rate": request.rate,
                     },
                 )
-                call = lambda provider=provider: self._synthesize_with_deadline(
-                    provider,
-                    request,
-                    timeout_ms=provider_timeout_ms,
-                )
+                def call(provider=provider):
+                    return self._synthesize_with_deadline(
+                        provider,
+                        request,
+                        timeout_ms=provider_timeout_ms,
+                    )
                 if self._resilience is not None:
                     result, _ = self._resilience.execute(
                         service_name="voice_runtime",

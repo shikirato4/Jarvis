@@ -100,10 +100,12 @@ def test_desktop_private_history_uses_enriched_user_context_and_excludes_banner(
         ),
     ]
     service._model_context_by_message_id = {  # noqa: SLF001
-        "user-1": ModelMessage(
-            role="user",
-            content="Analiza esto\n\nContenido derivado privado del adjunto",
-        )
+        "user-1": [
+            ModelMessage(
+                role="user",
+                content="Analiza esto\n\nContenido derivado privado del adjunto",
+            )
+        ]
     }
 
     history = service._model_history_snapshot()  # noqa: SLF001

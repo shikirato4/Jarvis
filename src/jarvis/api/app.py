@@ -131,7 +131,13 @@ def _stream_model_events(jarvis: Any, body: ModelInferenceRequest):
     """Encode provider stream chunks as standards-compatible SSE data."""
     try:
         for chunk in jarvis.runtime_service.stream_model(_model_request(body)):
-            yield f"data: {chunk.model_dump_json()}\n\n"
+            # Keep the public SSE shape backwards-compatible: tool_calls is
+            # emitted only for an actual tool delta, not as an empty list on
+            # ordinary text chunks.
+            payload = chunk.model_dump(mode="json")
+            if not payload.get("tool_calls"):
+                payload.pop("tool_calls", None)
+            yield f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
     except JarvisError as exc:
         payload = {"text": "", "done": True, "error": exc.code, "metadata": {"recoverable": exc.recoverable}}
         yield f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
@@ -181,7 +187,8 @@ def create_api_app() -> FastAPI:
         jarvis = _get_jarvis(request)
         selection = jarvis.model_service.provider_selection()
         nvidia = jarvis.provider_registry.get("nvidia_nim")
-        local = jarvis.provider_registry.get("nemotron_omni_local")
+        local = jarvis.provider_registry.get("qwen_local")
+        local_capabilities = local.capabilities.model_dump(mode="json") if local else {}
         return {
             "selected_mode": selection.selected_mode.value,
             "active_provider": selection.active_provider,
@@ -192,9 +199,14 @@ def create_api_app() -> FastAPI:
             "persistence_warning": selection.persistence_warning,
             "capabilities": {
                 "nvidia_nim": nvidia.capabilities.model_dump(mode="json"),
-                "nemotron_omni_local": local.capabilities.model_dump(mode="json"),
+                "qwen_local": local_capabilities,
+                # Deprecated response alias for clients from the Nemotron-local era.
+                "nemotron_omni_local": local_capabilities,
             },
             "key_status": jarvis.nvidia_secret_manager.status().model_dump(mode="json"),
+            "local_runtime": jarvis.local_model_runtime_manager.status().model_dump(
+                mode="json"
+            ),
         }
 
     @app.put("/llm/mode")

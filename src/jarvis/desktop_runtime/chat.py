@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from uuid import uuid4
@@ -8,7 +9,12 @@ from uuid import uuid4
 from jarvis.capability_manifest import get_capabilities_for_prompt, get_capabilities_summary, is_capability_query
 from jarvis.config import Settings
 from jarvis.conversation_context import ConversationContextBuilder, ContextFragment
-from jarvis.agent_runtime import AgentController, AgentRunRequest, AgentRunStatus
+from jarvis.agent_runtime import (
+    AgentController,
+    AgentOutcomeCode,
+    AgentRunRequest,
+    AgentRunStatus,
+)
 from jarvis.chat_optimization import select_chat_generation_profile, streaming_timeout_seconds
 from jarvis.conversational_safety import ConversationRisk, classify_conversation_risk, malware_safe_refusal
 from jarvis.core.errors import JarvisError
@@ -22,6 +28,7 @@ from jarvis.services import summarize_error, summarize_model_response
 from jarvis.voice_runtime.spoken import prepare_spoken_response
 from jarvis.web_search import build_grounded_web_prompt, build_web_search_provider, should_use_web_search
 from jarvis.web_search.router import select_synthesis_hits, source_count_message
+from jarvis.reasoning import resolve_reasoning_preference
 
 from .base import DesktopChatMessage, DesktopChatResponse
 from .intent_router import DesktopIntentDecision, DesktopIntentRouter
@@ -69,13 +76,17 @@ class DesktopChatEngine:
         memory_candidates: Iterable[ContextFragment] = (),
         correlation_id: str | None = None,
         request_finalized: Callable[[ModelRequest], None] | None = None,
+        stream_callback: Callable[[str], None] | None = None,
+        cancellation_check: Callable[[], bool] | None = None,
     ) -> DesktopChatResponse:
         normalized = text.strip()
+        history_messages = list(history)
         result: dict = {}
         response_text = ""
         web_result_for_error = None
         spoken_content_override: str | None = None
         spoken_mode = "prepared"
+        context_messages: list[ModelMessage] = []
         if self._pending_agent_confirmation is not None:
             return self._handle_agent_confirmation_reply(normalized)
         if self.awaiting_confirmation and self.pending_action is not None:
@@ -93,6 +104,15 @@ class DesktopChatEngine:
                 {"status": "ok", "category": "capabilities", "agent_mode_real": True, "openai": "blocked", "gemini": "blocked"},
             )
         decision = self._intent_router.classify(normalized)
+        manual_truncation_continue = (
+            decision.category == "writing_continue"
+            and self._is_manual_truncation_continue(
+                normalized,
+                history_messages,
+            )
+        )
+        if manual_truncation_continue:
+            decision = DesktopIntentDecision(category="chat", prompt=normalized)
         self._logger.info(
             "desktop_intent_detected",
             extra={"intent": decision.category, "prompt_length": len(normalized)},
@@ -105,6 +125,17 @@ class DesktopChatEngine:
                     response_text = self._context_summary(web_status)
                 else:
                     request, web_result = self._build_model_request(normalized)
+                    if manual_truncation_continue:
+                        request = request.model_copy(
+                            update={
+                                "metadata": {
+                                    **request.metadata,
+                                    "generation_profile": "detailed",
+                                    "context_profile": "detailed",
+                                    "manual_truncation_continue": True,
+                                }
+                            }
+                        )
                     if request_transform is not None:
                         request = request_transform(request)
                     if correlation_id is not None:
@@ -113,7 +144,7 @@ class DesktopChatEngine:
                         )
                     request = self.finalize_model_request(
                         request,
-                        history=history,
+                        history=history_messages,
                         tool_observations=tool_observations,
                         attachment_context=attachment_context,
                         memory_candidates=memory_candidates,
@@ -140,9 +171,15 @@ class DesktopChatEngine:
                                 timeout_seconds=self._settings.agent_timeout_seconds,
                                 correlation_id=correlation_id,
                                 source_surface="desktop_chat",
+                                stream_callback=stream_callback,
+                                cancellation_check=cancellation_check,
                             )
                         )
                         result = agent_result.model_dump(mode="json")
+                        context_messages = [
+                            message.model_copy(deep=True)
+                            for message in agent_result.context_messages
+                        ]
                         self._merge_last_observation(result, agent_result)
                         if agent_result.observations and hasattr(self._panels, "invalidate"):
                             self._panels.invalidate()
@@ -194,7 +231,7 @@ class DesktopChatEngine:
                 response_text = sanitize_assistant_identity(
                     provider_failure_message(
                         failure,
-                        selected_mode=self._settings.llm_mode,
+                        selected_mode=self._effective_llm_mode(),
                     )
                 )
                 if web_result_for_error is not None and web_sources:
@@ -209,6 +246,9 @@ class DesktopChatEngine:
 
         if not str(response_text or "").strip():
             response_text = "No obtuve una salida valida del sistema, pero sigo listo para responder."
+            result.setdefault("status", "failed")
+            result.setdefault("outcome_code", "INVALID_SYSTEM_OUTPUT")
+            result["absolute_fallback_used"] = True
         message = DesktopChatMessage(message_id=str(uuid4()), role="assistant", content=response_text, metadata={"result": result})
         return DesktopChatResponse(
             message=message,
@@ -216,6 +256,7 @@ class DesktopChatEngine:
             spoken_mode=spoken_mode,
             panel_snapshot=self._panels.compose(),
             raw_result=result,
+            context_messages=context_messages,
         )
 
     def _handle_confirmation_reply(self, normalized: str) -> DesktopChatResponse:
@@ -301,6 +342,15 @@ class DesktopChatEngine:
         self._merge_last_observation(result, agent_result)
         if agent_result.observations and hasattr(self._panels, "invalidate"):
             self._panels.invalidate()
+        if (
+            agent_result.status is AgentRunStatus.WAITING_CONFIRMATION
+            and agent_result.pending_confirmation is not None
+            and agent_result.pending_confirmation.confirmation_id
+        ):
+            self._pending_agent_confirmation = (
+                agent_result.run_id,
+                agent_result.pending_confirmation.confirmation_id,
+            )
         message = DesktopChatMessage(
             message_id=str(uuid4()),
             role="assistant",
@@ -313,20 +363,74 @@ class DesktopChatEngine:
             spoken_mode="prepared",
             panel_snapshot=self._panels.compose(),
             raw_result=result,
+            context_messages=[
+                item.model_copy(deep=True)
+                for item in agent_result.context_messages
+            ],
         )
 
     def _agent_result_text(self, agent_result) -> str:
         if agent_result.status is AgentRunStatus.COMPLETED:
+            # Agent finalization already established the provider text as the
+            # authoritative response. Do not rewrite it between assembly and
+            # the final rich-render boundary.
             return sanitize_assistant_identity(agent_result.final_answer or "")
+        if agent_result.status is AgentRunStatus.TRUNCATED:
+            partial = str(agent_result.final_answer or "").rstrip()
+            notice = "La respuesta alcanzó el límite de salida y quedó incompleta."
+            return f"{partial}\n\n{notice}" if partial else notice
         if agent_result.status is AgentRunStatus.WAITING_CONFIRMATION:
             return (
                 "La siguiente acción requiere confirmación explícita antes de "
                 "continuar."
             )
-        response_text = (
-            "No pude completar el ciclo de agente de forma segura "
-            f"(estado: {agent_result.status.value})."
-        )
+        outcome = agent_result.outcome_code
+        if (
+            agent_result.outcome_code is AgentOutcomeCode.INVALID_MODEL_OUTPUT
+            and agent_result.error_type == "MissingRequiredToolCall"
+        ):
+            response_text = (
+                "La solicitud requería una herramienta, pero el modelo no "
+                "seleccionó ninguna; no se ejecutó ningún cambio."
+            )
+        else:
+            response_text = {
+                AgentOutcomeCode.SECURITY_DENIED: (
+                    "SecurityGate bloqueó la acción solicitada."
+                ),
+                AgentOutcomeCode.TOOL_ARGUMENT_ERROR: (
+                    "La herramienta rechazó los argumentos de la acción."
+                ),
+                AgentOutcomeCode.TOOL_EXECUTION_ERROR: (
+                    "La herramienta no pudo completar la acción."
+                ),
+                AgentOutcomeCode.TOOL_TIMEOUT: (
+                    "La herramienta agotó el tiempo de ejecución."
+                ),
+                AgentOutcomeCode.CAPABILITY_UNAVAILABLE: (
+                    "La capacidad solicitada no está disponible."
+                ),
+                AgentOutcomeCode.MODEL_CONTINUATION_FAILURE: (
+                    "La herramienta produjo una observación, pero el modelo no pudo "
+                    "generar una respuesta final válida."
+                ),
+                AgentOutcomeCode.PROVIDER_TRANSPORT_FAILURE: (
+                    "La conexión con el proveedor se interrumpió antes de finalizar."
+                ),
+                AgentOutcomeCode.PROVIDER_PROCESS_EXIT: (
+                    "El proceso del proveedor terminó antes de finalizar la respuesta."
+                ),
+                AgentOutcomeCode.USER_CANCELLED: "La ejecución fue cancelada.",
+                AgentOutcomeCode.INVALID_MODEL_OUTPUT: (
+                    "El modelo terminó sin producir una respuesta válida."
+                ),
+            }.get(
+                outcome,
+                "No pude completar el ciclo de agente de forma segura "
+                f"(estado: {agent_result.status.value}).",
+            )
+        if agent_result.final_answer:
+            response_text = f"{agent_result.final_answer.rstrip()}\n\n{response_text}"
         partial_sources = self._format_agent_web_sources(agent_result.observations)
         if partial_sources:
             response_text = (
@@ -495,6 +599,18 @@ class DesktopChatEngine:
         system_context = "Superficie: chat de escritorio local."
         if prompt_context:
             system_context = f"{system_context}\n\nContexto activo de Jarvis:\n{prompt_context}"
+        configured_reasoning = getattr(
+            self._settings,
+            "reasoning_preference",
+            "auto",
+        )
+        reasoning_requested = str(
+            getattr(configured_reasoning, "value", configured_reasoning)
+        ).casefold()
+        reasoning_resolved = resolve_reasoning_preference(
+            configured_reasoning,
+            normalized,
+        ).value
         return ModelRequest(
             prompt=prompt,
             messages=[
@@ -512,11 +628,32 @@ class DesktopChatEngine:
                 "generation_profile": profile.name,
                 "context_profile": context_profile,
                 "web_used": False,
+                "adaptive_output_budget": True,
+                "auto_continue_text": True,
+                "output_context_tokens": self._settings.local_runtime_context_size,
+                "reasoning_preference": reasoning_resolved,
+                "reasoning_preference_requested": reasoning_requested,
+                "reasoning_preference_explicit": reasoning_requested != "auto",
             },
         ), None
 
-    def prepare_streaming_request(self, normalized: str) -> tuple[ModelRequest, object | None] | DesktopChatResponse | None:
+    def prepare_streaming_request(
+        self,
+        normalized: str,
+        *,
+        history: Iterable[ModelMessage] = (),
+    ) -> tuple[ModelRequest, object | None] | DesktopChatResponse | None:
+        history_messages = list(history)
         decision = self._intent_router.classify(normalized)
+        manual_truncation_continue = (
+            decision.category == "writing_continue"
+            and self._is_manual_truncation_continue(
+                normalized,
+                history_messages,
+            )
+        )
+        if manual_truncation_continue:
+            decision = DesktopIntentDecision(category="chat", prompt=normalized)
         if decision.category != "chat":
             return None
         if self._is_context_query(normalized.casefold()):
@@ -530,7 +667,19 @@ class DesktopChatEngine:
                 panel_snapshot=self._panels.compose(),
                 raw_result=result,
             )
-        return self._build_model_request(normalized)
+        request, web_result = self._build_model_request(normalized)
+        if manual_truncation_continue:
+            request = request.model_copy(
+                update={
+                    "metadata": {
+                        **request.metadata,
+                        "generation_profile": "detailed",
+                        "context_profile": "detailed",
+                        "manual_truncation_continue": True,
+                    }
+                }
+            )
+        return request, web_result
 
     def finalize_model_request(
         self,
@@ -541,10 +690,21 @@ class DesktopChatEngine:
         attachment_context: Iterable[ContextFragment] = (),
         memory_candidates: Iterable[ContextFragment] = (),
     ) -> ModelRequest:
+        history_messages = list(history)
+        operational_messages = [
+            message
+            for message in history_messages
+            if message.role == "tool" or bool(message.tool_calls)
+        ]
+        conversational_history = [
+            message
+            for message in history_messages
+            if message.role != "tool" and not message.tool_calls
+        ]
         return self._context_builder.finalize_model_request(
             request,
-            history=history,
-            tool_observations=tool_observations,
+            history=conversational_history,
+            tool_observations=[*tool_observations, *operational_messages],
             attachment_context=attachment_context,
             memory_candidates=memory_candidates,
             max_context_tokens=self._settings.conversation_context_max_tokens,
@@ -558,6 +718,16 @@ class DesktopChatEngine:
             "desktop_chat_route",
             extra={"route": route, "query_length": len(query)},
         )
+
+    def _effective_llm_mode(self) -> str:
+        selection_fn = getattr(self._bridge.runtime, "provider_selection", None)
+        if callable(selection_fn):
+            try:
+                selection = selection_fn()
+                return selection.selected_mode.value
+            except Exception:  # noqa: BLE001
+                pass
+        return str(self._settings.llm_mode)
 
     def _log_execution(self, route: str, query: str, result: dict) -> None:
         self._logger.info(
@@ -573,7 +743,23 @@ class DesktopChatEngine:
 
     @staticmethod
     def _is_coding_query(lowered: str) -> bool:
-        return any(keyword in lowered for keyword in ("codigo", "code", "python", "bug", "funcion", "function", "clase", "class", "script"))
+        words = set(re.findall(r"[a-záéíóúñ_]+", lowered))
+        return bool(
+            words
+            & {
+                "bug",
+                "class",
+                "clase",
+                "code",
+                "codigo",
+                "código",
+                "funcion",
+                "función",
+                "function",
+                "python",
+                "script",
+            }
+        )
 
     @staticmethod
     def _is_context_query(lowered: str) -> bool:
@@ -587,14 +773,35 @@ class DesktopChatEngine:
             return True
         return any(phrase in lowered for phrase in ("que contexto tienes", "qué contexto tienes", "que recuerdas", "qué recuerdas", "muestra tu contexto", "que sabes del proyecto", "qué sabes del proyecto"))
 
-    @staticmethod
-    def _context_summary(web_status) -> str:
+    def _is_manual_truncation_continue(
+        self,
+        normalized: str,
+        history: list[ModelMessage],
+    ) -> bool:
+        folded = self._intent_router._fold(normalized)  # noqa: SLF001
+        if folded not in {"continua", "continue", "go on", "sigue"}:
+            return False
+        last_assistant = next(
+            (
+                message
+                for message in reversed(history)
+                if message.role == "assistant" and message.content.strip()
+            ),
+            None,
+        )
+        if last_assistant is None:
+            return False
+        prior = self._intent_router._fold(last_assistant.content)  # noqa: SLF001
+        return "limite de salida" in prior and (
+            "incompleta" in prior or "sin contenido visible" in prior
+        )
+
+    def _context_summary(self, web_status) -> str:
         key_status = "configured true" if web_status.configured else "configured false"
         return (
             "Contexto actual de Jarvis\n\n"
             "Proyecto:\nJarvis desktop local en el workspace actual.\n\n"
-            "Modelo:\nNemotron 3 Nano Omni con modos AUTO, NVIDIA API y LOCAL. El objetivo local exacto es "
-            "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4.\n\n"
+            "Modelo:\nNemotron online y el perfil Qwen local configurado con modos AUTO, NVIDIA API y LOCAL.\n\n"
             "Web:\n"
             f"Brave Search provider={web_status.provider}, enabled={str(web_status.enabled).lower()}, API key {key_status}. "
             "Brave solo busca; el proveedor Nemotron asignado redacta.\n\n"

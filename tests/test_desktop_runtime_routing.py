@@ -93,6 +93,14 @@ def test_runtime_route_uses_general_chat_for_simple_prompt(tmp_path) -> None:
         app.stop()
 
 
+def test_funciona_in_informational_question_is_not_misclassified_as_coding() -> None:
+    from jarvis.desktop_runtime.chat import DesktopChatEngine
+
+    assert DesktopChatEngine._is_coding_query(  # noqa: SLF001
+        "¿cómo funciona el ciclo del agua?"
+    ) is False
+
+
 def test_desktop_chat_uses_jarvis_identity_and_sanitizes_model_reply(tmp_path) -> None:
     settings = Settings(
         data_dir=tmp_path / "runtime",
@@ -612,7 +620,8 @@ def test_desktop_chat_reports_missing_application_cleanly(tmp_path) -> None:
     )
     try:
         response = _run_confirmed_desktop_tool(desktop, "abre aplicacion imposible")
-        assert response.message.content == "No pude encontrar esa aplicacion."
+        assert "No pude encontrar esa aplicacion." in response.message.content
+        assert "herramienta no pudo completar" in response.message.content
     finally:
         app.stop()
 

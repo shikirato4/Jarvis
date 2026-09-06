@@ -79,6 +79,7 @@ class ModelResponse(JarvisBaseModel):
 
 class StreamChunk(JarvisBaseModel):
     text: str = ""
+    tool_calls: list[ModelToolCall] = Field(default_factory=list)
     done: bool = False
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)

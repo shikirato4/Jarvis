@@ -7,13 +7,29 @@ import logging
 from time import perf_counter
 
 from .styling import JARVIS_QSS
-from .widgets import ChatComposerInput, ConversationSurfaceWidget, MetricCard, ReactorCoreWidget, StatusBadge, apply_cyan_glow, tone_color
+from .widgets import (
+    ChatComposerInput,
+    ConversationSurfaceWidget,
+    MetricCard,
+    ReactorCoreWidget,
+    StatusBadge,
+    tone_color,
+)
 from .activity_graph import ActivityGraphWidget
-from jarvis.image_runtime.presentation import format_image_progress
+from jarvis.image_runtime.presentation import format_image_progress, format_probe_status
 
 try:
     from PySide6.QtCore import QBuffer, QEvent, QIODevice, QRect, QSize, Qt, QTimer
-    from PySide6.QtGui import QAction, QColor, QFont, QKeySequence
+    from PySide6.QtGui import (
+        QAction,
+        QColor,
+        QFont,
+        QIcon,
+        QKeySequence,
+        QPainter,
+        QPen,
+        QPixmap,
+    )
     from PySide6.QtWidgets import (
         QApplication,
         QFileDialog,
@@ -22,14 +38,17 @@ try:
         QHBoxLayout,
         QLabel,
         QComboBox,
+        QButtonGroup,
         QLineEdit,
         QListWidgetItem,
         QMainWindow,
         QMenu,
         QMessageBox,
         QPlainTextEdit,
+        QProgressBar,
         QPushButton,
         QSizePolicy,
+        QStackedWidget,
         QSplitter,
         QTabWidget,
         QTextEdit,
@@ -50,6 +69,84 @@ def pyside_available() -> bool:
 
 if QApplication is not None:
 
+    def _stitch_icon(kind: str, *, color: str = "#bac9cc", size: int = 20) -> QIcon:
+        """Small local line icons matching STITCH without external font assets."""
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(color), 1.5))
+        c = size // 2
+        if kind in {"neural", "spark"}:
+            painter.drawLine(c, 2, c, size - 2)
+            painter.drawLine(2, c, size - 2, c)
+            painter.drawLine(5, 5, size - 5, size - 5)
+            painter.drawLine(size - 5, 5, 5, size - 5)
+        elif kind == "agent":
+            painter.drawLine(5, 5, c, c)
+            painter.drawLine(size - 5, 5, c, c)
+            painter.drawLine(c, c, c, size - 4)
+            for x, y in ((5, 5), (size - 5, 5), (c, c), (c, size - 4)):
+                painter.drawEllipse(x - 2, y - 2, 4, 4)
+        elif kind == "activity":
+            painter.drawRect(2, 3, 6, 6)
+            painter.drawRect(size - 8, size - 9, 6, 6)
+            painter.drawLine(8, 6, size - 5, size - 6)
+        elif kind == "files":
+            painter.drawRect(2, 6, size - 4, size - 9)
+            painter.drawLine(3, 6, 8, 6)
+            painter.drawLine(8, 6, 10, 3)
+            painter.drawLine(10, 3, size - 3, 3)
+        elif kind == "data":
+            painter.drawRect(2, 2, size - 4, size - 4)
+            for index, height in enumerate((5, 10, 7)):
+                x = 5 + index * 4
+                painter.drawLine(x, size - 5, x, size - 5 - height)
+        elif kind == "memory":
+            painter.drawRoundedRect(4, 4, size - 8, size - 8, 2, 2)
+            painter.drawEllipse(c - 3, c - 3, 6, 6)
+        elif kind in {"tools", "settings"}:
+            painter.drawEllipse(c - 5, c - 5, 10, 10)
+            painter.drawEllipse(c - 2, c - 2, 4, 4)
+            painter.drawLine(c, 1, c, 5)
+            painter.drawLine(c, size - 5, c, size - 1)
+            painter.drawLine(1, c, 5, c)
+            painter.drawLine(size - 5, c, size - 1, c)
+        elif kind == "help":
+            painter.drawEllipse(2, 2, size - 4, size - 4)
+            painter.drawText(pixmap.rect(), Qt.AlignCenter, "?")
+        elif kind == "terminal":
+            painter.drawRect(2, 3, size - 4, size - 6)
+            painter.drawLine(5, 7, 8, c)
+            painter.drawLine(8, c, 5, size - 7)
+            painter.drawLine(10, size - 7, size - 5, size - 7)
+        elif kind == "bell":
+            painter.drawArc(4, 3, size - 8, size - 7, 0, 180 * 16)
+            painter.drawLine(4, c, 4, size - 5)
+            painter.drawLine(size - 4, c, size - 4, size - 5)
+            painter.drawLine(4, size - 5, size - 4, size - 5)
+        elif kind == "account":
+            painter.drawEllipse(c - 3, 3, 6, 6)
+            painter.drawArc(3, 9, size - 6, size - 5, 0, 180 * 16)
+        elif kind in {"speaker", "speaker_muted"}:
+            painter.drawRect(2, c - 3, 4, 6)
+            painter.drawLine(6, c - 3, 11, c - 7)
+            painter.drawLine(11, c - 7, 11, c + 7)
+            painter.drawLine(11, c + 7, 6, c + 3)
+            painter.drawArc(7, c - 7, 12, 14, -55 * 16, 110 * 16)
+            if kind == "speaker_muted":
+                painter.drawLine(3, 3, size - 3, size - 3)
+        elif kind == "mic":
+            painter.drawRoundedRect(c - 3, 2, 6, 10, 3, 3)
+            painter.drawArc(c - 6, 7, 12, 8, 180 * 16, 180 * 16)
+            painter.drawLine(c, 15, c, size - 2)
+        elif kind == "send":
+            painter.drawLine(c, size - 3, c, 4)
+            painter.drawLine(c, 4, 4, c)
+            painter.drawLine(c, 4, size - 4, c)
+        painter.end()
+        return QIcon(pixmap)
+
     class JarvisDesktopWindow(QMainWindow):
         def __init__(self, desktop_service) -> None:
             super().__init__()
@@ -59,13 +156,14 @@ if QApplication is not None:
             self._sending = False
             self._pending_future: Future | None = None
             self._pending_correlation_id: str | None = None
+            self._pending_new_turn_text: str | None = None
             self._last_submit_at = 0.0
             self._last_render_signature = None
             self._last_dev_action_id: str | None = None
             self._patch_items: dict[str, dict] = {}
-            self._focus_mode = True
-            self._left_panel_open = False
-            self._right_panel_open = False
+            self._focus_mode = False
+            self._left_panel_open = True
+            self._right_panel_open = True
             self._state = None
             self._nav_buttons: dict[str, QPushButton] = {}
             self._attachment_chip_buttons: list[QPushButton] = []
@@ -81,28 +179,57 @@ if QApplication is not None:
         def _build_ui(self) -> None:
             root = QFrame()
             root.setObjectName("ShellRoot")
-            layout = QVBoxLayout(root)
-            layout.setContentsMargins(18, 18, 18, 18)
-            layout.setSpacing(12)
-
-            layout.addWidget(self._build_header())
+            layout = QHBoxLayout(root)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
 
             self._splitter = QSplitter(Qt.Horizontal)
+            self._splitter.setObjectName("StitchShellSplitter")
             self._splitter.setChildrenCollapsible(False)
             self._left_panel = self._build_left_panel()
-            self._center_panel = self._build_center_panel()
+
             self._right_panel = self._build_right_panel()
+
+            self._center_shell = QFrame()
+            self._center_shell.setObjectName("CenterShell")
+            center_shell_layout = QVBoxLayout(self._center_shell)
+            center_shell_layout.setContentsMargins(0, 0, 0, 0)
+            center_shell_layout.setSpacing(0)
+            self._header = self._build_header()
+            self._surface_stack = QStackedWidget()
+            self._surface_stack.setObjectName("MainSurfaceStack")
+            self._surface_pages: dict[str, QWidget] = {}
+            self._chat_panel = self._build_center_panel()
+            self._surface_pages["chat"] = self._chat_panel
+            self._surface_stack.addWidget(self._chat_panel)
+            for surface_id in (
+                "agent",
+                "activity",
+                "files",
+                "data",
+                "memory",
+                "tools",
+                "settings",
+            ):
+                surface = self._build_module_surface(surface_id)
+                self._surface_pages[surface_id] = surface
+                self._surface_stack.addWidget(surface)
+            self._center_panel = self._surface_stack
+            center_shell_layout.addWidget(self._header)
+            center_shell_layout.addWidget(self._center_panel, 1)
             self._splitter.addWidget(self._left_panel)
-            self._splitter.addWidget(self._center_panel)
+            self._splitter.addWidget(self._center_shell)
             self._splitter.addWidget(self._right_panel)
             self._splitter.setStretchFactor(0, 0)
             self._splitter.setStretchFactor(1, 1)
             self._splitter.setStretchFactor(2, 0)
             layout.addWidget(self._splitter, 1)
 
+            self._header.setFixedHeight(64)
+            self._header.show()
+
             self.setCentralWidget(root)
             self.setStyleSheet(JARVIS_QSS)
-            apply_cyan_glow(self._center_panel, blur=58, alpha=90)
             self._apply_shell_mode()
 
             refresh_action = QAction("Refresh", self)
@@ -113,18 +240,20 @@ if QApplication is not None:
             header = QFrame()
             header.setObjectName("HeaderCard")
             layout = QHBoxLayout(header)
-            layout.setContentsMargins(20, 16, 20, 16)
-            layout.setSpacing(14)
+            layout.setContentsMargins(20, 0, 20, 0)
+            layout.setSpacing(8)
 
             title_box = QVBoxLayout()
             title_box.setSpacing(2)
-            title = QLabel("J.A.R.V.I.S")
+            title = QLabel("JARVIS")
             title.setObjectName("TitleLabel")
-            subtitle = QLabel("Conversational intelligence core")
+            subtitle = QLabel("System online")
             subtitle.setObjectName("SubtitleLabel")
             title_box.addWidget(title)
             title_box.addWidget(subtitle)
             layout.addLayout(title_box)
+            title.hide()
+            subtitle.hide()
 
             layout.addStretch(1)
 
@@ -133,7 +262,7 @@ if QApplication is not None:
             self._voice_badge = StatusBadge("VOICE", "neutral")
             self._llm_badge = StatusBadge("LLM", "neutral")
             self._mode_badge = StatusBadge("MODE AUTO", "active")
-            self._model_badge = StatusBadge("MODEL NEMOTRON", "active")
+            self._model_badge = StatusBadge("MODEL AUTO", "active")
             self._provider_badge = StatusBadge("PROVIDER PENDING", "neutral")
             self._web_badge = StatusBadge("WEB BRAVE", "neutral")
             self._openai_badge = StatusBadge("OPENAI BLOCKED", "warning")
@@ -152,7 +281,11 @@ if QApplication is not None:
             self._llm_mode_selector = QComboBox()
             self._llm_mode_selector.setObjectName("LLMModeSelector")
             self._llm_mode_selector.setAccessibleName("Seleccionar proveedor LLM")
-            for label, value in (("AUTO", "auto"), ("NVIDIA API", "nvidia_api"), ("LOCAL", "local")):
+            for label, value in (
+                ("AUTO", "auto"),
+                ("LOCAL", "local"),
+                ("ONLINE", "nvidia_api"),
+            ):
                 self._llm_mode_selector.addItem(label, value)
             initial_mode = self._desktop.llm_status()["selected_mode"]
             initial_index = self._llm_mode_selector.findData(initial_mode)
@@ -172,6 +305,37 @@ if QApplication is not None:
             self._system_button.setCheckable(True)
             self._system_button.clicked.connect(lambda: self._set_focus_mode(False))
             layout.addWidget(self._system_button)
+
+            # The reference shell uses a quiet top bar with utility glyphs.
+            # Legacy telemetry controls remain available to compatibility code
+            # but are not part of the visual header.
+            for widget in (
+                self._health_badge,
+                self._ops_badge,
+                self._voice_badge,
+                self._llm_badge,
+                self._mode_badge,
+                self._model_badge,
+                self._provider_badge,
+                self._web_badge,
+                self._openai_badge,
+                self._gemini_badge,
+                self._focus_button,
+                self._system_button,
+            ):
+                widget.hide()
+            self._notification_button = QPushButton()
+            self._notification_button.setObjectName("HeaderUtilityButton")
+            self._notification_button.setAccessibleName("Notifications")
+            self._notification_button.setToolTip("Notifications")
+            self._notification_button.setIcon(_stitch_icon("bell"))
+            self._account_button = QPushButton()
+            self._account_button.setObjectName("HeaderUtilityButton")
+            self._account_button.setAccessibleName("Account")
+            self._account_button.setToolTip("Account")
+            self._account_button.setIcon(_stitch_icon("account"))
+            layout.addWidget(self._notification_button)
+            layout.addWidget(self._account_button)
 
             self._left_toggle = QPushButton("SERVICES")
             self._left_toggle.setObjectName("PanelToggle")
@@ -206,8 +370,12 @@ if QApplication is not None:
             layout.addWidget(self._cancel_listen_button)
 
             self._voice_mute_button = QPushButton("MUTE")
-            self._voice_mute_button.setObjectName("GhostButton")
+            self._voice_mute_button.setObjectName("HeaderUtilityButton")
             self._voice_mute_button.setCheckable(True)
+            self._voice_mute_button.setIcon(_stitch_icon("speaker"))
+            self._voice_mute_button.setFixedSize(32, 32)
+            self._voice_mute_button.setAccessibleName("Mute JARVIS voice")
+            self._voice_mute_button.setToolTip("Mute JARVIS voice")
             self._voice_mute_button.clicked.connect(self._toggle_voice_muted)
             layout.addWidget(self._voice_mute_button)
 
@@ -220,39 +388,99 @@ if QApplication is not None:
             self._refresh_button.setObjectName("GhostButton")
             self._refresh_button.clicked.connect(self.refresh_view)
             layout.addWidget(self._refresh_button)
+            for legacy_control in (
+                self._health_badge,
+                self._ops_badge,
+                self._voice_badge,
+                self._llm_badge,
+                self._mode_badge,
+                self._model_badge,
+                self._provider_badge,
+                self._web_badge,
+                self._openai_badge,
+                self._gemini_badge,
+                self._focus_button,
+                self._system_button,
+                self._left_toggle,
+                self._right_toggle,
+                self._voice_enable_button,
+                self._mic_enable_button,
+                self._listen_button,
+                self._cancel_listen_button,
+                self._voice_test_button,
+                self._refresh_button,
+            ):
+                legacy_control.hide()
             return header
 
         def _build_left_panel(self) -> QWidget:
             panel = QFrame()
             panel.setObjectName("PanelCard")
-            panel.setMinimumWidth(260)
+            panel.setMinimumWidth(240)
+            panel.setMaximumWidth(280)
             layout = QVBoxLayout(panel)
-            layout.setContentsMargins(16, 16, 16, 16)
-            layout.setSpacing(12)
+            layout.setContentsMargins(16, 24, 16, 16)
+            layout.setSpacing(14)
 
-            layout.addWidget(self._section_header("Service Surface", "Secondary systems and live alerts"))
+            brand = QFrame()
+            brand.setObjectName("SidebarBrand")
+            brand_layout = QHBoxLayout(brand)
+            brand_layout.setContentsMargins(8, 0, 8, 0)
+            brand_layout.setSpacing(12)
+            avatar = QLabel()
+            avatar.setObjectName("BrandAvatar")
+            avatar.setAlignment(Qt.AlignCenter)
+            avatar.setFixedSize(42, 42)
+            avatar.setPixmap(
+                _stitch_icon("neural", color="#00e5ff", size=28).pixmap(28, 28)
+            )
+            brand_copy = QVBoxLayout()
+            brand_copy.setSpacing(4)
+            brand_title = QLabel("JARVIS")
+            brand_title.setObjectName("SidebarBrandTitle")
+            brand_status = QLabel("●  System Online")
+            brand_status.setObjectName("SidebarBrandStatus")
+            brand_copy.addWidget(brand_title)
+            brand_copy.addWidget(brand_status)
+            brand_layout.addWidget(avatar)
+            brand_layout.addLayout(brand_copy, 1)
+            layout.addWidget(brand)
+
+            self._new_session_button = QPushButton("New Session")
+            self._new_session_button.setObjectName("NewSessionButton")
+            self._new_session_button.setAccessibleName("New Session")
+            self._new_session_button.clicked.connect(self._start_new_session)
+            layout.addWidget(self._new_session_button)
 
             nav_card = QFrame()
-            nav_card.setObjectName("ChromeCard")
+            nav_card.setObjectName("SidebarNavigation")
             nav_layout = QVBoxLayout(nav_card)
-            nav_layout.setContentsMargins(12, 12, 12, 12)
-            nav_layout.setSpacing(8)
-            nav_layout.addWidget(self._section_header("Jarvis Navigation", "Real tools plus safe previews"))
-            for action_id, label in (
-                ("chat", "Chat"),
-                ("agent", "Agent Mode"),
-                ("web", "Web"),
-                ("context", "Context"),
-                ("memory", "Memory"),
-                ("code", "Code Agent"),
-                ("learning", "Learning"),
-                ("settings", "Settings"),
+            nav_layout.setContentsMargins(0, 10, 0, 0)
+            nav_layout.setSpacing(2)
+            self._primary_label = QLabel("Primary")
+            self._primary_label.setObjectName("SidebarSectionLabel")
+            nav_layout.addWidget(self._primary_label)
+            for action_id, label, icon_name in (
+                ("chat", "Neural Core", "neural"),
+                ("agent", "Agent Mode", "agent"),
+                ("activity", "Activity Graph", "activity"),
+                ("files", "File Vault", "files"),
+                ("data", "Data Analysis", "data"),
+                ("memory", "Memory Bank", "memory"),
+                ("tools", "Neural Tools", "tools"),
             ):
                 button = QPushButton(label)
                 button.setObjectName("NavButton")
-                button.clicked.connect(lambda _checked=False, action=action_id: self._navigate_shell(action))
+                button.setCheckable(True)
+                button.setIcon(_stitch_icon(icon_name))
+                button.clicked.connect(
+                    lambda _checked=False, action=action_id: self._navigate_shell(
+                        action
+                    )
+                )
                 nav_layout.addWidget(button)
                 self._nav_buttons[action_id] = button
+            self._nav_buttons["chat"].setChecked(True)
             layout.addWidget(nav_card)
 
             metrics_row = QHBoxLayout()
@@ -269,23 +497,59 @@ if QApplication is not None:
             self._services.setObjectName("ServiceList")
             layout.addWidget(self._services, 3)
 
-            layout.addWidget(self._section_header("Alerts", "Operational anomalies and approvals"))
+            self._alerts_header = self._section_header(
+                "Alerts", "Operational anomalies and approvals"
+            )
+            layout.addWidget(self._alerts_header)
             self._alerts = QListWidget()
             self._alerts.setObjectName("AlertList")
             layout.addWidget(self._alerts, 2)
+            self._alert_metric.hide()
+            self._service_metric.hide()
+            self._services.hide()
+            self._alerts.hide()
+            self._alerts_header.hide()
+            layout.addStretch(1)
+
+            footer = QFrame()
+            footer.setObjectName("SidebarFooter")
+            footer_layout = QVBoxLayout(footer)
+            footer_layout.setContentsMargins(0, 12, 0, 0)
+            footer_layout.setSpacing(2)
+            settings_button = QPushButton("System Settings")
+            settings_button.setObjectName("NavButton")
+            settings_button.setCheckable(True)
+            settings_button.setIcon(_stitch_icon("settings"))
+            settings_button.clicked.connect(
+                lambda _checked=False: self._navigate_shell("settings")
+            )
+            self._nav_buttons["settings"] = settings_button
+            self._sidebar_help_button = QPushButton("Help")
+            self._sidebar_help_button.setObjectName("NavButton")
+            self._sidebar_help_button.setIcon(_stitch_icon("help"))
+            self._sidebar_help_button.setToolTip("Help")
+            self._sidebar_terminal_button = QPushButton("Terminal")
+            self._sidebar_terminal_button.setObjectName("NavButton")
+            self._sidebar_terminal_button.setIcon(_stitch_icon("terminal"))
+            self._sidebar_terminal_button.setToolTip("Terminal")
+            footer_layout.addWidget(settings_button)
+            footer_layout.addWidget(self._sidebar_help_button)
+            footer_layout.addWidget(self._sidebar_terminal_button)
+            layout.addWidget(footer)
             return panel
 
         def _build_center_panel(self) -> QWidget:
             panel = QFrame()
             panel.setObjectName("CentralHalo")
             layout = QVBoxLayout(panel)
-            layout.setContentsMargins(24, 18, 24, 18)
-            layout.setSpacing(12)
+            layout.setContentsMargins(40, 24, 40, 24)
+            layout.setSpacing(0)
 
             hero = QFrame()
+            self._hero_card = hero
             hero.setObjectName("HeroCard")
             hero.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-            hero.setMinimumHeight(200)
+            hero.setMaximumHeight(116)
             hero_layout = QVBoxLayout(hero)
             hero_layout.setContentsMargins(22, 18, 22, 16)
             hero_layout.setSpacing(8)
@@ -304,6 +568,7 @@ if QApplication is not None:
             hero_layout.addLayout(hero_top)
 
             self._reactor = ReactorCoreWidget()
+            self._reactor.hide()
             hero_layout.addWidget(self._reactor, 0, Qt.AlignCenter)
 
             self._hero_state = QLabel("CONVERSATION STANDBY")
@@ -320,26 +585,126 @@ if QApplication is not None:
             self._ram_metric = MetricCard("RAM", "n/a")
             self._mission_metric = MetricCard("MISSIONS", "0")
             self._timeline_metric = MetricCard("TIMELINE", "0")
-            for widget in (self._cpu_metric, self._ram_metric, self._mission_metric, self._timeline_metric):
+            for widget in (
+                self._cpu_metric,
+                self._ram_metric,
+                self._mission_metric,
+                self._timeline_metric,
+            ):
                 metrics_layout.addWidget(widget)
             hero_layout.addWidget(self._metrics_strip)
             layout.addWidget(hero, 0)
+            hero.hide()
 
             chat_card = QFrame()
+            self._chat_card = chat_card
             chat_card.setObjectName("HistoryCard")
             chat_card.setMinimumHeight(420)
+            chat_card.setMaximumWidth(896)
             chat_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
             chat_layout = QVBoxLayout(chat_card)
             chat_layout.setContentsMargins(0, 0, 0, 0)
             chat_layout.setSpacing(0)
             self._conversation = ConversationSurfaceWidget()
+            self._conversation_header = self._conversation._title
             chat_layout.addWidget(self._conversation, 1)
 
             composer = QFrame()
+            self._composer = composer
             composer.setObjectName("ChatComposer")
             composer_layout = QVBoxLayout(composer)
-            composer_layout.setContentsMargins(12, 12, 12, 12)
+            composer_layout.setContentsMargins(14, 12, 14, 12)
             composer_layout.setSpacing(8)
+
+            mode_row = QHBoxLayout()
+            mode_row.setSpacing(6)
+            self._llm_mode_selector.hide()
+            self._model_mode_segment = QFrame()
+            self._model_mode_segment.setObjectName("ModelModeSegment")
+            segment_layout = QHBoxLayout(self._model_mode_segment)
+            segment_layout.setContentsMargins(0, 0, 0, 0)
+            segment_layout.setSpacing(0)
+            self._model_mode_buttons: dict[str, QPushButton] = {}
+            self._model_mode_group = QButtonGroup(self)
+            self._model_mode_group.setExclusive(True)
+            for label, value in (
+                ("AUTO", "auto"),
+                ("LOCAL", "local"),
+                ("ONLINE", "nvidia_api"),
+            ):
+                button = QPushButton(label)
+                button.setObjectName("ModelModeSegmentButton")
+                button.setCheckable(True)
+                button.setProperty("modeValue", value)
+                button.clicked.connect(
+                    lambda _checked=False, mode=value: self._select_model_segment(mode)
+                )
+                self._model_mode_group.addButton(button)
+                self._model_mode_buttons[value] = button
+                segment_layout.addWidget(button)
+            selected_mode = self._llm_mode_selector.currentData() or "auto"
+            self._model_mode_buttons.get(
+                str(selected_mode), self._model_mode_buttons["auto"]
+            ).setChecked(True)
+            mode_row.addWidget(self._model_mode_segment)
+            self._reasoning_selector = QComboBox()
+            self._reasoning_selector.setObjectName("ReasoningPreferenceSelector")
+            self._reasoning_selector.setAccessibleName(
+                "Seleccionar preferencia de razonamiento"
+            )
+            for label, value in (
+                ("Reasoning Off", "off"),
+                ("Reasoning Low", "low"),
+                ("Reasoning Medium", "medium"),
+                ("Reasoning XHigh", "xhigh"),
+                ("Reasoning Auto", "auto"),
+            ):
+                self._reasoning_selector.addItem(label, value)
+            current_reasoning = str(
+                self._desktop.llm_status().get("reasoning_preference") or "auto"
+            )
+            reasoning_index = self._reasoning_selector.findData(current_reasoning)
+            self._reasoning_selector.setCurrentIndex(max(reasoning_index, 0))
+            self._reasoning_selector.currentIndexChanged.connect(
+                self._change_reasoning_preference
+            )
+            mode_row.addWidget(self._reasoning_selector)
+            mode_row.addStretch(1)
+
+            self._attach_button = QPushButton("+")
+            self._attach_button.setObjectName("ComposerToolButton")
+            self._attach_button.setAccessibleName("Adjuntar archivos")
+            self._attach_button.setToolTip("Adjuntar archivos")
+            self._attach_button.setFixedSize(34, 34)
+            self._attachment_menu = QMenu(self._attach_button)
+            for label, file_filter in (
+                (
+                    "File",
+                    "Documentos (*.pdf *.docx *.csv *.json *.txt *.md *.py *.js *.ts *.yaml *.yml *.toml);;Todos los archivos (*)",
+                ),
+                ("Image", "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp)"),
+                ("Video", "Videos (*.mp4 *.mov *.mkv *.webm)"),
+                ("Audio", "Audio (*.wav *.mp3 *.flac *.m4a *.ogg)"),
+            ):
+                action = self._attachment_menu.addAction(label)
+                action.triggered.connect(
+                    lambda _checked=False, selected_filter=file_filter: (
+                        self._open_attachment_picker(selected_filter)
+                    )
+                )
+            self._attach_button.setMenu(self._attachment_menu)
+            self._attach_button.installEventFilter(self)
+            mode_row.addWidget(self._attach_button)
+
+            self._mic_button = QPushButton()
+            self._mic_button.setObjectName("ComposerToolButton")
+            self._mic_button.setAccessibleName("Entrada de voz")
+            self._mic_button.setToolTip("Entrada de voz")
+            self._mic_button.setIcon(_stitch_icon("mic"))
+            self._mic_button.setFixedSize(34, 34)
+            self._mic_button.clicked.connect(self._start_listening)
+            mode_row.addWidget(self._mic_button)
+            composer_layout.addLayout(mode_row)
 
             self._attachment_preview = QFrame()
             self._attachment_preview.setObjectName("AttachmentPreview")
@@ -351,62 +716,289 @@ if QApplication is not None:
             composer_layout.addWidget(self._attachment_preview)
 
             composer_row = QHBoxLayout()
-            composer_row.setSpacing(10)
-            self._attach_button = QPushButton("+")
-            self._attach_button.setObjectName("AttachButton")
-            self._attach_button.setAccessibleName("Adjuntar archivos")
-            self._attach_button.setToolTip("Adjuntar archivos")
-            self._attach_button.setMinimumSize(54, 54)
-            self._attach_button.setMaximumWidth(54)
-            self._attachment_menu = QMenu(self._attach_button)
-            for label, file_filter in (
-                ("Imágenes", "Imágenes (*.png *.jpg *.jpeg *.webp *.bmp)"),
-                ("Videos", "Videos (*.mp4 *.mov *.mkv *.webm)"),
-                ("Audio", "Audio (*.wav *.mp3 *.flac *.m4a *.ogg)"),
-                ("Documentos", "Documentos (*.pdf *.docx *.csv *.json)"),
-                ("Texto y código", "Texto y código (*.txt *.md *.py *.js *.ts *.tsx *.jsx *.rs *.go *.java *.c *.cpp *.h *.yaml *.yml *.toml)"),
-                ("Otros archivos", "Todos los archivos (*)"),
-            ):
-                action = self._attachment_menu.addAction(label)
-                action.triggered.connect(
-                    lambda _checked=False, selected_filter=file_filter: self._open_attachment_picker(selected_filter)
-                )
-            self._attach_button.setMenu(self._attachment_menu)
-            self._attach_button.installEventFilter(self)
-            composer_row.addWidget(self._attach_button)
+            composer_row.setSpacing(8)
             self._input = ChatComposerInput()
             self._input.setObjectName("ChatInput")
-            self._input.setPlaceholderText("Habla con JARVIS...")
+            self._input.setPlaceholderText("Message JARVIS or type '/' for commands...")
             self._input.submit_requested.connect(self._submit_chat)
             self._input.installEventFilter(self)
             composer_row.addWidget(self._input, 1)
-            self._mic_button = QPushButton("Listen")
-            self._mic_button.setMinimumHeight(54)
-            self._mic_button.setMinimumWidth(110)
-            self._mic_button.clicked.connect(self._start_listening)
-            composer_row.addWidget(self._mic_button)
-            self._send_button = QPushButton("Transmit")
-            self._send_button.setMinimumHeight(54)
-            self._send_button.setMinimumWidth(132)
+            self._send_button = QPushButton()
+            self._send_button.setObjectName("ComposerSendButton")
+            self._send_button.setAccessibleName("Enviar mensaje")
+            self._send_button.setToolTip("Enviar mensaje")
+            self._send_button.setIcon(_stitch_icon("send", color="#00363d"))
+            self._send_button.setFixedSize(44, 44)
             self._send_button.clicked.connect(self._submit_chat)
             composer_row.addWidget(self._send_button)
             composer_layout.addLayout(composer_row)
             chat_layout.addWidget(composer)
-            layout.addWidget(chat_card, 3)
+            self._composer_disclaimer = QLabel(
+                "JARVIS may produce inaccurate information about people, places, or facts."
+            )
+            self._composer_disclaimer.setObjectName("ComposerDisclaimer")
+            self._composer_disclaimer.setAlignment(Qt.AlignCenter)
+            chat_layout.addWidget(self._composer_disclaimer)
+            layout.addWidget(chat_card, 3, Qt.AlignHCenter)
             return panel
+
+        def _build_module_surface(self, surface_id: str) -> QWidget:
+            from PySide6.QtWidgets import QListWidget
+
+            page = QFrame()
+            page.setObjectName("ModuleSurface")
+            layout = QVBoxLayout(page)
+            layout.setContentsMargins(30, 24, 30, 24)
+            layout.setSpacing(18)
+
+            toolbar = QHBoxLayout()
+            toolbar.setSpacing(0)
+            segment = QFrame()
+            segment.setObjectName("ModelModeSegment")
+            segment_layout = QHBoxLayout(segment)
+            segment_layout.setContentsMargins(0, 0, 0, 0)
+            segment_layout.setSpacing(0)
+            if not hasattr(self, "_surface_mode_buttons"):
+                self._surface_mode_buttons: dict[str, list[QPushButton]] = {
+                    "auto": [],
+                    "local": [],
+                    "nvidia_api": [],
+                }
+            selected_mode = str(self._llm_mode_selector.currentData() or "auto")
+            for label, value in (
+                ("AUTO", "auto"),
+                ("LOCAL", "local"),
+                ("ONLINE", "nvidia_api"),
+            ):
+                button = QPushButton(label)
+                button.setObjectName("ModelModeSegmentButton")
+                button.setCheckable(True)
+                button.setChecked(value == selected_mode)
+                button.clicked.connect(
+                    lambda _checked=False, mode=value: self._select_model_segment(mode)
+                )
+                self._surface_mode_buttons[value].append(button)
+                segment_layout.addWidget(button)
+            toolbar.addWidget(segment)
+            toolbar.addStretch(1)
+            layout.addLayout(toolbar)
+
+            titles = {
+                "agent": ("Agent Mode", "Observe · Plan · Confirm · Execute · Verify"),
+                "activity": (
+                    "Activity Graph",
+                    "Live runtime flow from real events only",
+                ),
+                "files": (
+                    "File Vault",
+                    "Files and attachments in the current JARVIS session",
+                ),
+                "data": (
+                    "Data Analysis",
+                    "Analyze structured data with real runtime results",
+                ),
+                "memory": (
+                    "Active Memory Blocks",
+                    "Relevant context and retained facts",
+                ),
+                "tools": (
+                    "Available Toolkits",
+                    "Registered JARVIS services and execution state",
+                ),
+                "settings": (
+                    "Model Selection",
+                    "Configure the real AUTO, LOCAL and ONLINE routes",
+                ),
+            }
+            title, subtitle = titles[surface_id]
+            heading = self._section_header(title, subtitle)
+            heading.setObjectName("ModuleHeading")
+            heading.layout().itemAt(0).widget().setObjectName("ModulePageTitle")
+            heading.layout().itemAt(1).widget().setObjectName("ModulePageSubtitle")
+            layout.addWidget(heading)
+
+            if surface_id == "agent":
+                objective = QFrame()
+                objective.setObjectName("IntelligenceCard")
+                objective_layout = QVBoxLayout(objective)
+                objective_layout.setContentsMargins(22, 18, 22, 18)
+                self._agent_surface_status = QLabel("Standby")
+                self._agent_surface_status.setObjectName("ModuleEyebrow")
+                self._agent_surface_summary = QLabel(
+                    "No active objective. Enter a goal in Neural Core to begin."
+                )
+                self._agent_surface_summary.setObjectName("ModuleTitle")
+                self._agent_surface_summary.setWordWrap(True)
+                self._agent_surface_progress = QProgressBar()
+                self._agent_surface_progress.setObjectName("StitchProgress")
+                self._agent_surface_progress.setRange(0, 0)
+                self._agent_surface_progress.setTextVisible(False)
+                self._agent_surface_progress.hide()
+                objective_layout.addWidget(self._agent_surface_status)
+                objective_layout.addWidget(self._agent_surface_summary)
+                objective_layout.addWidget(self._agent_surface_progress)
+                layout.addWidget(objective)
+                self._agent_surface_steps = QListWidget()
+                self._agent_surface_steps.setObjectName("ModuleList")
+                layout.addWidget(self._agent_surface_steps, 1)
+                controls = QHBoxLayout()
+                for text, callback, object_name in (
+                    (
+                        "Start Guided Agent",
+                        self._start_guided_agent,
+                        "PrimaryActionButton",
+                    ),
+                    ("Dry Run", self._dry_run_agent_action, "PrimaryActionButton"),
+                    (
+                        "Confirm Action",
+                        self._confirm_agent_action,
+                        "PrimaryActionButton",
+                    ),
+                    ("Stop", self._stop_agent, "DangerActionButton"),
+                ):
+                    button = QPushButton(text)
+                    button.setObjectName(object_name)
+                    button.clicked.connect(callback)
+                    controls.addWidget(button)
+                layout.addLayout(controls)
+            elif surface_id == "activity":
+                self._activity_graph_main = ActivityGraphWidget()
+                layout.addWidget(self._activity_graph_main, 1)
+                self._activity_surface_status = QLabel("No runtime flow is active.")
+                self._activity_surface_status.setObjectName("ModuleStatus")
+                layout.addWidget(self._activity_surface_status)
+            elif surface_id == "files":
+                drop = QPushButton(
+                    "Drag & Drop Intel Packages\n\nCSV   JSON   PNG   MP4"
+                )
+                drop.setObjectName("FileDropZone")
+                drop.clicked.connect(
+                    lambda: self._open_attachment_picker("Todos los archivos (*)")
+                )
+                layout.addWidget(drop)
+                self._file_surface_list = QListWidget()
+                self._file_surface_list.setObjectName("ModuleList")
+                layout.addWidget(self._file_surface_list, 1)
+                add_file = QPushButton("Add File")
+                add_file.setObjectName("PrimaryActionButton")
+                add_file.clicked.connect(
+                    lambda: self._open_attachment_picker("Todos los archivos (*)")
+                )
+                layout.addWidget(add_file, 0, Qt.AlignLeft)
+            elif surface_id == "data":
+                metrics = QHBoxLayout()
+                self._data_records_card = MetricCard("Records Analyzed", "No dataset")
+                self._data_anomaly_card = MetricCard("Anomalies", "—")
+                self._data_confidence_card = MetricCard("Analysis Status", "Standby")
+                for card in (
+                    self._data_records_card,
+                    self._data_anomaly_card,
+                    self._data_confidence_card,
+                ):
+                    metrics.addWidget(card)
+                layout.addLayout(metrics)
+                self._data_surface_output = QTextEdit()
+                self._data_surface_output.setObjectName("ModuleOutput")
+                self._data_surface_output.setReadOnly(True)
+                self._data_surface_output.setPlaceholderText(
+                    "Attach a CSV, TSV, JSON or XLSX file and ask JARVIS to analyze it."
+                )
+                layout.addWidget(self._data_surface_output, 1)
+            elif surface_id == "memory":
+                filters = QHBoxLayout()
+                for label in ("All", "Preferences", "Context", "Facts"):
+                    button = QPushButton(label)
+                    button.setObjectName("ContextModeButton")
+                    button.setCheckable(True)
+                    if label == "All":
+                        button.setChecked(True)
+                    filters.addWidget(button)
+                layout.addLayout(filters)
+                self._memory_surface_summary = QLabel(
+                    "No relevant memory blocks selected for the current turn."
+                )
+                self._memory_surface_summary.setObjectName("ContextCardText")
+                self._memory_surface_summary.setWordWrap(True)
+                layout.addWidget(self._memory_surface_summary)
+                self._memory_surface_context = QTextEdit()
+                self._memory_surface_context.setObjectName("ModuleOutput")
+                self._memory_surface_context.setReadOnly(True)
+                layout.addWidget(self._memory_surface_context, 1)
+            elif surface_id == "tools":
+                self._tools_surface_summary = QLabel("Registered services")
+                self._tools_surface_summary.setObjectName("ModuleEyebrow")
+                layout.addWidget(self._tools_surface_summary)
+                self._tools_surface_list = QListWidget()
+                self._tools_surface_list.setObjectName("ToolGrid")
+                layout.addWidget(self._tools_surface_list, 1)
+            elif surface_id == "settings":
+                cards = QHBoxLayout()
+                self._settings_primary_card = MetricCard("Primary Engine", "AUTO")
+                self._settings_fallback_card = MetricCard("Local Engine", "Qwen local")
+                cards.addWidget(self._settings_primary_card)
+                cards.addWidget(self._settings_fallback_card)
+                layout.addLayout(cards)
+                self._settings_surface_status = QLabel(
+                    "Provider status is loading from the real runtime."
+                )
+                self._settings_surface_status.setObjectName("ContextCardText")
+                self._settings_surface_status.setWordWrap(True)
+                layout.addWidget(self._settings_surface_status)
+                self._settings_reasoning_selector = QComboBox()
+                self._settings_reasoning_selector.setObjectName(
+                    "ReasoningPreferenceSelector"
+                )
+                for label, value in (
+                    ("Off", "off"),
+                    ("Low", "low"),
+                    ("Medium", "medium"),
+                    ("XHigh", "xhigh"),
+                    ("Auto", "auto"),
+                ):
+                    self._settings_reasoning_selector.addItem(
+                        f"Reasoning {label}", value
+                    )
+                reasoning = str(
+                    self._desktop.llm_status().get("reasoning_preference") or "auto"
+                )
+                self._settings_reasoning_selector.setCurrentIndex(
+                    max(self._settings_reasoning_selector.findData(reasoning), 0)
+                )
+                self._settings_reasoning_selector.currentIndexChanged.connect(
+                    lambda index: self._change_reasoning_preference_from(
+                        self._settings_reasoning_selector, index
+                    )
+                )
+                layout.addWidget(self._settings_reasoning_selector, 0, Qt.AlignLeft)
+                layout.addStretch(1)
+            return page
 
         def _build_right_panel(self) -> QWidget:
             panel = QFrame()
             panel.setObjectName("PanelCard")
-            panel.setMinimumWidth(300)
+            panel.setMinimumWidth(260)
+            panel.setMaximumWidth(280)
             layout = QVBoxLayout(panel)
-            layout.setContentsMargins(16, 16, 16, 16)
-            layout.setSpacing(12)
-            layout.addWidget(self._section_header("Jarvis Ops", "Estado local, contexto, memoria, Code Agent y aprendizaje seguro"))
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(0)
+
+            context_header = QFrame()
+            context_header.setObjectName("ContextPanelHeader")
+            context_header_layout = QVBoxLayout(context_header)
+            context_header_layout.setContentsMargins(24, 22, 24, 18)
+            context_header_layout.setSpacing(8)
+            self._right_context_label = QLabel("Context / Active Threads")
+            self._right_context_label.setObjectName("ContextEyebrow")
+            self._right_session_label = QLabel("Current Session")
+            self._right_session_label.setObjectName("ContextSessionTitle")
+            context_header_layout.addWidget(self._right_context_label)
+            context_header_layout.addWidget(self._right_session_label)
+            layout.addWidget(context_header)
 
             tabs = QTabWidget()
             tabs.setObjectName("RightTabs")
             tabs.setDocumentMode(True)
+            tabs.tabBar().hide()
             self._right_tabs = tabs
 
             from PySide6.QtWidgets import QListWidget
@@ -444,13 +1036,13 @@ if QApplication is not None:
             status_layout.addWidget(
                 self._section_header(
                     "Live System",
-                    "Nemotron híbrido; memoria, herramientas y políticas permanecen locales",
+                    "Qwen local + Nemotron online; memoria, herramientas y políticas permanecen locales",
                 )
             )
             status_grid = QGridLayout()
             status_grid.setHorizontalSpacing(10)
             status_grid.setVerticalSpacing(10)
-            self._local_model_card = MetricCard("Active Model", "Nemotron pending")
+            self._local_model_card = MetricCard("Active Model", "Qwen pending")
             self._web_search_card = MetricCard("Web Search", "Brave")
             self._voice_card = MetricCard("Voice", "ready")
             self._context_card = MetricCard("Context", "active")
@@ -479,7 +1071,7 @@ if QApplication is not None:
             settings_layout.setSpacing(10)
             settings_layout.addWidget(
                 self._section_header(
-                    "NVIDIA y Nemotron local",
+                    "NVIDIA online y Qwen local",
                     "La clave se guarda en el almacén seguro del sistema; nunca en la interfaz ni en el historial",
                 )
             )
@@ -489,10 +1081,14 @@ if QApplication is not None:
             self._nvidia_key_input.setPlaceholderText("NVIDIA_API_KEY")
             self._nvidia_key_input.setAccessibleName("Clave API de NVIDIA")
             settings_layout.addWidget(self._nvidia_key_input)
-            key_buttons = QHBoxLayout()
+            key_buttons = QGridLayout()
+            key_buttons.setHorizontalSpacing(6)
+            key_buttons.setVerticalSpacing(6)
             self._nvidia_key_visibility_button = QPushButton("Mostrar")
             self._nvidia_key_visibility_button.setCheckable(True)
-            self._nvidia_key_visibility_button.toggled.connect(self._toggle_nvidia_key_visibility)
+            self._nvidia_key_visibility_button.toggled.connect(
+                self._toggle_nvidia_key_visibility
+            )
             self._nvidia_key_save_button = QPushButton("Guardar o reemplazar")
             self._nvidia_key_save_button.clicked.connect(self._save_nvidia_key)
             self._nvidia_key_delete_button = QPushButton("Eliminar")
@@ -500,13 +1096,15 @@ if QApplication is not None:
             self._nvidia_key_delete_button.clicked.connect(self._delete_nvidia_key)
             self._nvidia_key_test_button = QPushButton("Probar conexión")
             self._nvidia_key_test_button.clicked.connect(self._test_nvidia_connection)
-            for button in (
-                self._nvidia_key_visibility_button,
-                self._nvidia_key_save_button,
-                self._nvidia_key_delete_button,
-                self._nvidia_key_test_button,
+            for index, button in enumerate(
+                (
+                    self._nvidia_key_visibility_button,
+                    self._nvidia_key_save_button,
+                    self._nvidia_key_delete_button,
+                    self._nvidia_key_test_button,
+                )
             ):
-                key_buttons.addWidget(button)
+                key_buttons.addWidget(button, index // 2, index % 2)
             settings_layout.addLayout(key_buttons)
             self._nvidia_key_status = QLabel("Clave NVIDIA: consultando estado seguro")
             self._nvidia_key_status.setObjectName("SectionMeta")
@@ -520,11 +1118,13 @@ if QApplication is not None:
             self._provider_capabilities.setObjectName("SectionMeta")
             self._provider_capabilities.setWordWrap(True)
             settings_layout.addWidget(self._provider_capabilities)
-            self._local_runtime_button = QPushButton("Diagnosticar Nemotron local")
-            self._local_runtime_button.clicked.connect(self._refresh_local_runtime_diagnostic)
+            self._local_runtime_button = QPushButton("Diagnosticar Qwen local")
+            self._local_runtime_button.clicked.connect(
+                self._refresh_local_runtime_diagnostic
+            )
             settings_layout.addWidget(self._local_runtime_button)
             self._local_runtime_diagnostic = QLabel(
-                "Diagnóstico local: pulsa el botón para comprobar GPU, VRAM, RAM, CUDA, backend y NVFP4."
+                "Diagnóstico Qwen local cuantizado: comprueba endpoint, GPU, VRAM, RAM, CUDA y backend."
             )
             self._local_runtime_diagnostic.setObjectName("SectionMeta")
             self._local_runtime_diagnostic.setWordWrap(True)
@@ -535,14 +1135,22 @@ if QApplication is not None:
             agent_layout = QVBoxLayout(agent_tab)
             agent_layout.setContentsMargins(6, 10, 6, 6)
             agent_layout.setSpacing(10)
-            agent_layout.addWidget(self._section_header("Agent Mode", "Observe -> Plan -> Confirm -> Execute -> Verify"))
+            agent_layout.addWidget(
+                self._section_header(
+                    "Agent Mode", "Observe -> Plan -> Confirm -> Execute -> Verify"
+                )
+            )
             self._agent_state = MetricCard("State", "Standby")
             agent_layout.addWidget(self._agent_state)
-            self._agent_trust = QLabel("Mode: normal | Risk: low | Skill: standby | Rollback: n/a")
+            self._agent_trust = QLabel(
+                "Mode: normal | Risk: low | Skill: standby | Rollback: n/a"
+            )
             self._agent_trust.setObjectName("SectionMeta")
             self._agent_trust.setWordWrap(True)
             agent_layout.addWidget(self._agent_trust)
-            self._agent_timeline = QLabel("Observe -> Plan -> Confirm -> Execute -> Verify")
+            self._agent_timeline = QLabel(
+                "Observe -> Plan -> Confirm -> Execute -> Verify"
+            )
             self._agent_timeline.setObjectName("SectionMeta")
             self._agent_timeline.setWordWrap(True)
             agent_layout.addWidget(self._agent_timeline)
@@ -559,7 +1167,9 @@ if QApplication is not None:
                 step.setWordWrap(True)
                 agent_layout.addWidget(step)
                 self._agent_steps.append(step)
-            self._agent_note = QLabel("Guided Control activo. Usa el chat para dar un objetivo; acciones sensibles esperan Confirm Action.")
+            self._agent_note = QLabel(
+                "Guided Control activo. Usa el chat para dar un objetivo; acciones sensibles esperan Confirm Action."
+            )
             self._agent_note.setObjectName("SectionMeta")
             self._agent_note.setWordWrap(True)
             agent_layout.addWidget(self._agent_note)
@@ -592,28 +1202,126 @@ if QApplication is not None:
             agent_layout.addStretch(1)
 
             context_tab = QWidget()
+            context_tab.setObjectName("ContextSurface")
             context_layout = QVBoxLayout(context_tab)
-            context_layout.setContentsMargins(6, 10, 6, 6)
-            context_layout.setSpacing(8)
-            context_layout.addWidget(self._section_header("Jarvis Context", "Identidad, proveedores, web search, memoria y reglas activas"))
+            context_layout.setContentsMargins(16, 16, 16, 16)
+            context_layout.setSpacing(18)
+
+            context_modes = QFrame()
+            context_modes.setObjectName("ContextModeSegment")
+            context_modes_layout = QHBoxLayout(context_modes)
+            context_modes_layout.setContentsMargins(4, 4, 4, 4)
+            context_modes_layout.setSpacing(2)
+            self._context_mode_buttons: list[QPushButton] = []
+            for label in ("Memory", "Files", "Agents"):
+                button = QPushButton(label)
+                button.setObjectName("ContextModeButton")
+                button.setCheckable(True)
+                if label == "Memory":
+                    button.setChecked(True)
+                context_modes_layout.addWidget(button)
+                self._context_mode_buttons.append(button)
+            context_layout.addWidget(context_modes)
+
+            self._context_memory_title = QLabel("Relevant Memory")
+            self._context_memory_title.setObjectName("ContextSectionTitle")
+            context_layout.addWidget(self._context_memory_title)
+            self._context_memory_value = QLabel(
+                "No relevant memory selected for this turn."
+            )
+            self._context_memory_value.setObjectName("ContextCardText")
+            self._context_memory_value.setWordWrap(True)
+            context_layout.addWidget(self._context_memory_value)
+
+            self._context_files_title = QLabel("Files / Attachments")
+            self._context_files_title.setObjectName("ContextSectionTitle")
+            context_layout.addWidget(self._context_files_title)
+            self._context_files_value = QLabel(
+                "No files attached to the current session."
+            )
+            self._context_files_value.setObjectName("ContextCardText")
+            self._context_files_value.setWordWrap(True)
+            context_layout.addWidget(self._context_files_value)
+
+            self._context_state_title = QLabel("Context State")
+            self._context_state_title.setObjectName("ContextSectionTitle")
+            context_layout.addWidget(self._context_state_title)
+            self._context_state_value = QLabel("Waiting for live context state.")
+            self._context_state_value.setObjectName("ContextCardText")
+            self._context_state_value.setWordWrap(True)
+            context_layout.addWidget(self._context_state_value)
+            context_layout.addStretch(1)
+
             self._context_output = QTextEdit()
             self._context_output.setReadOnly(True)
             self._context_output.setObjectName("DevOutput")
             self._context_output.setPlaceholderText("Contexto seguro de Jarvis.")
-            context_layout.addWidget(self._context_output, 1)
+            self._context_output.hide()
+            context_layout.addWidget(self._context_output)
+
+            file_context_tab = QWidget()
+            file_context_layout = QVBoxLayout(file_context_tab)
+            file_context_layout.setContentsMargins(16, 18, 16, 16)
+            file_context_layout.setSpacing(12)
+            self._file_context_name = QLabel("No file selected")
+            self._file_context_name.setObjectName("ContextSectionTitle")
+            self._file_context_detail = QLabel(
+                "Attach a file to inspect its verified name, type, size and processing state."
+            )
+            self._file_context_detail.setObjectName("ContextCardText")
+            self._file_context_detail.setWordWrap(True)
+            file_context_layout.addWidget(self._file_context_name)
+            file_context_layout.addWidget(self._file_context_detail)
+            file_context_layout.addStretch(1)
+
+            data_context_tab = QWidget()
+            data_context_layout = QVBoxLayout(data_context_tab)
+            data_context_layout.setContentsMargins(16, 18, 16, 16)
+            data_context_layout.setSpacing(12)
+            self._data_brief_title = QLabel("Intelligence Brief")
+            self._data_brief_title.setObjectName("ContextSectionTitle")
+            self._data_brief_value = QLabel(
+                "No completed data analysis is available for the current session."
+            )
+            self._data_brief_value.setObjectName("ContextCardText")
+            self._data_brief_value.setWordWrap(True)
+            data_context_layout.addWidget(self._data_brief_title)
+            data_context_layout.addWidget(self._data_brief_value)
+            data_context_layout.addStretch(1)
+
+            tools_context_tab = QWidget()
+            tools_context_layout = QVBoxLayout(tools_context_tab)
+            tools_context_layout.setContentsMargins(16, 18, 16, 16)
+            tools_context_layout.setSpacing(12)
+            self._tool_inspector_title = QLabel("No tool selected")
+            self._tool_inspector_title.setObjectName("ContextSectionTitle")
+            self._tool_inspector_value = QLabel(
+                "Select a registered toolkit to inspect its live state and permissions."
+            )
+            self._tool_inspector_value.setObjectName("ContextCardText")
+            self._tool_inspector_value.setWordWrap(True)
+            tools_context_layout.addWidget(self._tool_inspector_title)
+            tools_context_layout.addWidget(self._tool_inspector_value)
+            tools_context_layout.addStretch(1)
 
             image_tab = QWidget()
             image_layout = QVBoxLayout(image_tab)
             image_layout.setContentsMargins(6, 10, 6, 6)
             image_layout.setSpacing(8)
-            image_layout.addWidget(self._section_header("Image Studio", "JuggernautXL SDXL local · Diffusers · sin Fooocus"))
+            image_layout.addWidget(
+                self._section_header(
+                    "Image Studio", "JuggernautXL SDXL local · Diffusers · sin Fooocus"
+                )
+            )
             self._image_status = QLabel("Image Runtime standby")
             self._image_status.setObjectName("SectionMeta")
             self._image_status.setWordWrap(True)
             image_layout.addWidget(self._image_status)
             self._image_prompt = QPlainTextEdit()
             self._image_prompt.setObjectName("DevOutput")
-            self._image_prompt.setPlaceholderText("Describe la imagen local a generar...")
+            self._image_prompt.setPlaceholderText(
+                "Describe la imagen local a generar..."
+            )
             self._image_prompt.setMaximumHeight(130)
             image_layout.addWidget(self._image_prompt)
             image_grid = QGridLayout()
@@ -626,12 +1334,16 @@ if QApplication is not None:
             self._image_cancel_button.setObjectName("DangerActionButton")
             self._image_cancel_button.clicked.connect(self._cancel_image_generation)
             self._image_open_folder_button = QPushButton("Open Output Folder")
-            self._image_open_folder_button.clicked.connect(self._open_image_output_folder)
+            self._image_open_folder_button.clicked.connect(
+                self._open_image_output_folder
+            )
             self._image_unload_button = QPushButton("Unload Image Model")
             self._image_unload_button.clicked.connect(self._unload_image_model)
             self._image_variations_button = QPushButton("Variations")
             self._image_variations_button.setEnabled(False)
-            self._image_variations_button.setToolTip("Coming soon: variaciones desde el ultimo prompt.")
+            self._image_variations_button.setToolTip(
+                "Coming soon: variaciones desde el ultimo prompt."
+            )
             for index, button in enumerate(
                 (
                     self._image_generate_button,
@@ -653,7 +1365,12 @@ if QApplication is not None:
             code_layout = QVBoxLayout(code_tab)
             code_layout.setContentsMargins(6, 10, 6, 6)
             code_layout.setSpacing(8)
-            code_layout.addWidget(self._section_header("Code Agent", "Patches revisables, Git, memoria y doctor sin aplicar cambios automaticos"))
+            code_layout.addWidget(
+                self._section_header(
+                    "Code Agent",
+                    "Patches revisables, Git, memoria y doctor sin aplicar cambios automaticos",
+                )
+            )
             self._dev_status = QLabel("Code Agent standby")
             self._dev_status.setObjectName("SectionMeta")
             self._dev_status.setWordWrap(True)
@@ -677,7 +1394,9 @@ if QApplication is not None:
             self._patch_list.setObjectName("PatchList")
             self._patch_list.setMaximumHeight(132)
             self._patch_list.setAlternatingRowColors(False)
-            self._patch_list.itemSelectionChanged.connect(self._on_patch_selection_changed)
+            self._patch_list.itemSelectionChanged.connect(
+                self._on_patch_selection_changed
+            )
             code_layout.addWidget(self._patch_list)
             code_grid = QGridLayout()
             code_grid.setHorizontalSpacing(8)
@@ -697,14 +1416,20 @@ if QApplication is not None:
                 ]
             ):
                 button = QPushButton(label)
-                button.clicked.connect(lambda _checked=False, action=action_id: self._run_dev_action(action))
+                button.clicked.connect(
+                    lambda _checked=False, action=action_id: self._run_dev_action(
+                        action
+                    )
+                )
                 code_grid.addWidget(button, index // 3, index % 3)
                 self._dev_buttons.append(button)
             code_layout.addLayout(code_grid)
             self._dev_output = QTextEdit()
             self._dev_output.setReadOnly(True)
             self._dev_output.setObjectName("DevOutput")
-            self._dev_output.setPlaceholderText("Los resultados del Code Agent apareceran aqui.")
+            self._dev_output.setPlaceholderText(
+                "Los resultados del Code Agent apareceran aqui."
+            )
             code_layout.addWidget(self._dev_output, 1)
             self._patch_diff_output = QPlainTextEdit()
             self._patch_diff_output.setReadOnly(True)
@@ -735,16 +1460,40 @@ if QApplication is not None:
             tabs.addTab(ops_tab, "Ops")
             tabs.addTab(image_tab, "Image Studio")
             tabs.addTab(context_tab, "Context")
+            tabs.addTab(file_context_tab, "File Context")
+            tabs.addTab(data_context_tab, "Data Context")
+            tabs.addTab(tools_context_tab, "Tool Context")
             tabs.addTab(code_tab, "Code Agent")
             tabs.addTab(activity_tab, "Activity Graph")
+            for index in range(tabs.count()):
+                if tabs.tabText(index) == "Context":
+                    tabs.setCurrentIndex(index)
+                    break
             layout.addWidget(tabs, 1)
+
+            runtime_footer = QFrame()
+            runtime_footer.setObjectName("ContextRuntimeFooter")
+            runtime_footer_layout = QVBoxLayout(runtime_footer)
+            runtime_footer_layout.setContentsMargins(24, 16, 24, 18)
+            runtime_footer_layout.setSpacing(5)
+            runtime_label = QLabel("RUNTIME STATUS")
+            runtime_label.setObjectName("ContextEyebrow")
+            self._runtime_status_label = QLabel("●  Connecting")
+            self._runtime_status_label.setObjectName("RuntimeStatusValue")
+            runtime_footer_layout.addWidget(runtime_label)
+            runtime_footer_layout.addWidget(self._runtime_status_label)
+            layout.addWidget(runtime_footer)
 
             self._quick_action_frame = QFrame()
             self._quick_action_frame.setObjectName("ChromeCard")
             quick_layout = QVBoxLayout(self._quick_action_frame)
             quick_layout.setContentsMargins(16, 14, 16, 14)
             quick_layout.setSpacing(10)
-            quick_layout.addWidget(self._section_header("Quick Actions", "Runtime shortcuts when system mode is open"))
+            quick_layout.addWidget(
+                self._section_header(
+                    "Quick Actions", "Runtime shortcuts when system mode is open"
+                )
+            )
             quick_grid = QGridLayout()
             quick_grid.setHorizontalSpacing(10)
             quick_grid.setVerticalSpacing(10)
@@ -760,11 +1509,16 @@ if QApplication is not None:
                 ]
             ):
                 button = QPushButton(label)
-                button.clicked.connect(lambda _checked=False, action=action_id: self._run_quick_action(action))
+                button.clicked.connect(
+                    lambda _checked=False, action=action_id: self._run_quick_action(
+                        action
+                    )
+                )
                 quick_grid.addWidget(button, index // 3, index % 3)
                 self._quick_buttons.append(button)
             quick_layout.addLayout(quick_grid)
             layout.addWidget(self._quick_action_frame, 0)
+            self._quick_action_frame.hide()
             return panel
 
         def _section_header(self, title: str, meta: str) -> QWidget:
@@ -802,6 +1556,29 @@ if QApplication is not None:
             frame.moveCenter(available.center())
             self.setGeometry(frame.intersected(available))
 
+        def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API.
+            super().resizeEvent(event)
+            if not hasattr(self, "_splitter"):
+                return
+            width = event.size().width()
+            if width < 900:
+                self._left_panel.setVisible(False)
+                self._right_panel.setVisible(False)
+                self._splitter.setSizes([0, max(width, 1), 0])
+            elif width < 1240:
+                self._left_panel.setVisible(True)
+                self._right_panel.setVisible(False)
+                self._splitter.setSizes([260, max(width - 260, 1), 0])
+            else:
+                self._apply_shell_mode()
+            QTimer.singleShot(0, self._sync_stitch_chat_width)
+
+        def _sync_stitch_chat_width(self) -> None:
+            if not hasattr(self, "_chat_card") or not hasattr(self, "_center_panel"):
+                return
+            available = max(self._center_panel.width() - 80, 320)
+            self._chat_card.setFixedWidth(min(896, available))
+
         def _change_llm_mode(self, index: int) -> None:
             mode = self._llm_mode_selector.itemData(index)
             if not isinstance(mode, str):
@@ -809,12 +1586,43 @@ if QApplication is not None:
             try:
                 self._desktop.set_llm_mode(mode)
             except (ValueError, RuntimeError) as exc:
-                self._provider_status_detail.setText(f"No se pudo cambiar el modo: {exc}")
+                self._provider_status_detail.setText(
+                    f"No se pudo cambiar el modo: {exc}"
+                )
+            self.refresh_view()
+
+        def _select_model_segment(self, mode: str) -> None:
+            index = self._llm_mode_selector.findData(mode)
+            if index >= 0:
+                self._llm_mode_selector.blockSignals(True)
+                self._llm_mode_selector.setCurrentIndex(index)
+                self._llm_mode_selector.blockSignals(False)
+            self._change_llm_mode(index)
+
+        def _change_reasoning_preference(self, index: int) -> None:
+            self._change_reasoning_preference_from(self._reasoning_selector, index)
+
+        def _change_reasoning_preference_from(
+            self, selector: QComboBox, index: int
+        ) -> None:
+            preference = selector.itemData(index)
+            if not isinstance(preference, str):
+                return
+            try:
+                self._desktop.set_reasoning_preference(preference)
+            except (ValueError, RuntimeError, OSError) as exc:
+                self._provider_status_detail.setText(
+                    f"No se pudo cambiar reasoning: {exc}"
+                )
             self.refresh_view()
 
         def _toggle_nvidia_key_visibility(self, visible: bool) -> None:
-            self._nvidia_key_input.setEchoMode(QLineEdit.Normal if visible else QLineEdit.Password)
-            self._nvidia_key_visibility_button.setText("Ocultar" if visible else "Mostrar")
+            self._nvidia_key_input.setEchoMode(
+                QLineEdit.Normal if visible else QLineEdit.Password
+            )
+            self._nvidia_key_visibility_button.setText(
+                "Ocultar" if visible else "Mostrar"
+            )
 
         def _save_nvidia_key(self) -> None:
             value = self._nvidia_key_input.text()
@@ -853,7 +1661,11 @@ if QApplication is not None:
                 state = str(result.get("state") or "unknown")
                 latency = result.get("latency_ms")
                 detail = str(result.get("detail") or result.get("reason") or "")
-                latency_text = f" · {float(latency):.0f} ms" if isinstance(latency, (int, float)) else ""
+                latency_text = (
+                    f" · {float(latency):.0f} ms"
+                    if isinstance(latency, (int, float))
+                    else ""
+                )
                 self._nvidia_key_status.setText(
                     f"Prueba NVIDIA: {state}{latency_text}{' · ' + detail if detail else ''}"
                 )
@@ -865,24 +1677,33 @@ if QApplication is not None:
                 result = self._desktop.local_runtime_status()
                 diagnostic = result.get("diagnostic") or {}
                 gpu_devices = diagnostic.get("gpu_devices") or []
-                gpu_label = ", ".join(
-                    str(device.get("name") or "GPU desconocida")
-                    for device in gpu_devices
-                    if isinstance(device, dict)
-                ) or "ninguna GPU compatible detectada"
+                gpu_label = (
+                    ", ".join(
+                        str(device.get("name") or "GPU desconocida")
+                        for device in gpu_devices
+                        if isinstance(device, dict)
+                    )
+                    or "ninguna GPU compatible detectada"
+                )
                 missing = diagnostic.get("missing_requirements") or []
-                endpoint_note = "endpoint remoto" if diagnostic.get("endpoint_is_remote") else "host local"
+                endpoint_note = (
+                    "endpoint remoto"
+                    if diagnostic.get("endpoint_is_remote")
+                    else "host local"
+                )
                 detail = (
                     f"{endpoint_note} · RAM {diagnostic.get('ram_total_gb')} GiB · GPU {gpu_label} · "
                     f"CUDA {diagnostic.get('cuda_version') or 'no disponible'} · "
                     f"backend {diagnostic.get('backend') or 'no disponible'} · "
-                    f"NVFP4 {'compatible' if diagnostic.get('nvfp4_compatible') else 'no verificado'}"
+                    f"modelo {(result.get('runtime') or {}).get('display_name') or (result.get('runtime') or {}).get('model') or 'perfil local configurado'}"
                 )
                 if missing:
                     detail += " · Falta: " + " | ".join(str(item) for item in missing)
                 self._local_runtime_diagnostic.setText(detail)
             except (ValueError, RuntimeError, OSError) as exc:
-                self._local_runtime_diagnostic.setText(f"Diagnóstico local fallido: {exc}")
+                self._local_runtime_diagnostic.setText(
+                    f"Diagnóstico local fallido: {exc}"
+                )
 
         def _open_attachment_picker(self, file_filter: str) -> None:
             paths, _selected = QFileDialog.getOpenFileNames(
@@ -893,6 +1714,12 @@ if QApplication is not None:
             )
             if paths:
                 self._add_attachment_paths(paths)
+
+        def _start_new_session(self) -> None:
+            """Return to Neural Core without inventing a backend session reset."""
+            self._navigate_shell("chat")
+            self._input.clear()
+            self._input.setFocus()
 
         def _add_attachment_paths(self, paths) -> None:
             try:
@@ -907,17 +1734,61 @@ if QApplication is not None:
                 button.deleteLater()
             self._attachment_chip_buttons.clear()
             pending = self._desktop.pending_attachments()
+            if hasattr(self, "_file_surface_list"):
+                self._file_surface_list.clear()
+            if hasattr(self, "_file_context_name"):
+                if pending:
+                    latest_file = pending[-1]
+                    file_name = str(
+                        latest_file.get("safe_name")
+                        or latest_file.get("original_name")
+                        or "Attached file"
+                    )
+                    self._file_context_name.setText(file_name)
+                    self._file_context_detail.setText(
+                        f"Size: {self._format_file_size(int(latest_file.get('size_bytes') or 0))}\n"
+                        f"State: {str(latest_file.get('status') or 'pending').upper()}\n"
+                        "The attachment is scoped to the current session."
+                    )
+                else:
+                    self._file_context_name.setText("No file selected")
+                    self._file_context_detail.setText(
+                        "Attach a file to inspect its verified name, type, size and processing state."
+                    )
+            if hasattr(self, "_context_files_value"):
+                if pending:
+                    self._context_files_value.setText(
+                        "\n".join(
+                            f"{str(item.get('safe_name') or item.get('original_name') or 'file')}  ·  "
+                            f"{self._format_file_size(int(item.get('size_bytes') or 0))}"
+                            for item in pending
+                        )
+                    )
+                else:
+                    self._context_files_value.setText(
+                        "No files attached to the current session."
+                    )
             for item in pending:
                 attachment_id = str(item.get("id") or "")
-                name = str(item.get("safe_name") or item.get("original_name") or "archivo")
+                name = str(
+                    item.get("safe_name") or item.get("original_name") or "archivo"
+                )
                 size = int(item.get("size_bytes") or 0)
                 status = str(item.get("status") or "pending")
-                chip = QPushButton(f"{name} · {self._format_file_size(size)} · {status}  ×")
+                if hasattr(self, "_file_surface_list"):
+                    self._file_surface_list.addItem(
+                        f"{name}   {self._format_file_size(size)}   {status.upper()}"
+                    )
+                chip = QPushButton(
+                    f"{name} · {self._format_file_size(size)} · {status}  ×"
+                )
                 chip.setObjectName("AttachmentChip")
                 chip.setAccessibleName(f"Eliminar archivo {name}")
                 chip.setProperty("attachment_name", name)
                 chip.clicked.connect(
-                    lambda _checked=False, selected_id=attachment_id: self._remove_attachment(selected_id)
+                    lambda _checked=False, selected_id=attachment_id: (
+                        self._remove_attachment(selected_id)
+                    )
                 )
                 self._attachment_preview_layout.insertWidget(
                     max(0, self._attachment_preview_layout.count() - 1),
@@ -969,25 +1840,37 @@ if QApplication is not None:
             return True
 
         def eventFilter(self, watched, event) -> bool:  # noqa: N802
-            if watched is getattr(self, "_attach_button", None) and event.type() == QEvent.KeyPress:
+            if (
+                watched is getattr(self, "_attach_button", None)
+                and event.type() == QEvent.KeyPress
+            ):
                 if event.key() in {Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space}:
                     self._attachment_menu.popup(
-                        self._attach_button.mapToGlobal(self._attach_button.rect().bottomLeft())
+                        self._attach_button.mapToGlobal(
+                            self._attach_button.rect().bottomLeft()
+                        )
                     )
                     return True
-            if watched is getattr(self, "_input", None) and event.type() == QEvent.KeyPress:
+            if (
+                watched is getattr(self, "_input", None)
+                and event.type() == QEvent.KeyPress
+            ):
                 if event.matches(QKeySequence.Paste) and self._paste_attachments():
                     return True
             return super().eventFilter(watched, event)
 
         def dragEnterEvent(self, event) -> None:  # noqa: N802
-            if event.mimeData().hasUrls() and any(url.isLocalFile() for url in event.mimeData().urls()):
+            if event.mimeData().hasUrls() and any(
+                url.isLocalFile() for url in event.mimeData().urls()
+            ):
                 event.acceptProposedAction()
                 return
             event.ignore()
 
         def dropEvent(self, event) -> None:  # noqa: N802
-            if event.mimeData().hasUrls() and self._handle_dropped_urls(event.mimeData().urls()):
+            if event.mimeData().hasUrls() and self._handle_dropped_urls(
+                event.mimeData().urls()
+            ):
                 event.acceptProposedAction()
                 return
             event.ignore()
@@ -1008,6 +1891,7 @@ if QApplication is not None:
             self._input.setFocus()
             self._sending = True
             self._set_processing_state(True, "PROCESSING")
+            self._pending_new_turn_text = text
             correlation_id = f"desktop-ui-{int(perf_counter() * 1000)}"
             self._pending_correlation_id = correlation_id
             pending_placeholder: Future = Future()
@@ -1031,10 +1915,7 @@ if QApplication is not None:
 
         @staticmethod
         def _should_stream_chat(text: str) -> bool:
-            lowered = (text or "").casefold()
-            if any(marker in lowered for marker in ("calcula", "simula", "estima", "resuelve", "deriv", "integr", "ecuacion")):
-                return False
-            return True
+            return bool((text or "").strip())
 
         def _run_quick_action(self, action_id: str) -> None:
             if self._sending or self._has_pending_work():
@@ -1050,13 +1931,16 @@ if QApplication is not None:
                 return
             text = self._input.text().strip()
             if not text:
-                self._agent_note.setText("Escribe un objetivo en el chat y pulsa Start Guided Agent.")
+                self._agent_note.setText(
+                    "Escribe un objetivo en el chat y pulsa Start Guided Agent."
+                )
                 self._input.setFocus()
                 return
             self._input.clear()
             self._input.setFocus()
             self._sending = True
             self._set_processing_state(True, "AGENT PLANNING")
+            self._pending_new_turn_text = text
             correlation_id = f"desktop-agent-{int(perf_counter() * 1000)}"
             self._pending_correlation_id = correlation_id
             self._pending_future = self._desktop.send_chat_async(
@@ -1143,12 +2027,19 @@ if QApplication is not None:
                 "patch_id": self._selected_or_typed_patch_id(),
                 "llm_mode": self._dev_mode.currentText(),
             }
-            if action_id in {"patch_show", "patch_apply", "patch_reject"} and not payload["patch_id"]:
-                self._dev_output.setPlainText("Selecciona un patch o escribe un patch_id.")
+            if (
+                action_id in {"patch_show", "patch_apply", "patch_reject"}
+                and not payload["patch_id"]
+            ):
+                self._dev_output.setPlainText(
+                    "Selecciona un patch o escribe un patch_id."
+                )
                 return
             if action_id == "patch_apply":
                 if not payload["patch_id"]:
-                    self._dev_output.setPlainText("Selecciona o escribe un patch_id antes de aplicar.")
+                    self._dev_output.setPlainText(
+                        "Selecciona o escribe un patch_id antes de aplicar."
+                    )
                     return
                 answer = QMessageBox.question(
                     self,
@@ -1158,13 +2049,19 @@ if QApplication is not None:
                     QMessageBox.No,
                 )
                 if answer != QMessageBox.Yes:
-                    self._dev_output.setPlainText("Apply patch cancelado por el usuario.")
+                    self._dev_output.setPlainText(
+                        "Apply patch cancelado por el usuario."
+                    )
                     return
                 payload["confirm"] = True
                 if self._last_patch_requires_pin():
-                    pin, ok = QInputDialog.getText(self, "PIN requerido", "PIN maestro:", QLineEdit.Password)
+                    pin, ok = QInputDialog.getText(
+                        self, "PIN requerido", "PIN maestro:", QLineEdit.Password
+                    )
                     if not ok:
-                        self._dev_output.setPlainText("Apply patch cancelado: PIN no ingresado.")
+                        self._dev_output.setPlainText(
+                            "Apply patch cancelado: PIN no ingresado."
+                        )
                         return
                     payload["pin"] = pin
             if payload["patch_id"]:
@@ -1172,7 +2069,9 @@ if QApplication is not None:
             self._sending = True
             self._last_dev_action_id = action_id
             self._set_processing_state(True, f"CODE {action_id.upper()}")
-            self._pending_future = self._desktop.execute_dev_action_async(action_id, payload=payload)
+            self._pending_future = self._desktop.execute_dev_action_async(
+                action_id, payload=payload
+            )
             if not self._refresh_timer.isActive():
                 self._refresh_timer.start()
 
@@ -1229,21 +2128,57 @@ if QApplication is not None:
             self._apply_shell_mode()
 
         def _navigate_shell(self, action_id: str) -> None:
+            for name, button in self._nav_buttons.items():
+                button.setChecked(name == action_id)
+            page = self._surface_pages.get(action_id)
+            if page is not None:
+                self._surface_stack.setCurrentWidget(page)
+            self._right_session_label.setText(
+                {
+                    "chat": "Current Session",
+                    "agent": "Agent Context",
+                    "activity": "Node Inspector / Context",
+                    "files": "Selected File",
+                    "data": "Intelligence Brief",
+                    "memory": "System Context",
+                    "tools": "Tool Inspector",
+                    "settings": "System Status",
+                }.get(action_id, "Current Session")
+            )
+            self._right_context_label.setText(
+                {
+                    "chat": "Context / Active Threads",
+                    "agent": "Context / Active Threads",
+                    "activity": "Node Inspector / Context",
+                    "files": "File Inspector / Context",
+                    "data": "Analysis / Context",
+                    "memory": "Memory / Context",
+                    "tools": "Toolkit / Context",
+                    "settings": "Settings / Runtime",
+                }.get(action_id, "Context / Active Threads")
+            )
             if action_id == "chat":
-                self._set_focus_mode(True)
+                self._focus_mode = False
+                self._left_panel_open = True
+                self._right_panel_open = True
+                self._apply_shell_mode()
+                for index in range(self._right_tabs.count()):
+                    if self._right_tabs.tabText(index) == "Context":
+                        self._right_tabs.setCurrentIndex(index)
+                        break
                 self._input.setFocus()
                 return
             self._focus_mode = False
             self._right_panel_open = True
-            self._left_panel_open = action_id in {"settings"}
+            self._left_panel_open = True
             self._apply_shell_mode()
             tab_map = {
                 "agent": "Agent Mode",
-                "web": "Status",
-                "context": "Context",
+                "activity": "Activity Graph",
+                "files": "File Context",
+                "data": "Data Context",
                 "memory": "Context",
-                "code": "Code Agent",
-                "learning": "Context",
+                "tools": "Tool Context",
                 "settings": "Settings",
             }
             target = tab_map.get(action_id, "Status")
@@ -1259,24 +2194,30 @@ if QApplication is not None:
             right_visible = (not self._focus_mode) and self._right_panel_open
             self._left_panel.setVisible(left_visible)
             self._right_panel.setVisible(right_visible)
-            self._metrics_strip.setVisible(not self._focus_mode)
+            self._metrics_strip.setVisible(False)
             self._focus_button.setChecked(self._focus_mode)
             self._system_button.setChecked(not self._focus_mode)
-            self._left_toggle.setText("SERVICES" if not left_visible else "HIDE SERVICES")
+            self._left_toggle.setText(
+                "SERVICES" if not left_visible else "HIDE SERVICES"
+            )
             self._right_toggle.setText("OPS" if not right_visible else "HIDE OPS")
             if left_visible and right_visible:
-                self._splitter.setSizes([320, 960, 380])
+                self._splitter.setSizes([280, 1040, 280])
             elif left_visible:
-                self._splitter.setSizes([320, 1120, 0])
+                self._splitter.setSizes([280, 1320, 0])
             elif right_visible:
-                self._splitter.setSizes([0, 1180, 380])
+                self._splitter.setSizes([0, 1320, 280])
             else:
                 self._splitter.setSizes([0, 1600, 0])
 
-        def _set_processing_state(self, enabled: bool, label: str | None = None) -> None:
+        def _set_processing_state(
+            self, enabled: bool, label: str | None = None
+        ) -> None:
             self._is_processing = enabled
             self._thinking_label.setText(label or "SYSTEM READY")
-            self._hero_state.setText((label or "PROCESSING") if enabled else "CONVERSATION STANDBY")
+            self._hero_state.setText(
+                (label or "PROCESSING") if enabled else "CONVERSATION STANDBY"
+            )
             self._send_button.setEnabled(not enabled)
             self._listen_button.setEnabled(not enabled)
             self._mic_button.setEnabled(not enabled)
@@ -1297,7 +2238,10 @@ if QApplication is not None:
             state = self._desktop.refresh()
             self._state = state
             if hasattr(self, "_activity_graph"):
-                self._activity_graph.set_snapshot(self._desktop.activity_snapshot())
+                activity_snapshot = self._desktop.activity_snapshot()
+                self._activity_graph.set_snapshot(activity_snapshot)
+                if hasattr(self, "_activity_graph_main"):
+                    self._activity_graph_main.set_snapshot(activity_snapshot)
             if self._pending_future is not None and self._pending_future.done():
                 try:
                     self._pending_future.result()
@@ -1311,7 +2255,9 @@ if QApplication is not None:
                         },
                     )
                     if hasattr(self, "_dev_output"):
-                        self._dev_output.setPlainText(f"Accion fallida: {type(exc).__name__}: {self._safe_error_text(str(exc))}")
+                        self._dev_output.setPlainText(
+                            f"Accion fallida: {type(exc).__name__}: {self._safe_error_text(str(exc))}"
+                        )
                 self._pending_future = None
                 self._pending_correlation_id = None
                 self._sending = False
@@ -1336,11 +2282,36 @@ if QApplication is not None:
             if not self._is_processing and not state.busy:
                 self._sync_reactor_state(state)
             live_voice_states = {"LISTENING", "TRANSCRIBING", "PROCESSING", "ERROR"}
-            if state.busy or self._has_pending_work() or state.voice.speaking or str(state.voice.input_state).upper() in live_voice_states:
+            llm_status = getattr(state, "llm_status", {}) or {}
+            local_runtime = (
+                llm_status.get("local_runtime")
+                if isinstance(llm_status.get("local_runtime"), dict)
+                else {}
+            )
+            local_runtime_transitioning = str(
+                local_runtime.get("state") or ""
+            ) in {"starting", "loading_model", "stopping"}
+            local_runtime_ready = (
+                str(llm_status.get("selected_mode") or "").casefold() == "local"
+                and str(local_runtime.get("state") or "") == "ready"
+            )
+            if (
+                state.busy
+                or self._has_pending_work()
+                or local_runtime_transitioning
+                or state.voice.speaking
+                or str(state.voice.input_state).upper() in live_voice_states
+            ):
+                self._refresh_timer.setInterval(150)
+                if not self._refresh_timer.isActive():
+                    self._refresh_timer.start()
+            elif local_runtime_ready:
+                self._refresh_timer.setInterval(2_000)
                 if not self._refresh_timer.isActive():
                     self._refresh_timer.start()
             elif self._refresh_timer.isActive():
                 self._refresh_timer.stop()
+                self._refresh_timer.setInterval(150)
 
         def _has_pending_work(self) -> bool:
             return self._pending_future is not None and not self._pending_future.done()
@@ -1357,12 +2328,40 @@ if QApplication is not None:
             return (
                 bool(getattr(state, "busy", False)),
                 str(getattr(state, "activity_label", "")),
-                tuple((message.message_id, message.role, message.content) for message in state.conversation),
-                tuple((service.name, service.status) for service in state.panel_snapshot.services),
-                tuple((alert.get("title"), alert.get("message"), alert.get("level")) for alert in state.panel_snapshot.alerts),
-                tuple((mission.mission_id, mission.status, mission.pending_approval_step_id) for mission in state.panel_snapshot.missions),
-                tuple((entry.timestamp.isoformat(), entry.source, entry.title, entry.status) for entry in state.panel_snapshot.timeline),
-                json.dumps(getattr(state.panel_snapshot, "runtime_panels", []) or [], sort_keys=True, default=str),
+                tuple(
+                    (message.message_id, message.role, message.content)
+                    for message in state.conversation
+                ),
+                tuple(
+                    (service.name, service.status)
+                    for service in state.panel_snapshot.services
+                ),
+                tuple(
+                    (alert.get("title"), alert.get("message"), alert.get("level"))
+                    for alert in state.panel_snapshot.alerts
+                ),
+                tuple(
+                    (
+                        mission.mission_id,
+                        mission.status,
+                        mission.pending_approval_step_id,
+                    )
+                    for mission in state.panel_snapshot.missions
+                ),
+                tuple(
+                    (
+                        entry.timestamp.isoformat(),
+                        entry.source,
+                        entry.title,
+                        entry.status,
+                    )
+                    for entry in state.panel_snapshot.timeline
+                ),
+                json.dumps(
+                    getattr(state.panel_snapshot, "runtime_panels", []) or [],
+                    sort_keys=True,
+                    default=str,
+                ),
                 state.panel_snapshot.health_summary.get("aggregate_status"),
                 state.panel_snapshot.health_summary.get("active_operations"),
                 latest.get("cpu_percent"),
@@ -1375,12 +2374,16 @@ if QApplication is not None:
                 state.voice.input_error,
                 state.voice.last_transcript,
                 (getattr(state, "performance", {}) or {}).get("last_request_ms"),
-                json.dumps(getattr(state, "llm_status", {}) or {}, sort_keys=True, default=str),
+                json.dumps(
+                    getattr(state, "llm_status", {}) or {}, sort_keys=True, default=str
+                ),
                 tuple(
                     (item.get("id"), item.get("status"), item.get("progress"))
                     for item in (getattr(state, "pending_attachments", []) or [])
                 ),
-                json.dumps(getattr(state, "dev_runtime", {}) or {}, sort_keys=True, default=str),
+                json.dumps(
+                    getattr(state, "dev_runtime", {}) or {}, sort_keys=True, default=str
+                ),
             )
 
         def _render_conversation(self, state) -> None:
@@ -1388,19 +2391,47 @@ if QApplication is not None:
             for message in state.conversation:
                 if message.role == "assistant":
                     latest_assistant = message
-            self._conversation.set_messages(state.conversation)
+            anchor_message_id = None
+            if self._pending_new_turn_text is not None:
+                for message in reversed(state.conversation):
+                    if (
+                        message.role == "user"
+                        and message.content == self._pending_new_turn_text
+                    ):
+                        anchor_message_id = message.message_id
+                        self._pending_new_turn_text = None
+                        break
+            self._conversation.set_messages(
+                state.conversation,
+                anchor_message_id=anchor_message_id,
+            )
             voice_state = getattr(state, "voice", None)
-            voice_input_state = str(getattr(voice_state, "input_state", "IDLE") or "IDLE").upper()
-            if voice_input_state in {"LISTENING", "TRANSCRIBING", "PROCESSING", "ERROR"}:
+            voice_input_state = str(
+                getattr(voice_state, "input_state", "IDLE") or "IDLE"
+            ).upper()
+            if voice_input_state in {
+                "LISTENING",
+                "TRANSCRIBING",
+                "PROCESSING",
+                "ERROR",
+            }:
                 self._conversation.set_status(voice_input_state)
                 if getattr(voice_state, "input_error", None):
                     self._conversation.set_meta(str(voice_state.input_error))
-                elif getattr(voice_state, "last_transcript", None) and voice_input_state in {"PROCESSING", "TRANSCRIBING"}:
-                    self._conversation.set_meta(f"Transcript: {voice_state.last_transcript}")
+                elif getattr(
+                    voice_state, "last_transcript", None
+                ) and voice_input_state in {"PROCESSING", "TRANSCRIBING"}:
+                    self._conversation.set_meta(
+                        f"Transcript: {voice_state.last_transcript}"
+                    )
                 elif voice_input_state == "LISTENING":
-                    self._conversation.set_meta("Micrófono activo. JARVIS está capturando tu voz.")
+                    self._conversation.set_meta(
+                        "Micrófono activo. JARVIS está capturando tu voz."
+                    )
                 else:
-                    self._conversation.set_meta("JARVIS está procesando la orden hablada.")
+                    self._conversation.set_meta(
+                        "JARVIS está procesando la orden hablada."
+                    )
                 self._hero_state.setText(f"VOICE {voice_input_state}")
                 return
             if getattr(voice_state, "profile_name", None):
@@ -1409,19 +2440,27 @@ if QApplication is not None:
                     profile_meta = f"{profile_meta} | Clone: {voice_state.clone_status}"
                 self._conversation.set_meta(profile_meta)
             if bool(getattr(state, "busy", False)):
-                activity = str(getattr(state, "activity_label", "PROCESSING") or "PROCESSING").upper()
+                activity = str(
+                    getattr(state, "activity_label", "PROCESSING") or "PROCESSING"
+                ).upper()
                 self._conversation.set_status(activity)
                 performance = getattr(state, "performance", {}) or {}
                 latency = performance.get("last_request_ms")
                 if latency is None:
-                    self._conversation.set_meta("JARVIS mantiene feedback visual mientras ejecuta la solicitud actual.")
+                    self._conversation.set_meta(
+                        "JARVIS mantiene feedback visual mientras ejecuta la solicitud actual."
+                    )
                 else:
-                    self._conversation.set_meta(f"Última solicitud completada en {latency} ms. Procesando nueva tarea.")
+                    self._conversation.set_meta(
+                        f"Última solicitud completada en {latency} ms. Procesando nueva tarea."
+                    )
                 self._hero_state.setText(activity)
                 return
             if latest_assistant is None:
                 self._conversation.set_status("STANDBY")
-                self._conversation.set_meta("Readable transcript with stable scroll and full message visibility.")
+                self._conversation.set_meta(
+                    "Readable transcript with stable scroll and full message visibility."
+                )
                 self._hero_state.setText("CONVERSATION STANDBY")
                 return
             self._conversation.set_status("LIVE")
@@ -1434,13 +2473,45 @@ if QApplication is not None:
             from PySide6.QtWidgets import QListWidgetItem
 
             self._services.clear()
+            if hasattr(self, "_tools_surface_list"):
+                self._tools_surface_list.clear()
             self._service_metric.set_value(str(len(state.panel_snapshot.services)))
             for service in state.panel_snapshot.services:
                 item = QListWidgetItem(self._services)
-                widget = self._status_row_widget(service.name, service.status, self._service_details(service.details))
+                widget = self._status_row_widget(
+                    service.name, service.status, self._service_details(service.details)
+                )
                 item.setSizeHint(widget.sizeHint())
                 self._services.addItem(item)
                 self._services.setItemWidget(item, widget)
+                if hasattr(self, "_tools_surface_list"):
+                    tool_item = QListWidgetItem(self._tools_surface_list)
+                    tool_widget = self._status_row_widget(
+                        service.name,
+                        service.status,
+                        self._service_details(service.details),
+                    )
+                    tool_hint = tool_widget.sizeHint()
+                    tool_item.setSizeHint(
+                        QSize(tool_hint.width(), max(96, tool_hint.height() + 24))
+                    )
+                    self._tools_surface_list.addItem(tool_item)
+                    self._tools_surface_list.setItemWidget(tool_item, tool_widget)
+            if hasattr(self, "_tools_surface_summary"):
+                active = sum(
+                    1
+                    for service in state.panel_snapshot.services
+                    if str(service.status).casefold()
+                    in {"ready", "active", "running", "healthy"}
+                )
+                self._tools_surface_summary.setText(
+                    f"{active} ACTIVE  |  {len(state.panel_snapshot.services) - active} STANDBY"
+                )
+                self._tool_inspector_value.setText(
+                    f"Registered toolkits: {len(state.panel_snapshot.services)}\n"
+                    f"Active or ready: {active}\n"
+                    "Select a toolkit in the main surface to inspect execution details."
+                )
 
         def _render_alerts(self, state) -> None:
             from PySide6.QtWidgets import QListWidgetItem
@@ -1462,7 +2533,9 @@ if QApplication is not None:
 
             self._missions.clear()
             for mission in state.panel_snapshot.missions:
-                meta = mission.pending_approval_step_id or (mission.autonomy_level or "standby")
+                meta = mission.pending_approval_step_id or (
+                    mission.autonomy_level or "standby"
+                )
                 item = QListWidgetItem(self._missions)
                 widget = self._status_row_widget(mission.goal, mission.status, meta)
                 item.setSizeHint(widget.sizeHint())
@@ -1486,12 +2559,31 @@ if QApplication is not None:
         def _render_ops(self, state) -> None:
             self._ops_tree.clear()
             ops_pairs = {
-                "aggregate_status": state.panel_snapshot.health_summary.get("aggregate_status", "unknown"),
-                "active_operations": state.panel_snapshot.health_summary.get("active_operations", 0),
-                "resource_warnings": ", ".join(state.panel_snapshot.health_summary.get("resource_warnings", [])) or "none",
-                "cpu": str(state.panel_snapshot.resources.get("latest", {}).get("cpu_percent", "n/a")),
-                "ram": str(state.panel_snapshot.resources.get("latest", {}).get("ram_percent", "n/a")),
-                "disk": str(state.panel_snapshot.resources.get("latest", {}).get("disk_percent", "n/a")),
+                "aggregate_status": state.panel_snapshot.health_summary.get(
+                    "aggregate_status", "unknown"
+                ),
+                "active_operations": state.panel_snapshot.health_summary.get(
+                    "active_operations", 0
+                ),
+                "resource_warnings": ", ".join(
+                    state.panel_snapshot.health_summary.get("resource_warnings", [])
+                )
+                or "none",
+                "cpu": str(
+                    state.panel_snapshot.resources.get("latest", {}).get(
+                        "cpu_percent", "n/a"
+                    )
+                ),
+                "ram": str(
+                    state.panel_snapshot.resources.get("latest", {}).get(
+                        "ram_percent", "n/a"
+                    )
+                ),
+                "disk": str(
+                    state.panel_snapshot.resources.get("latest", {}).get(
+                        "disk_percent", "n/a"
+                    )
+                ),
             }
             for key, value in ops_pairs.items():
                 row = QTreeWidgetItem(self._ops_tree, [key, str(value)])
@@ -1502,13 +2594,31 @@ if QApplication is not None:
             latest = self._latest_agent_panel(state)
             status = str(latest.get("status") or "idle")
             current_step = str(latest.get("current_step") or "Sin paso activo")
-            summary = str(latest.get("summary") or "Agent Mode listo para Guided Control.")
-            progress = latest.get("progress") if isinstance(latest.get("progress"), dict) else {}
+            summary = str(
+                latest.get("summary") or "Agent Mode listo para Guided Control."
+            )
+            progress = (
+                latest.get("progress")
+                if isinstance(latest.get("progress"), dict)
+                else {}
+            )
             completed = progress.get("completed_steps", 0)
             total = progress.get("total_steps", 0)
-            rollback = latest.get("rollback") if isinstance(latest.get("rollback"), dict) else {}
-            task_queue = latest.get("task_queue") if isinstance(latest.get("task_queue"), dict) else {}
-            human_log = latest.get("human_mission_log") if isinstance(latest.get("human_mission_log"), list) else []
+            rollback = (
+                latest.get("rollback")
+                if isinstance(latest.get("rollback"), dict)
+                else {}
+            )
+            task_queue = (
+                latest.get("task_queue")
+                if isinstance(latest.get("task_queue"), dict)
+                else {}
+            )
+            human_log = (
+                latest.get("human_mission_log")
+                if isinstance(latest.get("human_mission_log"), list)
+                else []
+            )
             rollback_label = rollback.get("rollback_description") or "n/a"
             self._agent_state.set_value(status)
             self._agent_trust.setText(
@@ -1522,29 +2632,102 @@ if QApplication is not None:
                 f"Estado: {status} | Paso: {current_step} | Progreso: {completed}/{total}"
             )
             self._agent_note.setText(summary)
+            if hasattr(self, "_agent_surface_status"):
+                self._agent_surface_status.setText(status.upper())
+                self._agent_surface_summary.setText(summary)
+                self._agent_surface_steps.clear()
+                for label, detail in (
+                    ("Observe", "Read current state"),
+                    ("Plan", str(latest.get("goal") or "No active objective")),
+                    (
+                        "Confirm",
+                        "Waiting"
+                        if status == "waiting_confirmation"
+                        else "No confirmation pending",
+                    ),
+                    ("Execute", current_step),
+                    (
+                        "Verify",
+                        str(
+                            latest.get("last_verification_note")
+                            or "No verification yet"
+                        ),
+                    ),
+                ):
+                    self._agent_surface_steps.addItem(f"{label.upper()}   {detail}")
+                if isinstance(total, int) and total > 0 and isinstance(completed, int):
+                    self._agent_surface_progress.setRange(0, total)
+                    self._agent_surface_progress.setValue(min(completed, total))
+                    self._agent_surface_progress.show()
+                else:
+                    self._agent_surface_progress.hide()
             pending_count = task_queue.get("pending_count", 0)
             self._agent_queue.setText(f"Queue: {pending_count} tareas pendientes")
-            self._agent_mission_log.setText("Mission Log: " + (" | ".join(str(item) for item in human_log[-5:]) if human_log else "sin mision activa"))
+            self._agent_mission_log.setText(
+                "Mission Log: "
+                + (
+                    " | ".join(str(item) for item in human_log[-5:])
+                    if human_log
+                    else "sin mision activa"
+                )
+            )
             labels = [
                 ("Observe", "Captura segura o contexto de ventana"),
                 ("Plan", str(latest.get("goal") or "Sin objetivo activo")[:120]),
-                ("Confirm", "Pendiente" if status == "waiting_confirmation" else "Sin confirmacion pendiente"),
+                (
+                    "Confirm",
+                    "Pendiente"
+                    if status == "waiting_confirmation"
+                    else "Sin confirmacion pendiente",
+                ),
                 ("Execute", current_step),
-                ("Verify", str(latest.get("last_verification_note") or "Sin verificacion reciente")[:120]),
+                (
+                    "Verify",
+                    str(
+                        latest.get("last_verification_note")
+                        or "Sin verificacion reciente"
+                    )[:120],
+                ),
             ]
-            for step_label, (label, detail) in zip(self._agent_steps, labels, strict=False):
+            for step_label, (label, detail) in zip(
+                self._agent_steps, labels, strict=False
+            ):
                 step_label.setText(f"{label.upper()}  |  {detail}")
-            active_statuses = {"pending", "observing", "planning", "waiting_confirmation", "executing", "verifying", "recovering", "paused"}
-            self._start_guided_agent_button.setEnabled(not self._is_processing and not self._has_pending_work())
-            self._dry_run_agent_button.setEnabled(not self._is_processing and not self._has_pending_work())
-            self._confirm_action_button.setEnabled(status == "waiting_confirmation" and not self._is_processing and not self._has_pending_work())
-            self._stop_agent_button.setEnabled(status in active_statuses and not self._is_processing and not self._has_pending_work())
+            active_statuses = {
+                "pending",
+                "observing",
+                "planning",
+                "waiting_confirmation",
+                "executing",
+                "verifying",
+                "recovering",
+                "paused",
+            }
+            self._start_guided_agent_button.setEnabled(
+                not self._is_processing and not self._has_pending_work()
+            )
+            self._dry_run_agent_button.setEnabled(
+                not self._is_processing and not self._has_pending_work()
+            )
+            self._confirm_action_button.setEnabled(
+                status == "waiting_confirmation"
+                and not self._is_processing
+                and not self._has_pending_work()
+            )
+            self._stop_agent_button.setEnabled(
+                status in active_statuses
+                and not self._is_processing
+                and not self._has_pending_work()
+            )
 
         @staticmethod
         def _latest_agent_panel(state) -> dict:
             panels = getattr(state.panel_snapshot, "runtime_panels", []) or []
             for panel in reversed(panels):
-                if isinstance(panel, dict) and panel.get("runtime") == "desktop_agent_runtime":
+                if (
+                    isinstance(panel, dict)
+                    and panel.get("runtime") == "desktop_agent_runtime"
+                ):
                     return panel
             return {}
 
@@ -1557,16 +2740,28 @@ if QApplication is not None:
             self._dev_status.setText(
                 f"LLM {mode} | provider={provider} | model={model} | endpoint local={local_endpoint}"
             )
-            web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            web = (
+                dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            )
             active_model = getattr(state, "llm_model", None)
-            self._local_model_card.set_value(model if model != "n/a" else (active_model or "Nemotron pending"))
-            self._web_search_card.set_value("Brave" if web.get("provider", "disabled") == "brave" else str(web.get("provider", "disabled")))
+            self._local_model_card.set_value(
+                model if model != "n/a" else (active_model or "Qwen pending")
+            )
+            self._web_search_card.set_value(
+                "Brave"
+                if web.get("provider", "disabled") == "brave"
+                else str(web.get("provider", "disabled"))
+            )
             self._context_card.set_value("active")
             self._memory_card.set_value("enabled")
             self._code_agent_card.set_value("ready")
             self._learning_card.set_value("repo/web")
             self._safety_card.set_value("protected")
-            last = dev.get("last_result") if isinstance(dev.get("last_result"), dict) else {}
+            last = (
+                dev.get("last_result")
+                if isinstance(dev.get("last_result"), dict)
+                else {}
+            )
             if last:
                 self._dev_output.setPlainText(self._format_dev_result(last))
                 self._sync_patch_selector(last)
@@ -1575,18 +2770,58 @@ if QApplication is not None:
                 if patch_id and not self._patch_id_input.text().strip():
                     self._patch_id_input.setText(patch_id)
             if hasattr(self, "_context_output"):
-                self._context_output.setPlainText(self._format_context_state(dev))
+                context_text = self._format_context_state(dev)
+                self._context_output.setPlainText(context_text)
+                self._context_state_value.setText(
+                    f"Mode: {str(getattr(state, 'llm_mode', 'auto')).upper()}\n"
+                    f"Provider: {str(getattr(state, 'llm_provider', 'pending')).replace('_', ' ')}\n"
+                    f"Conversation messages: {len(getattr(state, 'conversation', ()) or ())}"
+                )
+                if hasattr(self, "_memory_surface_context"):
+                    self._memory_surface_context.setPlainText(context_text)
+                if hasattr(self, "_settings_surface_status"):
+                    self._settings_surface_status.setText(
+                        f"Mode: {str(getattr(state, 'llm_mode', 'auto')).upper()}\n"
+                        f"Provider: {str(getattr(state, 'llm_provider', 'pending')).replace('_', ' ')}\n"
+                        f"Model: {str(getattr(state, 'llm_model', 'pending'))}"
+                    )
+                if hasattr(self, "_settings_primary_card"):
+                    self._settings_primary_card.set_value(
+                        str(getattr(state, "llm_mode", "auto")).upper()
+                    )
 
         def _render_image_runtime(self, state) -> None:
             if not hasattr(self, "_image_output"):
                 return
             dev = getattr(state, "dev_runtime", {}) or {}
-            image = dev.get("image_runtime") if isinstance(dev.get("image_runtime"), dict) else {}
-            deps = image.get("dependencies") if isinstance(image.get("dependencies"), dict) else {}
-            missing = [name for name in ("diffusers", "safetensors", "transformers") if deps.get(name) is False]
-            model_state = str(image.get("model_status") or image.get("status") or "unknown")
-            latest = image.get("latest_job") if isinstance(image.get("latest_job"), dict) else {}
-            paths = latest.get("output_paths") if isinstance(latest.get("output_paths"), list) else []
+            image = (
+                dev.get("image_runtime")
+                if isinstance(dev.get("image_runtime"), dict)
+                else {}
+            )
+            deps = (
+                image.get("dependencies")
+                if isinstance(image.get("dependencies"), dict)
+                else {}
+            )
+            missing = [
+                name
+                for name in ("diffusers", "safetensors", "transformers")
+                if deps.get(name) is False
+            ]
+            model_state = str(
+                image.get("model_status") or image.get("status") or "unknown"
+            )
+            latest = (
+                image.get("latest_job")
+                if isinstance(image.get("latest_job"), dict)
+                else {}
+            )
+            paths = (
+                latest.get("output_paths")
+                if isinstance(latest.get("output_paths"), list)
+                else []
+            )
             self._image_status.setText(
                 f"Model: JuggernautXL SDXL | Backend: {image.get('backend', 'diffusers')} | "
                 f"Status: {model_state} | Queue: {image.get('queue_length', 0)} | Fooocus: not required"
@@ -1596,8 +2831,8 @@ if QApplication is not None:
                 f"Enabled: {str(bool(image.get('enabled'))).lower()}",
                 f"Model path exists: {str(bool(image.get('model_path_exists'))).lower()}",
                 f"Output dir: {image.get('output_dir', '')}",
-                f"CUDA available: {str(bool(deps.get('torch_cuda_available'))).lower()}",
-                f"Torch CUDA compiled: {str(bool(deps.get('torch_cuda_compiled'))).lower()}",
+                f"CUDA available: {format_probe_status(deps.get('torch_cuda_available'))}",
+                f"Torch CUDA compiled: {format_probe_status(deps.get('torch_cuda_compiled'))}",
                 f"Dependencies missing: {', '.join(missing) if missing else 'none'}",
             ]
             if latest:
@@ -1614,16 +2849,32 @@ if QApplication is not None:
                     lines.append("Outputs:")
                     lines.extend(f"- {path}" for path in paths)
             self._image_output.setPlainText("\n".join(lines))
-            busy = model_state in {"loading", "generating"} or bool(image.get("current_job"))
-            self._image_cancel_button.setEnabled(busy and not self._is_processing and not self._has_pending_work())
-            self._image_generate_button.setEnabled(not self._is_processing and not self._has_pending_work())
-            self._image_unload_button.setEnabled(not self._is_processing and not self._has_pending_work())
-            self._image_open_folder_button.setEnabled(not self._is_processing and not self._has_pending_work())
+            busy = model_state in {"loading", "generating"} or bool(
+                image.get("current_job")
+            )
+            self._image_cancel_button.setEnabled(
+                busy and not self._is_processing and not self._has_pending_work()
+            )
+            self._image_generate_button.setEnabled(
+                not self._is_processing and not self._has_pending_work()
+            )
+            self._image_unload_button.setEnabled(
+                not self._is_processing and not self._has_pending_work()
+            )
+            self._image_open_folder_button.setEnabled(
+                not self._is_processing and not self._has_pending_work()
+            )
 
         def _format_context_state(self, dev: dict) -> str:
-            web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            web = (
+                dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            )
             policy = dev.get("policy") if isinstance(dev.get("policy"), dict) else {}
-            image = dev.get("image_runtime") if isinstance(dev.get("image_runtime"), dict) else {}
+            image = (
+                dev.get("image_runtime")
+                if isinstance(dev.get("image_runtime"), dict)
+                else {}
+            )
             return "\n".join(
                 [
                     "Contexto actual de Jarvis",
@@ -1649,7 +2900,7 @@ if QApplication is not None:
                     f"OpenAI: {policy.get('openai', 'blocked')}",
                     f"Gemini: {policy.get('gemini', 'blocked')}",
                     f"NVIDIA NIM: {policy.get('nvidia_nim', 'enabled_by_selected_mode')}",
-                    f"Local LLM: {policy.get('local_llm', 'Nemotron configurable aliases')}",
+                    f"Local LLM: {policy.get('local_llm', 'configured local model profile')}",
                     f"Online search: {policy.get('online_search', 'Brave + assigned Nemotron provider')}",
                     "",
                     "Code Agent:",
@@ -1676,7 +2927,11 @@ if QApplication is not None:
             display = dict(result)
             patches = display.get("patches")
             if isinstance(patches, list):
-                display["patches"] = [self._patch_list_summary(item) for item in patches if isinstance(item, dict)]
+                display["patches"] = [
+                    self._patch_list_summary(item)
+                    for item in patches
+                    if isinstance(item, dict)
+                ]
             return display
 
         def _patch_list_summary(self, patch: dict) -> dict:
@@ -1687,7 +2942,9 @@ if QApplication is not None:
             return {
                 "id": patch_id,
                 "status": str(patch.get("status") or "unknown"),
-                "summary": self._safe_patch_text(str(patch.get("summary") or patch.get("message") or ""))[:240],
+                "summary": self._safe_patch_text(
+                    str(patch.get("summary") or patch.get("message") or "")
+                )[:240],
                 "files": [self._safe_patch_text(str(item)) for item in files[:4]],
             }
 
@@ -1731,11 +2988,15 @@ if QApplication is not None:
         def _patch_item_label(self, patch: dict) -> str:
             patch_id = str(patch.get("id") or patch.get("patch_id") or "")
             status = str(patch.get("status") or "unknown")
-            summary = self._safe_patch_text(str(patch.get("summary") or patch.get("message") or "")).replace("\n", " ")
+            summary = self._safe_patch_text(
+                str(patch.get("summary") or patch.get("message") or "")
+            ).replace("\n", " ")
             files = patch.get("target_files") or patch.get("touched_files") or []
             if not isinstance(files, list):
                 files = []
-            files_text = ", ".join(self._safe_patch_text(str(item)) for item in files[:3])
+            files_text = ", ".join(
+                self._safe_patch_text(str(item)) for item in files[:3]
+            )
             label = f"{patch_id} | {status}"
             if summary:
                 label = f"{label} | {summary[:90]}"
@@ -1744,7 +3005,9 @@ if QApplication is not None:
             return label
 
         def _selected_or_typed_patch_id(self) -> str:
-            item = self._patch_list.currentItem() if hasattr(self, "_patch_list") else None
+            item = (
+                self._patch_list.currentItem() if hasattr(self, "_patch_list") else None
+            )
             if item is not None:
                 patch_id = item.data(Qt.UserRole)
                 if isinstance(patch_id, str) and patch_id:
@@ -1762,14 +3025,20 @@ if QApplication is not None:
                 self._render_patch_diff_from_result(patch)
 
         def _render_patch_diff_from_result(self, result: dict) -> None:
-            patch = result.get("patch") if isinstance(result.get("patch"), dict) else result
+            patch = (
+                result.get("patch") if isinstance(result.get("patch"), dict) else result
+            )
             if not isinstance(patch, dict):
                 return
             diff = str(patch.get("unified_diff") or "")
             if not diff:
                 changes = patch.get("changes")
                 if isinstance(changes, list):
-                    diff = "\n".join(str(item.get("unified_diff") or "") for item in changes if isinstance(item, dict))
+                    diff = "\n".join(
+                        str(item.get("unified_diff") or "")
+                        for item in changes
+                        if isinstance(item, dict)
+                    )
             self._patch_diff_output.setPlainText(self._format_patch_diff(diff))
 
         def _format_patch_diff(self, diff: str, *, max_chars: int = 16000) -> str:
@@ -1845,41 +3114,67 @@ if QApplication is not None:
             return ""
 
         def _last_patch_requires_pin(self) -> bool:
-            selected_patch_id = self._selected_or_typed_patch_id() if hasattr(self, "_patch_list") else ""
+            selected_patch_id = (
+                self._selected_or_typed_patch_id()
+                if hasattr(self, "_patch_list")
+                else ""
+            )
             if selected_patch_id:
                 selected_patch = self._patch_items.get(selected_patch_id, {})
-                if isinstance(selected_patch, dict) and bool(selected_patch.get("requires_pin")):
+                if isinstance(selected_patch, dict) and bool(
+                    selected_patch.get("requires_pin")
+                ):
                     return True
             state = self._state
             if state is None:
                 return False
             dev = getattr(state, "dev_runtime", {}) or {}
-            last = dev.get("last_result") if isinstance(dev.get("last_result"), dict) else {}
+            last = (
+                dev.get("last_result")
+                if isinstance(dev.get("last_result"), dict)
+                else {}
+            )
             if bool(last.get("requires_pin")):
                 return True
             patch = last.get("patch")
             return bool(isinstance(patch, dict) and patch.get("requires_pin"))
 
         def _render_header(self, state) -> None:
-            aggregate = str(state.panel_snapshot.health_summary.get("aggregate_status", "unknown"))
-            active_ops = int(state.panel_snapshot.health_summary.get("active_operations", 0))
+            aggregate = str(
+                state.panel_snapshot.health_summary.get("aggregate_status", "unknown")
+            )
+            active_ops = int(
+                state.panel_snapshot.health_summary.get("active_operations", 0)
+            )
             voice_state = state.voice
             self._health_badge.setText(f"STATUS {aggregate.upper()}")
             self._health_badge.set_tone(aggregate)
             self._ops_badge.setText(f"OPS {active_ops}")
             self._ops_badge.set_tone("active" if active_ops else "neutral")
-            
+
             llm_status = getattr(state, "llm_status", {}) or {}
-            llm_mode_value = str(llm_status.get("selected_mode") or getattr(state, "llm_mode", "auto"))
+            llm_mode_value = str(
+                llm_status.get("selected_mode") or getattr(state, "llm_mode", "auto")
+            )
             llm_mode = llm_mode_value.upper()
             llm_provider_value = str(
                 llm_status.get("request_provider")
                 or llm_status.get("active_provider")
                 or getattr(state, "llm_provider", "none")
             )
-            provider_status = llm_status.get("provider_status") if isinstance(llm_status.get("provider_status"), dict) else {}
+            provider_status = (
+                llm_status.get("provider_status")
+                if isinstance(llm_status.get("provider_status"), dict)
+                else {}
+            )
             provider_state = str(provider_status.get("state") or "recovering")
             provider_healthy = bool(provider_status.get("healthy"))
+            local_runtime = (
+                llm_status.get("local_runtime")
+                if isinstance(llm_status.get("local_runtime"), dict)
+                else {}
+            )
+            local_runtime_state = str(local_runtime.get("state") or "stopped")
             llm_model = str(
                 llm_status.get("active_model")
                 or getattr(state, "llm_model", "")
@@ -1894,13 +3189,58 @@ if QApplication is not None:
             provider_label = llm_provider_value.replace("_", " ").upper()
             self._provider_badge.setText(f"PROVIDER {provider_label}")
             self._provider_badge.set_tone("active" if provider_healthy else "warning")
+            if hasattr(self, "_runtime_status_label"):
+                if llm_mode_value.casefold() == "local":
+                    runtime_label = {
+                        "starting": "Starting local model...",
+                        "loading_model": "Loading Qwen...",
+                        "ready": "Local Connected",
+                        "failed": "Local runtime failed",
+                    }.get(local_runtime_state, "Local runtime stopped")
+                elif provider_healthy and llm_mode_value.casefold() in {
+                    "auto",
+                    "nvidia_api",
+                }:
+                    runtime_label = "Online Connected"
+                else:
+                    runtime_label = f"{provider_label.title()} {provider_state.title()}"
+                self._runtime_status_label.setText(f"●  {runtime_label}")
             selected_index = self._llm_mode_selector.findData(llm_mode_value.casefold())
-            if selected_index >= 0 and selected_index != self._llm_mode_selector.currentIndex():
+            if (
+                selected_index >= 0
+                and selected_index != self._llm_mode_selector.currentIndex()
+            ):
                 self._llm_mode_selector.blockSignals(True)
                 self._llm_mode_selector.setCurrentIndex(selected_index)
                 self._llm_mode_selector.blockSignals(False)
+            for mode, button in getattr(self, "_model_mode_buttons", {}).items():
+                button.blockSignals(True)
+                button.setChecked(mode == llm_mode_value.casefold())
+                button.blockSignals(False)
+            for mode, buttons in getattr(self, "_surface_mode_buttons", {}).items():
+                for button in buttons:
+                    button.blockSignals(True)
+                    button.setChecked(mode == llm_mode_value.casefold())
+                    button.blockSignals(False)
 
-            key_status = llm_status.get("key_status") if isinstance(llm_status.get("key_status"), dict) else {}
+            reasoning_value = str(llm_status.get("reasoning_preference") or "auto")
+            for selector in (
+                getattr(self, "_reasoning_selector", None),
+                getattr(self, "_settings_reasoning_selector", None),
+            ):
+                if selector is None:
+                    continue
+                reasoning_index = selector.findData(reasoning_value)
+                if reasoning_index >= 0 and selector.currentIndex() != reasoning_index:
+                    selector.blockSignals(True)
+                    selector.setCurrentIndex(reasoning_index)
+                    selector.blockSignals(False)
+
+            key_status = (
+                llm_status.get("key_status")
+                if isinstance(llm_status.get("key_status"), dict)
+                else {}
+            )
             configured = bool(key_status.get("configured"))
             validity = str(key_status.get("validity") or "unknown")
             source = str(key_status.get("source") or "none")
@@ -1908,14 +3248,29 @@ if QApplication is not None:
                 f"Clave NVIDIA: {'configurada' if configured else 'ausente'} · estado {validity} · origen {source}"
             )
             latency = provider_status.get("latency_ms")
-            latency_text = f" · {float(latency):.0f} ms" if isinstance(latency, (int, float)) else ""
+            latency_text = (
+                f" · {float(latency):.0f} ms"
+                if isinstance(latency, (int, float))
+                else ""
+            )
             fallback = str(llm_status.get("fallback_reason") or "sin fallback")
             provider_message = str(provider_status.get("message") or "")
             self._provider_status_detail.setText(
                 f"Proveedor: {provider_label} · {provider_state}{latency_text} · {fallback}"
                 + (f" · {provider_message}" if provider_message else "")
+                + (
+                    f" · runtime={local_runtime_state}"
+                    f" backend={local_runtime.get('backend') or 'none'}"
+                    f" ownership={local_runtime.get('ownership') or 'none'}"
+                    if llm_mode_value.casefold() == "local"
+                    else ""
+                )
             )
-            capabilities = llm_status.get("capabilities") if isinstance(llm_status.get("capabilities"), dict) else {}
+            capabilities = (
+                llm_status.get("capabilities")
+                if isinstance(llm_status.get("capabilities"), dict)
+                else {}
+            )
             enabled_capabilities = [
                 label
                 for key, label in (
@@ -1932,7 +3287,12 @@ if QApplication is not None:
                 if capabilities.get(key) is True
             ]
             self._provider_capabilities.setText(
-                "Capacidades verificadas: " + (", ".join(enabled_capabilities) if enabled_capabilities else "solo texto base")
+                "Capacidades verificadas: "
+                + (
+                    ", ".join(enabled_capabilities)
+                    if enabled_capabilities
+                    else "solo texto base"
+                )
             )
 
             if str(voice_state.input_state).upper() == "ERROR":
@@ -1954,7 +3314,9 @@ if QApplication is not None:
                 self._voice_badge.setText("VOICE MUTED")
                 self._voice_badge.set_tone("warning")
             elif state.busy:
-                self._voice_badge.setText(str(getattr(state, "activity_label", "PROCESSING")).upper())
+                self._voice_badge.setText(
+                    str(getattr(state, "activity_label", "PROCESSING")).upper()
+                )
                 self._voice_badge.set_tone("active")
                 self._voice_card.set_value("busy")
             elif voice_state.speaking:
@@ -1966,7 +3328,9 @@ if QApplication is not None:
                 self._voice_badge.set_tone("neutral")
                 self._voice_card.set_value("ready" if voice_state.enabled else "off")
             dev = getattr(state, "dev_runtime", {}) or {}
-            web = dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            web = (
+                dev.get("web_search") if isinstance(dev.get("web_search"), dict) else {}
+            )
             web_provider = str(web.get("provider") or "disabled")
             web_available = bool(web.get("available"))
             self._web_badge.setText(f"WEB {web_provider.upper()}")
@@ -1976,16 +3340,55 @@ if QApplication is not None:
             self._gemini_badge.setText("GEMINI BLOCKED")
             self._gemini_badge.set_tone("warning")
             self._voice_enable_button.setChecked(bool(voice_state.enabled))
-            self._voice_enable_button.setText("VOICE ON" if voice_state.enabled else "VOICE OFF")
+            self._voice_enable_button.setText(
+                "VOICE ON" if voice_state.enabled else "VOICE OFF"
+            )
             self._voice_mute_button.setChecked(bool(voice_state.muted))
-            self._voice_mute_button.setText("UNMUTE" if voice_state.muted else "MUTE")
-            self._voice_test_button.setEnabled(bool(voice_state.enabled and not self._is_processing))
-            self._mic_enable_button.setChecked(bool(voice_state.input_enabled and not voice_state.input_muted))
-            self._mic_enable_button.setText("MIC ON" if voice_state.input_enabled and not voice_state.input_muted else "MIC OFF")
-            self._listen_button.setEnabled(bool(voice_state.input_enabled and not voice_state.input_muted and not self._is_processing))
-            self._cancel_listen_button.setEnabled(str(voice_state.input_state).upper() in {"LISTENING", "TRANSCRIBING", "PROCESSING"})
-            self._mic_button.setEnabled(bool(voice_state.input_enabled and not voice_state.input_muted and not self._is_processing))
-            self._mic_button.setText("Listening..." if str(voice_state.input_state).upper() == "LISTENING" else "Listen")
+            self._voice_mute_button.setText("")
+            self._voice_mute_button.setIcon(
+                _stitch_icon("speaker_muted" if voice_state.muted else "speaker")
+            )
+            self._voice_mute_button.setAccessibleName(
+                "Unmute JARVIS voice" if voice_state.muted else "Mute JARVIS voice"
+            )
+            self._voice_mute_button.setToolTip(
+                "Unmute JARVIS voice" if voice_state.muted else "Mute JARVIS voice"
+            )
+            self._voice_test_button.setEnabled(
+                bool(voice_state.enabled and not self._is_processing)
+            )
+            self._mic_enable_button.setChecked(
+                bool(voice_state.input_enabled and not voice_state.input_muted)
+            )
+            self._mic_enable_button.setText(
+                "MIC ON"
+                if voice_state.input_enabled and not voice_state.input_muted
+                else "MIC OFF"
+            )
+            self._listen_button.setEnabled(
+                bool(
+                    voice_state.input_enabled
+                    and not voice_state.input_muted
+                    and not self._is_processing
+                )
+            )
+            self._cancel_listen_button.setEnabled(
+                str(voice_state.input_state).upper()
+                in {"LISTENING", "TRANSCRIBING", "PROCESSING"}
+            )
+            self._mic_button.setEnabled(
+                bool(
+                    voice_state.input_enabled
+                    and not voice_state.input_muted
+                    and not self._is_processing
+                )
+            )
+            self._mic_button.setText("")
+            self._mic_button.setToolTip(
+                "Listening…"
+                if str(voice_state.input_state).upper() == "LISTENING"
+                else "Entrada de voz"
+            )
             self._render_attachment_preview()
 
         def _render_metrics(self, state) -> None:
@@ -1996,16 +3399,27 @@ if QApplication is not None:
             self._timeline_metric.set_value(str(len(state.panel_snapshot.timeline)))
 
         def _sync_reactor_state(self, state) -> None:
-            aggregate = str(state.panel_snapshot.health_summary.get("aggregate_status", "unknown")).casefold()
-            active_ops = int(state.panel_snapshot.health_summary.get("active_operations", 0))
+            aggregate = str(
+                state.panel_snapshot.health_summary.get("aggregate_status", "unknown")
+            ).casefold()
+            active_ops = int(
+                state.panel_snapshot.health_summary.get("active_operations", 0)
+            )
             latest_assistant_time = None
             for message in reversed(state.conversation):
                 if message.role == "assistant":
                     latest_assistant_time = message.created_at
                     break
             if bool(getattr(state, "busy", False)):
-                activity = str(getattr(state, "activity_label", "PROCESSING") or "PROCESSING").upper()
-                if "WEB" in activity or "BRAVE" in activity or "SEARCH" in activity or "FUENTE" in activity:
+                activity = str(
+                    getattr(state, "activity_label", "PROCESSING") or "PROCESSING"
+                ).upper()
+                if (
+                    "WEB" in activity
+                    or "BRAVE" in activity
+                    or "SEARCH" in activity
+                    or "FUENTE" in activity
+                ):
                     self._reactor.set_state("web_search", activity=0.9)
                 else:
                     self._reactor.set_state("thinking", activity=0.9)
@@ -2049,7 +3463,9 @@ if QApplication is not None:
                 self._thinking_label.setText("ALERT SURFACE ACTIVE")
                 self._hero_state.setText("ALERT")
                 self._conversation.set_status("ALERT")
-            elif latest_assistant_time and self._is_recent(latest_assistant_time, seconds=8):
+            elif latest_assistant_time and self._is_recent(
+                latest_assistant_time, seconds=8
+            ):
                 self._reactor.set_state("speaking", activity=0.84)
                 self._thinking_label.setText("JARVIS RESPONDING")
                 self._hero_state.setText("VOICE SURFACE ACTIVE")
@@ -2110,11 +3526,15 @@ else:
 
     class JarvisDesktopWindow(QMainWindow):
         def __init__(self, *_args, **_kwargs) -> None:
-            raise RuntimeError("PySide6 is not installed. Install it with `python -m pip install PySide6`.")
+            raise RuntimeError(
+                "PySide6 is not installed. Install it with `python -m pip install PySide6`."
+            )
 
 
 def create_qt_application():
     if QApplication is None:
-        raise RuntimeError("PySide6 is not installed. Install with `python -m pip install PySide6`.")
+        raise RuntimeError(
+            "PySide6 is not installed. Install with `python -m pip install PySide6`."
+        )
     app = QApplication.instance() or QApplication([])
     return app

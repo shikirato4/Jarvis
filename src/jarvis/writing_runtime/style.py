@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from .base import WritingModelAdapter
 from .models import WritingContext, WritingStyleProfile, WritingTextType
+from .parsing import normalize_confidence
 
 
 class WritingStyleAnalyzer:
@@ -29,6 +30,14 @@ class WritingStyleAnalyzer:
                 parsed_type = WritingTextType(text_type)
             except Exception:
                 parsed_type = WritingTextType.UNKNOWN
+            if parsed_type is WritingTextType.UNKNOWN:
+                parsed_type = _infer_text_type(context.combined_context)
+            raw_characters = response.get("characters")
+            characters = (
+                [str(item) for item in raw_characters]
+                if isinstance(raw_characters, (list, tuple))
+                else []
+            )
             return WritingStyleProfile(
                 profile_id=str(uuid4()),
                 language=context.language,
@@ -39,8 +48,8 @@ class WritingStyleAnalyzer:
                 point_of_view=response.get("point_of_view"),
                 tense=response.get("tense"),
                 paragraph_structure=response.get("paragraph_structure"),
-                characters=[str(item) for item in response.get("characters", [])],
-                confidence=float(response.get("confidence") or 0.6),
+                characters=characters,
+                confidence=normalize_confidence(response.get("confidence"), default=0.6),
             )
         return self._fallback(context)
 
@@ -71,3 +80,12 @@ def _extract_capitalized_names(text: str) -> list[str]:
             if cleaned not in names:
                 names.append(cleaned)
     return names[:8]
+
+
+def _infer_text_type(text: str) -> WritingTextType:
+    lowered = text.casefold()
+    if any(token in lowered for token in ("capítulo", "escena", "personaje", "dijo", "pasillo", "respiración")):
+        return WritingTextType.STORY
+    if any(token in lowered for token in ("sistema", "arquitectura", "módulo", "implementación", "función")):
+        return WritingTextType.TECHNICAL
+    return WritingTextType.CASUAL

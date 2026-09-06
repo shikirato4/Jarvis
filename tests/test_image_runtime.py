@@ -12,6 +12,7 @@ from jarvis.config import Settings
 from jarvis.image_runtime import ImageGenerationRequest, ImageGenerationResult, ImageGenerationService, ImageJobStatus
 from jarvis.image_runtime.service import ImageModelManager, dependency_status
 from jarvis.image_runtime.prompting import build_image_request_from_text, is_image_generation_prompt
+from jarvis.image_runtime.service import _normalize_cuda_components
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -192,6 +193,30 @@ def test_default_image_model_path_resolves_inside_workspace(tmp_path: Path) -> N
     ).resolve()
 
 
+def test_image_model_path_finds_checkout_when_workspace_is_parent(tmp_path: Path) -> None:
+    """A launcher cwd/setting may be ``jarvis`` while checkout is ``jarvis/Jarvis``."""
+    checkout = tmp_path / "Jarvis"
+    model = checkout / "models" / "image" / "checkpoints" / "juggernautXL_v8Rundiffusion.safetensors"
+    model.parent.mkdir(parents=True)
+    model.write_bytes(b"checkpoint")
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        image_model_path=Path("models/image/checkpoints/juggernautXL_v8Rundiffusion.safetensors"),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+        system_backend_kind="in_memory",
+    )
+    assert settings.resolved_image_model_path == model.resolve()
+
+
+def test_default_image_model_path_is_not_bound_to_arbitrary_cwd(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(_env_file=None, embeddings_enabled=False, ui_backend_kind="in_memory", system_backend_kind="in_memory")
+    assert settings.resolved_image_model_path.exists()
+    assert settings.resolved_image_model_path.name == "juggernautXL_v8Rundiffusion.safetensors"
+
+
 def test_image_cli_status(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setenv("JARVIS_WORKSPACE_ROOT", str(tmp_path))
@@ -204,6 +229,8 @@ def test_image_cli_status(monkeypatch, tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "Jarvis Image Runtime" in result.output
     assert "Fooocus required: false" in result.output
+    assert "CUDA available: not checked" in result.output
+    assert "CUDA available: false" not in result.output
 
 
 def test_agent_mode_has_image_skills() -> None:
@@ -213,3 +240,23 @@ def test_agent_mode_has_image_skills() -> None:
     assert registry.get("generate_local_image") is not None
     assert registry.get("cancel_image_generation") is not None
     assert registry.get("unload_image_model") is not None
+
+
+def test_cuda_component_normalization_keeps_vae_upcast_policy() -> None:
+    """Compute modules share FP16; VAE dtype is left to Diffusers policy."""
+    import torch
+
+    class Pipe:
+        unet = torch.nn.Linear(2, 2).float()
+        text_encoder = torch.nn.Linear(2, 2).float()
+        text_encoder_2 = torch.nn.Linear(2, 2).float()
+        vae = torch.nn.Linear(2, 2).float()
+
+    pipe = Pipe()
+    _normalize_cuda_components(pipe, torch.float16)
+
+    assert next(pipe.unet.parameters()).dtype is torch.float16
+    assert next(pipe.text_encoder.parameters()).dtype is torch.float16
+    assert next(pipe.text_encoder_2.parameters()).dtype is torch.float16
+    # A force_upcast VAE may legitimately remain float32 for numerical safety.
+    assert next(pipe.vae.parameters()).dtype is torch.float32

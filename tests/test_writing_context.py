@@ -1,4 +1,19 @@
-from jarvis.writing_runtime.models import WritingContinuationRequest
+from jarvis.writing_runtime.models import WritingContinuationRequest, WritingContext
+from jarvis.writing_runtime.style import WritingStyleAnalyzer
+
+
+class _NullCharactersModel:
+    def infer_json(self, **kwargs):
+        return {"text_type": "casual", "characters": None, "confidence": 0.8}
+
+
+def test_writing_style_analyzer_normalizes_null_characters() -> None:
+    profile = WritingStyleAnalyzer(_NullCharactersModel()).analyze(
+        WritingContext(combined_context="Texto breve", language="es"),
+        correlation_id="regression-null-characters",
+    )
+    assert profile.characters == []
+    assert profile.confidence == 0.8
 
 
 def test_writing_context_detects_word_and_recent_text(jarvis_app) -> None:

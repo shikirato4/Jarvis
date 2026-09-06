@@ -38,10 +38,10 @@ def test_mode_selector_offers_three_modes_and_preserves_pending_files(tmp_path) 
 
         assert [window._llm_mode_selector.itemData(index) for index in range(3)] == [  # noqa: SLF001
             "auto",
-            "nvidia_api",
             "local",
+            "nvidia_api",
         ]
-        window._llm_mode_selector.setCurrentIndex(2)  # noqa: SLF001
+        window._llm_mode_selector.setCurrentIndex(1)  # noqa: SLF001
         app.processEvents()
 
         assert desktop.llm_status()["selected_mode"] == "local"
@@ -106,14 +106,7 @@ def test_attachment_button_menu_keyboard_multiple_preview_remove_and_mode_change
         assert window._attach_button.text() == "+"  # noqa: SLF001
         assert window._attach_button.accessibleName() == "Adjuntar archivos"  # noqa: SLF001
         action_labels = [action.text() for action in window._attachment_menu.actions()]  # noqa: SLF001
-        assert action_labels == [
-            "Imágenes",
-            "Videos",
-            "Audio",
-            "Documentos",
-            "Texto y código",
-            "Otros archivos",
-        ]
+        assert action_labels == ["File", "Image", "Video", "Audio"]
 
         window._attach_button.setFocus()  # noqa: SLF001
         QTest.keyClick(window._attach_button, Qt.Key_Return)  # noqa: SLF001

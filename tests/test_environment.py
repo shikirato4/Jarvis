@@ -50,6 +50,28 @@ def test_local_endpoint_requires_exact_configured_model() -> None:
     assert status.models == [LOCAL_MODEL]
 
 
+def test_local_endpoint_accepts_an_explicit_qwen_serving_alias() -> None:
+    advertised = "Qwen/Qwen3-8B-GGUF"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/models"
+        return httpx.Response(200, json={"data": [{"id": advertised}]})
+
+    client = httpx.Client(
+        base_url="http://127.0.0.1:8000/v1",
+        transport=httpx.MockTransport(handler),
+    )
+    status = detect_local_endpoint(
+        client=client,
+        model=LOCAL_MODEL,
+        model_aliases=(advertised,),
+    )
+
+    assert status.available is True
+    assert status.model_found is True
+    assert status.models == [advertised]
+
+
 def test_local_endpoint_rejects_invalid_url_without_leaking_path() -> None:
     status = detect_local_endpoint("file:///tmp/token-secret")
 
@@ -67,7 +89,7 @@ def test_environment_reports_both_routes_unavailable(_local, _internet) -> None:
     environment = detect_environment(nvidia_configured=False)
 
     assert environment.recommended_mode == "auto"
-    assert environment.recommended_local_provider == "nemotron_omni_local"
+    assert environment.recommended_local_provider == "qwen_local"
     assert any("Both" in warning for warning in environment.warnings)
 
 

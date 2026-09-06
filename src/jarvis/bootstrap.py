@@ -39,12 +39,28 @@ from jarvis.core.capabilities import CapabilityRegistry
 from jarvis.desktop_agent_runtime import DesktopAgentRuntimeService
 from jarvis.core.models import AutoRecoveryPolicy, HealthStatus
 from jarvis.core.modes import ModeManager
-from jarvis.core.operations import AdmissionController, OperationRegistry, OperationWatchdog
+from jarvis.core.operations import (
+    AdmissionController,
+    OperationRegistry,
+    OperationWatchdog,
+)
 from jarvis.core.process import SyncProcessRunner
-from jarvis.core.resilience import CircuitBreakerPolicy, ResilienceController, ResiliencePolicy, RetryBudgetPolicy, TimeoutPolicy
+from jarvis.core.resilience import (
+    CircuitBreakerPolicy,
+    ResilienceController,
+    ResiliencePolicy,
+    RetryBudgetPolicy,
+    TimeoutPolicy,
+)
 from jarvis.core.lifecycle import RuntimeLifecycleSupervisor
 from jarvis.core.resources import ResourceMonitor
-from jarvis.core.retention import EventRetentionPolicy, LogRetentionPolicy, ReceiptRetentionPolicy, RetentionManager, SnapshotRetentionPolicy
+from jarvis.core.retention import (
+    EventRetentionPolicy,
+    LogRetentionPolicy,
+    ReceiptRetentionPolicy,
+    RetentionManager,
+    SnapshotRetentionPolicy,
+)
 from jarvis.core.state import RuntimeStateManager
 from jarvis.core.telemetry import TelemetryRecorder
 from jarvis.cognition.orchestrator import CognitiveOrchestrator
@@ -54,13 +70,19 @@ from jarvis.runtime_activity import RuntimeActivityStore
 from jarvis.core.modules import ModuleRegistry
 from jarvis.jarvis_logging import configure_logging, shutdown_logging
 from jarvis.legacy_model_config import detect_legacy_model_configuration
-from jarvis.local_runtime import LocalBackendRegistry, LocalHardwareDiagnostics, LocalRuntimeService, VllmBackendAdapter
+from jarvis.local_runtime import (
+    LocalBackendRegistry,
+    LocalHardwareDiagnostics,
+    LocalRuntimeService,
+    VllmBackendAdapter,
+)
 from jarvis.memory.repository import Database, MemoryRepository
 from jarvis.memory.service import MemoryService
 from jarvis.indexing_runtime import IndexingRepository, IndexingRuntimeService
 from jarvis.integrations import WordCOMBackend
 from jarvis.hud_runtime.service import HudRuntimeService
 from jarvis.image_runtime import ImageGenerationService
+from jarvis.file_runtime import FileNavigator
 from jarvis.memory_semantic.embeddings import (
     EmbeddingProviderRegistry,
     EmbeddingRouter,
@@ -78,17 +100,28 @@ from jarvis.models_runtime import (
     ModelCatalog,
     ModelRouter,
     ModelService,
-    NemotronOmniLocalProvider,
+    LocalModelRuntimeManager,
+    QwenLocalProvider,
     NvidiaNimProvider,
     PersistentModeStore,
     ProviderCoordinator,
     ProviderRegistry,
     build_default_model_catalog,
 )
+from jarvis.models_runtime.local_profiles import resolve_local_model_profile
+from jarvis.neural_router import (
+    HashedTextFeatureExtractor,
+    LazyTrainingShadowRouter,
+    NeuralRouterTrainingPipeline,
+    NumpyMLPBackend,
+    build_controlled_dataset,
+)
 from jarvis.security_runtime.secrets import NvidiaSecretManager
 from jarvis.modules.voice_interface_module import VoiceInterfaceModule
 from jarvis.modules.memory_module import MemoryModule
 from jarvis.modules.operations_module import OperationsModule
+from jarvis.modules.terminal_module import TerminalModule
+from jarvis.modules.files_module import FilesModule
 from jarvis.modules.research_module import ResearchModule
 from jarvis.modules.interface_module import InterfaceModule
 from jarvis.modules.indexing_module import IndexingModule
@@ -105,14 +138,31 @@ from jarvis.modules.voice_module import VoiceModule
 from jarvis.modules.writing_module import WritingModule
 from jarvis.modules.writer_module import WriterModule
 from jarvis.modules.desktop_agent_module import DesktopAgentModule
-from jarvis.writing_runtime import WritingAnalyzer, WritingContextResolver, WritingContinuationEngine, WritingEditor, WritingGenerator, WritingRepository, WritingRuntimeService, WritingStyleAnalyzer
+from jarvis.terminal_runtime import TerminalRuntime
+from jarvis.writing_runtime import (
+    WritingAnalyzer,
+    WritingContextResolver,
+    WritingContinuationEngine,
+    WritingEditor,
+    WritingGenerator,
+    WritingRepository,
+    WritingRuntimeService,
+    WritingStyleAnalyzer,
+)
 from jarvis.writing_runtime.base import WritingModelAdapter
 from jarvis.web_search import build_web_search_provider
 from jarvis.data_analyzer import DataAnalyzer
 from jarvis.routing.task_router import TaskRouter
 from jarvis.services.runtime import JarvisRuntimeService
 from jarvis.services.ops_runtime import OpsRuntimeService
-from jarvis.research_runtime import ResearchAnalyzer, ResearchPipeline, ResearchRepository, ResearchRetriever, ResearchRuntimeService, ResearchSynthesizer
+from jarvis.research_runtime import (
+    ResearchAnalyzer,
+    ResearchPipeline,
+    ResearchRepository,
+    ResearchRetriever,
+    ResearchRuntimeService,
+    ResearchSynthesizer,
+)
 from jarvis.research_runtime.base import ModelServiceResearchAdapter
 from jarvis.science_runtime import ScienceRuntimeService
 from jarvis.security_runtime import SecurityRuntimeService
@@ -166,7 +216,11 @@ from jarvis.unity_runtime import (
     UnityScriptService,
 )
 from jarvis.tools.registry import ToolRegistry
-from jarvis.ui_automation import InMemoryDesktopAutomationBackend, UIAutomationService, WindowsDesktopAutomationBackend
+from jarvis.ui_automation import (
+    InMemoryDesktopAutomationBackend,
+    UIAutomationService,
+    WindowsDesktopAutomationBackend,
+)
 from jarvis.ui_automation.base import CancellationRequest, WriteTextRequest
 from jarvis.vision_runtime import (
     HeuristicVisionAnalyzer,
@@ -219,7 +273,10 @@ class JarvisApplication:
     action_router: ActionRouter
     action_executor: ActionExecutor
     agent_controller: AgentController
+    neural_router_shadow: LazyTrainingShadowRouter | None
     tool_registry: ToolRegistry
+    terminal_runtime: TerminalRuntime
+    file_navigator: FileNavigator
     provider_registry: ProviderRegistry
     model_catalog: ModelCatalog
     model_router: ModelRouter
@@ -229,6 +286,7 @@ class JarvisApplication:
     multimodal_pipeline: MultimodalPipeline
     local_hardware_diagnostics: LocalHardwareDiagnostics
     local_runtime_service: LocalRuntimeService
+    local_model_runtime_manager: LocalModelRuntimeManager
     embedding_provider_registry: EmbeddingProviderRegistry
     embedding_router: EmbeddingRouter
     embedding_service: EmbeddingService
@@ -261,7 +319,9 @@ class JarvisApplication:
     logger: logging.Logger
     started: bool = False
 
-    def _startup_service_details(self, name: str, details: dict[str, object] | None = None) -> dict[str, object]:
+    def _startup_service_details(
+        self, name: str, details: dict[str, object] | None = None
+    ) -> dict[str, object]:
         payload = {"startup_ready": True}
         if details:
             payload.update(details)
@@ -274,91 +334,209 @@ class JarvisApplication:
         startup_timings: dict[str, float] = {}
         self.settings.prepare_environment()
         self.state_manager.update_service("jarvis.app", HealthStatus.STARTING)
-        startup_timings["prepare_environment_ms"] = (time.perf_counter() - stage_started) * 1000
+        startup_timings["prepare_environment_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.memory_service.create_schema()
         self.state_manager.update_service("memory", HealthStatus.READY)
-        startup_timings["memory_schema_ms"] = (time.perf_counter() - stage_started) * 1000
+        startup_timings["memory_schema_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.semantic_memory_service.create_schema()
         self.state_manager.update_service("semantic_memory", HealthStatus.READY)
-        startup_timings["semantic_memory_schema_ms"] = (time.perf_counter() - stage_started) * 1000
+        startup_timings["semantic_memory_schema_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.indexing_runtime_service.create_schema()
-        self.state_manager.update_service("indexing_runtime", HealthStatus.READY, self._startup_service_details("indexing_runtime"))
-        startup_timings["indexing_schema_ms"] = (time.perf_counter() - stage_started) * 1000
+        self.state_manager.update_service(
+            "indexing_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("indexing_runtime"),
+        )
+        startup_timings["indexing_schema_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.mission_persistence_service.create_schema()
-        self.mission_persistence_service.hydrate_state(self.autonomy_service_runtime._state)  # noqa: SLF001
-        startup_timings["mission_persistence_ms"] = (time.perf_counter() - stage_started) * 1000
+        self.mission_persistence_service.hydrate_state(
+            self.autonomy_service_runtime._state
+        )  # noqa: SLF001
+        startup_timings["mission_persistence_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.lifecycle_supervisor.start_service("system_runtime")
-        self.state_manager.update_service("ui_automation", HealthStatus.READY, self._startup_service_details("ui_automation"))
-        self.state_manager.update_service("vision_runtime", HealthStatus.READY, self._startup_service_details("vision_runtime"))
-        self.state_manager.update_service("voice_runtime", HealthStatus.READY, self._startup_service_details("voice_runtime"))
-        self.state_manager.update_service("system_runtime", HealthStatus.READY, self._startup_service_details("system_runtime"))
-        startup_timings["system_runtime_start_ms"] = (time.perf_counter() - stage_started) * 1000
+        self.state_manager.update_service(
+            "ui_automation",
+            HealthStatus.READY,
+            self._startup_service_details("ui_automation"),
+        )
+        self.state_manager.update_service(
+            "vision_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("vision_runtime"),
+        )
+        self.state_manager.update_service(
+            "voice_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("voice_runtime"),
+        )
+        self.state_manager.update_service(
+            "system_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("system_runtime"),
+        )
+        startup_timings["system_runtime_start_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.lifecycle_supervisor.start_service("unity_runtime")
-        self.state_manager.update_service("unity_runtime", HealthStatus.READY, self._startup_service_details("unity_runtime"))
-        self.state_manager.update_service("autonomy", HealthStatus.READY, self._startup_service_details("autonomy"))
-        startup_timings["unity_autonomy_start_ms"] = (time.perf_counter() - stage_started) * 1000
+        self.state_manager.update_service(
+            "unity_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("unity_runtime"),
+        )
+        self.state_manager.update_service(
+            "autonomy", HealthStatus.READY, self._startup_service_details("autonomy")
+        )
+        startup_timings["unity_autonomy_start_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.research_runtime_service.start()
-        self.state_manager.update_service("research_runtime", HealthStatus.READY, self._startup_service_details("research_runtime"))
+        self.state_manager.update_service(
+            "research_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("research_runtime"),
+        )
         self.science_runtime_service.start()
-        self.state_manager.update_service("science_runtime", HealthStatus.READY, self._startup_service_details("science_runtime"))
+        self.state_manager.update_service(
+            "science_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("science_runtime"),
+        )
         self.security_runtime_service.start()
-        self.state_manager.update_service("security_runtime", HealthStatus.READY, self._startup_service_details("security_runtime"))
+        self.state_manager.update_service(
+            "security_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("security_runtime"),
+        )
         self.self_improvement_runtime_service.start()
-        self.state_manager.update_service("self_improvement_runtime", HealthStatus.READY, self._startup_service_details("self_improvement_runtime"))
+        self.state_manager.update_service(
+            "self_improvement_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("self_improvement_runtime"),
+        )
         self.writing_runtime_service.start()
-        self.state_manager.update_service("writing_runtime", HealthStatus.READY, self._startup_service_details("writing_runtime"))
+        self.state_manager.update_service(
+            "writing_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("writing_runtime"),
+        )
         self.image_runtime_service.start()
-        self.state_manager.update_service("image_runtime", HealthStatus.READY, self._startup_service_details("image_runtime", self.image_runtime_service.status()))
+        self.state_manager.update_service(
+            "image_runtime",
+            HealthStatus.READY,
+            self._startup_service_details(
+                "image_runtime", self.image_runtime_service.status()
+            ),
+        )
         self.desktop_agent_runtime_service.start()
-        self.state_manager.update_service("desktop_agent_runtime", HealthStatus.READY, self._startup_service_details("desktop_agent_runtime"))
+        self.state_manager.update_service(
+            "desktop_agent_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("desktop_agent_runtime"),
+        )
         self.indexing_runtime_service.start()
-        self.state_manager.update_service("indexing_runtime", HealthStatus.READY, self._startup_service_details("indexing_runtime"))
+        self.state_manager.update_service(
+            "indexing_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("indexing_runtime"),
+        )
         self.hud_runtime_service.start()
-        self.state_manager.update_service("hud_runtime", HealthStatus.READY, self._startup_service_details("hud_runtime"))
-        startup_timings["secondary_runtime_start_ms"] = (time.perf_counter() - stage_started) * 1000
+        self.state_manager.update_service(
+            "hud_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("hud_runtime"),
+        )
+        startup_timings["secondary_runtime_start_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.module_registry.start_all()
-        self.state_manager.update_service("modules", HealthStatus.READY, {"count": len(self.module_registry.descriptors)})
-        startup_timings["module_start_ms"] = (time.perf_counter() - stage_started) * 1000
+        self.state_manager.update_service(
+            "modules",
+            HealthStatus.READY,
+            {"count": len(self.module_registry.descriptors)},
+        )
+        startup_timings["module_start_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         stage_started = time.perf_counter()
         self.state_manager.update_service(
             "providers",
             HealthStatus.READY,
-            {"providers": [provider.provider_name for provider in self.provider_registry.list_providers()]},
+            {
+                "providers": [
+                    provider.provider_name
+                    for provider in self.provider_registry.list_providers()
+                ]
+            },
         )
         self.state_manager.update_service(
             "models",
             HealthStatus.READY,
-            {"profiles": [profile["logical_name"] for profile in self.model_service.list_models()]},
+            {
+                "profiles": [
+                    profile["logical_name"]
+                    for profile in self.model_service.list_models()
+                ]
+            },
         )
         self.state_manager.update_service(
             "embedding_providers",
             HealthStatus.READY,
-            {"providers": [provider.provider_name for provider in self.embedding_provider_registry.list_providers()]},
+            {
+                "providers": [
+                    provider.provider_name
+                    for provider in self.embedding_provider_registry.list_providers()
+                ]
+            },
         )
         self.state_manager.update_service(
             "semantic_embeddings",
             HealthStatus.READY,
-            {"profiles": [profile["logical_name"] for profile in self.embedding_service.list_models()]},
+            {
+                "profiles": [
+                    profile["logical_name"]
+                    for profile in self.embedding_service.list_models()
+                ]
+            },
         )
         self.lifecycle_supervisor.start_service("automation")
         self.state_manager.update_service("automation", HealthStatus.READY)
         self.state_manager.update_service("task_router", HealthStatus.READY)
         self.lifecycle_supervisor.start_service("runtime")
         self.lifecycle_supervisor.start_service("ops_runtime")
-        self.state_manager.update_service("runtime", HealthStatus.READY, self.runtime_service.health().details)
-        self.state_manager.update_service("ops_runtime", HealthStatus.READY, self._startup_service_details("ops_runtime"))
-        startup_timings["runtime_ops_start_ms"] = (time.perf_counter() - stage_started) * 1000
+        self.state_manager.update_service(
+            "runtime", HealthStatus.READY, self.runtime_service.health().details
+        )
+        self.state_manager.update_service(
+            "ops_runtime",
+            HealthStatus.READY,
+            self._startup_service_details("ops_runtime"),
+        )
+        startup_timings["runtime_ops_start_ms"] = (
+            time.perf_counter() - stage_started
+        ) * 1000
         self.started = True
         startup_timings["total_startup_ms"] = sum(startup_timings.values())
-        self.state_manager.update_service("jarvis.app", HealthStatus.READY, {"startup_timings_ms": startup_timings})
+        self.state_manager.update_service(
+            "jarvis.app", HealthStatus.READY, {"startup_timings_ms": startup_timings}
+        )
         self.logger.info(
             "jarvis_started",
             extra={
@@ -369,6 +547,10 @@ class JarvisApplication:
 
     def stop(self) -> None:
         if not self.started:
+            self.terminal_runtime.shutdown()
+            if self.settings.local_runtime_stop_on_shutdown:
+                self.local_model_runtime_manager.stop()
+            self.database.close()
             return
         self.state_manager.update_service("jarvis.app", HealthStatus.STOPPED)
         self.lifecycle_supervisor.stop_service("ops_runtime")
@@ -378,7 +560,11 @@ class JarvisApplication:
         self.lifecycle_supervisor.stop_service("unity_runtime")
         self.state_manager.update_service("automation", HealthStatus.STOPPED)
         self.module_registry.stop_all()
-        self.state_manager.update_service("modules", HealthStatus.STOPPED, {"count": len(self.module_registry.descriptors)})
+        self.state_manager.update_service(
+            "modules",
+            HealthStatus.STOPPED,
+            {"count": len(self.module_registry.descriptors)},
+        )
         self.state_manager.update_service("providers", HealthStatus.STOPPED)
         self.state_manager.update_service("models", HealthStatus.STOPPED)
         self.state_manager.update_service("embedding_providers", HealthStatus.STOPPED)
@@ -401,11 +587,15 @@ class JarvisApplication:
         self.security_runtime_service.stop()
         self.state_manager.update_service("security_runtime", HealthStatus.STOPPED)
         self.self_improvement_runtime_service.stop()
-        self.state_manager.update_service("self_improvement_runtime", HealthStatus.STOPPED)
+        self.state_manager.update_service(
+            "self_improvement_runtime", HealthStatus.STOPPED
+        )
         self.writing_runtime_service.stop()
         self.state_manager.update_service("writing_runtime", HealthStatus.STOPPED)
         self.image_runtime_service.stop()
         self.state_manager.update_service("image_runtime", HealthStatus.STOPPED)
+        if self.settings.local_runtime_stop_on_shutdown:
+            self.local_model_runtime_manager.stop()
         self.desktop_agent_runtime_service.stop()
         self.state_manager.update_service("desktop_agent_runtime", HealthStatus.STOPPED)
         self.indexing_runtime_service.stop()
@@ -425,7 +615,10 @@ class JarvisApplication:
             "environment": self.settings.environment,
             "mode": runtime_description["mode"],
             "services": runtime_description["services"],
-            "modules": [{"name": item.name, "description": item.description} for item in self.module_registry.descriptors],
+            "modules": [
+                {"name": item.name, "description": item.description}
+                for item in self.module_registry.descriptors
+            ],
             "actions": [
                 {
                     "name": definition.name,
@@ -446,9 +639,14 @@ class JarvisApplication:
                 capability.descriptor.model_dump(mode="json")
                 for capability in self.capability_registry.list_capabilities()
             ],
-            "providers": [health.model_dump(mode="json") for health in self.model_service.health()],
+            "providers": [
+                health.model_dump(mode="json") for health in self.model_service.health()
+            ],
             "models": self.model_service.list_models(),
-            "embedding_providers": [health.model_dump(mode="json") for health in self.embedding_service.health()],
+            "embedding_providers": [
+                health.model_dump(mode="json")
+                for health in self.embedding_service.health()
+            ],
             "embedding_models": self.embedding_service.list_models(),
             "semantic_memory": self.semantic_memory_service.status(),
             "indexing_runtime": self.indexing_runtime_service.status(),
@@ -480,7 +678,9 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     logger = logging.getLogger("jarvis.app")
     detect_legacy_model_configuration()
-    database = Database(settings.sqlalchemy_database_url, settings.sqlalchemy_engine_options())
+    database = Database(
+        settings.sqlalchemy_database_url, settings.sqlalchemy_engine_options()
+    )
     repository = MemoryRepository(database)
     semantic_repository = SemanticMemoryRepository(database)
     indexing_repository = IndexingRepository(database)
@@ -503,18 +703,58 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         default_limit=settings.ops_default_max_concurrent_operations,
         queue_limit=settings.ops_default_queue_limit,
         policies={
-            "autonomy": {"max_concurrent": settings.autonomy_max_concurrent_missions, "queue_limit": settings.autonomy_max_concurrent_missions, "overflow_policy": "reject"},
-            "research_runtime": {"max_concurrent": settings.research_max_concurrent_tasks, "queue_limit": settings.research_max_concurrent_tasks, "overflow_policy": "defer"},
-            "indexing_runtime": {"max_concurrent": settings.indexing_max_concurrent_runs, "queue_limit": settings.indexing_max_concurrent_runs, "overflow_policy": "reject"},
-            "ui_automation": {"max_concurrent": 1, "queue_limit": 1, "overflow_policy": "reject"},
-            "voice_runtime": {"max_concurrent": 2, "queue_limit": 2, "overflow_policy": "reject"},
-            "vision_runtime": {"max_concurrent": 3, "queue_limit": 4, "overflow_policy": "reject"},
-            "system_runtime": {"max_concurrent": 4, "queue_limit": 6, "overflow_policy": "reject"},
-            "unity_runtime": {"max_concurrent": 2, "queue_limit": 2, "overflow_policy": "reject"},
-            "writing_runtime": {"max_concurrent": 3, "queue_limit": 4, "overflow_policy": "defer"},
+            "autonomy": {
+                "max_concurrent": settings.autonomy_max_concurrent_missions,
+                "queue_limit": settings.autonomy_max_concurrent_missions,
+                "overflow_policy": "reject",
+            },
+            "research_runtime": {
+                "max_concurrent": settings.research_max_concurrent_tasks,
+                "queue_limit": settings.research_max_concurrent_tasks,
+                "overflow_policy": "defer",
+            },
+            "indexing_runtime": {
+                "max_concurrent": settings.indexing_max_concurrent_runs,
+                "queue_limit": settings.indexing_max_concurrent_runs,
+                "overflow_policy": "reject",
+            },
+            "ui_automation": {
+                "max_concurrent": 1,
+                "queue_limit": 1,
+                "overflow_policy": "reject",
+            },
+            "voice_runtime": {
+                "max_concurrent": 2,
+                "queue_limit": 2,
+                "overflow_policy": "reject",
+            },
+            "vision_runtime": {
+                "max_concurrent": 3,
+                "queue_limit": 4,
+                "overflow_policy": "reject",
+            },
+            "system_runtime": {
+                "max_concurrent": 4,
+                "queue_limit": 6,
+                "overflow_policy": "reject",
+            },
+            "unity_runtime": {
+                "max_concurrent": 2,
+                "queue_limit": 2,
+                "overflow_policy": "reject",
+            },
+            "writing_runtime": {
+                "max_concurrent": 3,
+                "queue_limit": 4,
+                "overflow_policy": "defer",
+            },
         },
     )
-    operation_registry = OperationRegistry(event_bus=event_bus, admission_controller=admission, history_limit=settings.ops_operation_history_limit)
+    operation_registry = OperationRegistry(
+        event_bus=event_bus,
+        admission_controller=admission,
+        history_limit=settings.ops_operation_history_limit,
+    )
     resilience = ResilienceController(
         telemetry,
         default_policy=ResiliencePolicy(
@@ -549,12 +789,24 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     capability_registry = CapabilityRegistry()
     provider_registry = ProviderRegistry()
-    fallback_secret = settings.nvidia_api_key.get_secret_value() if settings.nvidia_api_key is not None else None
-    nvidia_secret_manager = NvidiaSecretManager.from_system(fallback_value=fallback_secret)
+    fallback_secret = (
+        settings.nvidia_api_key.get_secret_value()
+        if settings.nvidia_api_key is not None
+        else None
+    )
+    nvidia_secret_manager = NvidiaSecretManager.from_system(
+        fallback_value=fallback_secret
+    )
     nvidia_provider = NvidiaNimProvider(settings, secret_manager=nvidia_secret_manager)
-    local_nemotron_provider = NemotronOmniLocalProvider(settings)
+    local_profile = resolve_local_model_profile(settings)
+    local_model_runtime_manager = LocalModelRuntimeManager(
+        settings, profile=local_profile, logger=logger
+    )
+    local_qwen_provider = QwenLocalProvider(
+        settings, profile=local_profile, runtime_manager=local_model_runtime_manager
+    )
     provider_registry.register(nvidia_provider)
-    provider_registry.register(local_nemotron_provider)
+    provider_registry.register(local_qwen_provider)
     attachment_service = AttachmentService(
         AttachmentTypeRegistry(),
         RequestScopedAttachmentStorage(
@@ -573,8 +825,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     provider_coordinator = ProviderCoordinator(
         settings,
         nvidia_provider=nvidia_provider,
-        local_provider=local_nemotron_provider,
-        mode_store=PersistentModeStore(default_mode=LLMMode(settings.llm_mode)),
+        local_provider=local_qwen_provider,
+        mode_store=PersistentModeStore(
+            settings.workspace_root,
+            default_mode=LLMMode(settings.llm_mode),
+        ),
     )
     model_service = ModelService(
         settings,
@@ -590,7 +845,9 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     embedding_provider_registry = EmbeddingProviderRegistry()
     if settings.embeddings_enabled:
         embedding_provider_registry.register(LocalHashEmbeddingProvider(settings))
-    embedding_router = EmbeddingRouter(build_default_embedding_profiles(settings), mode_manager)
+    embedding_router = EmbeddingRouter(
+        build_default_embedding_profiles(settings), mode_manager
+    )
     embedding_service = EmbeddingService(
         settings,
         mode_manager,
@@ -601,7 +858,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         resilience_controller=resilience,
     )
     vector_index = RepositoryVectorIndex(semantic_repository)
-    reranker = BasicHeuristicReranker() if settings.semantic_reranking_type == "basic" else NoOpReranker()
+    reranker = (
+        BasicHeuristicReranker()
+        if settings.semantic_reranking_type == "basic"
+        else NoOpReranker()
+    )
     retrieval_pipeline = RetrievalPipeline(
         semantic_repository,
         vector_index,
@@ -631,19 +892,61 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         logger=logger,
     )
     action_registry = ActionRegistry()
-    router = ActionRouter(action_registry, settings, memory_service, model_service, event_bus, logger=logger)
+    router = ActionRouter(
+        action_registry,
+        settings,
+        memory_service,
+        model_service,
+        event_bus,
+        logger=logger,
+    )
     action_executor = ActionExecutor(
         router,
         security_gate=TypedActionSecurityGate(),
         event_sink=event_bus.publish,
     )
+    neural_router_shadow = None
+    if settings.neural_router_shadow_enabled:
+        neural_features = HashedTextFeatureExtractor(
+            dimension=settings.neural_router_feature_dimension
+        )
+        neural_router_shadow = LazyTrainingShadowRouter(
+            pipeline=NeuralRouterTrainingPipeline(
+                backend_factory=lambda labels, dimension: NumpyMLPBackend(
+                    labels=labels,
+                    input_dimension=dimension,
+                    hidden_dimension=settings.neural_router_hidden_dimension,
+                    epochs=settings.neural_router_epochs,
+                    learning_rate=settings.neural_router_learning_rate,
+                    seed=42,
+                ),
+                feature_extractor=neural_features,
+            ),
+            dataset_factory=build_controlled_dataset,
+            seed=42,
+        )
     agent_controller = AgentController(
         infer_model=model_service.infer,
+        stream_model=model_service.stream,
         action_executor=action_executor,
         event_sink=event_bus.publish,
+        shadow_observer=neural_router_shadow,
         max_repeated_signature=settings.agent_max_repeated_action_signature,
     )
-    tool_registry = ToolRegistry(settings, memory_service, router, model_service, event_bus, logger=logger)
+    terminal_runtime = TerminalRuntime(event_sink=event_bus.publish)
+    file_navigator = FileNavigator(
+        settings.resolved_workspace_root,
+        event_sink=event_bus.publish,
+    )
+    tool_registry = ToolRegistry(
+        settings,
+        memory_service,
+        router,
+        model_service,
+        event_bus,
+        logger=logger,
+        action_executor=action_executor,
+    )
     meta_command_parser = MetaCommandParser()
     process_runner = SyncProcessRunner()
     application_registry = ApplicationCatalogRegistry()
@@ -654,7 +957,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     if settings.system_backend_kind == "in_memory":
         application_registry.register(InMemoryApplicationCatalogProvider())
     else:
-        application_registry.register(NativeApplicationCatalogProvider(settings.resolved_workspace_root, settings.system_known_locations))
+        application_registry.register(
+            NativeApplicationCatalogProvider(
+                settings.resolved_workspace_root, settings.system_known_locations
+            )
+        )
     ui_automation_service = UIAutomationService(
         settings,
         mode_manager,
@@ -690,12 +997,19 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     audio_input_registry = AudioInputRegistry()
     audio_input_registry.register(WavFileAudioInputBackend())
     audio_input_registry.register(InMemoryAudioInputBackend())
-    if settings.voice_audio_input_backend_default == "sounddevice" or settings.voice_input_enabled:
+    if (
+        settings.voice_audio_input_backend_default == "sounddevice"
+        or settings.voice_input_enabled
+    ):
         audio_input_registry.register(SoundDeviceAudioInputBackend())
     audio_output_registry = AudioOutputRegistry()
     audio_output_registry.register(InMemoryAudioOutputBackend())
     audio_output_registry.register(WinsoundAudioOutputBackend())
-    if settings.voice_audio_output_backend_default == "pyttsx3" or settings.voice_tts_provider_default == "pyttsx3" or "pyttsx3" in settings.voice_tts_provider_fallback_order:
+    if (
+        settings.voice_audio_output_backend_default == "pyttsx3"
+        or settings.voice_tts_provider_default == "pyttsx3"
+        or "pyttsx3" in settings.voice_tts_provider_fallback_order
+    ):
         audio_output_registry.register(Pyttsx3AudioOutputBackend())
     stt_registry = STTProviderRegistry()
     stt_registry.register(InMemorySTTProvider())
@@ -711,7 +1025,8 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         CoquiXTTSProvider(
             model_name=settings.voice_coqui_model_name,
             language=settings.voice_default_language,
-            speaker_wav=settings.resolved_voice_clone_sample_path or settings.resolved_voice_coqui_speaker_wav,
+            speaker_wav=settings.resolved_voice_clone_sample_path
+            or settings.resolved_voice_coqui_speaker_wav,
             speaker=settings.voice_coqui_speaker_name,
             device_preference=settings.voice_coqui_device_preference,
             tos_agreed=settings.voice_coqui_tos_agreed,
@@ -722,10 +1037,27 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         tts_registry.register(OpenVoiceProvider())
     if settings.voice_clone_rvc_enabled:
         tts_registry.register(RVCProvider())
-    if settings.voice_tts_provider_default == "pyttsx3" or "pyttsx3" in settings.voice_tts_provider_fallback_order:
+    if (
+        settings.voice_tts_provider_default == "pyttsx3"
+        or "pyttsx3" in settings.voice_tts_provider_fallback_order
+    ):
         tts_registry.register(Pyttsx3TTSProvider())
-    stt_service = STTService(settings, mode_manager, stt_registry, event_bus, logger=logger, resilience_controller=resilience)
-    tts_service = TTSService(settings, mode_manager, tts_registry, event_bus, logger=logger, resilience_controller=resilience)
+    stt_service = STTService(
+        settings,
+        mode_manager,
+        stt_registry,
+        event_bus,
+        logger=logger,
+        resilience_controller=resilience,
+    )
+    tts_service = TTSService(
+        settings,
+        mode_manager,
+        tts_registry,
+        event_bus,
+        logger=logger,
+        resilience_controller=resilience,
+    )
     voice_clone_manager = VoiceCloneManager(settings, logger=logger)
     voice_runtime_service = VoiceRuntimeService(
         settings,
@@ -738,20 +1070,24 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         logger=logger,
         operation_registry=operation_registry,
         voice_clone_manager=voice_clone_manager,
-        dictate_callback=lambda text, correlation_id, options: ui_automation_service.write_text(
-            WriteTextRequest.model_validate(
-                {
-                    "text": text,
-                    "mode": options.get("ui_mode") or "copilot",
-                    "target_window": options.get("target_window"),
-                    "typing_interval_ms": 0,
-                    "pause_between_blocks_ms": 0,
-                    "approved": True,
-                }
-            ),
-            correlation_id=correlation_id,
+        dictate_callback=lambda text, correlation_id, options: (
+            ui_automation_service.write_text(
+                WriteTextRequest.model_validate(
+                    {
+                        "text": text,
+                        "mode": options.get("ui_mode") or "copilot",
+                        "target_window": options.get("target_window"),
+                        "typing_interval_ms": 0,
+                        "pause_between_blocks_ms": 0,
+                        "approved": True,
+                    }
+                ),
+                correlation_id=correlation_id,
+            )
         ),
-        cancel_callback=lambda correlation_id: ui_automation_service.cancel(CancellationRequest(correlation_id=correlation_id)),
+        cancel_callback=lambda correlation_id: ui_automation_service.cancel(
+            CancellationRequest(correlation_id=correlation_id)
+        ),
     )
     voice_runtime_service.set_voice_enabled(settings.voice_enabled)
     voice_runtime_service.set_voice_muted(settings.voice_start_muted)
@@ -764,17 +1100,31 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         launcher_registry.register(InMemoryLauncherBackend())
         launcher_backend_name = "in_memory_launcher"
     else:
-        volume_registry.register(NativeVolumeProvider(settings.resolved_workspace_root, settings.system_known_locations))
+        volume_registry.register(
+            NativeVolumeProvider(
+                settings.resolved_workspace_root, settings.system_known_locations
+            )
+        )
         association_registry.register(NativeAssociationProvider())
         launcher_registry.register(NativeLauncherBackend())
         launcher_backend_name = "native_launcher"
     volume_topology = VolumeTopologyService(volume_registry, settings, logger=logger)
-    resource_search = ResourceSearchService(settings, volume_topology, application_registry, logger=logger)
+    resource_search = ResourceSearchService(
+        settings, volume_topology, application_registry, logger=logger
+    )
     application_resolver = ApplicationResolver(application_registry, logger=logger)
     path_resolver = PathResolver()
     association_resolver = AssociationResolver(association_registry, logger=logger)
-    system_launcher = SystemLauncher(launcher_registry, backend_name=launcher_backend_name, logger=logger)
-    system_target_resolver = SystemTargetResolver(application_resolver, path_resolver, resource_search, association_resolver, logger=logger)
+    system_launcher = SystemLauncher(
+        launcher_registry, backend_name=launcher_backend_name, logger=logger
+    )
+    system_target_resolver = SystemTargetResolver(
+        application_resolver,
+        path_resolver,
+        resource_search,
+        association_resolver,
+        logger=logger,
+    )
     system_runtime_service = SystemRuntimeService(
         settings,
         event_bus,
@@ -793,18 +1143,28 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
             fallback_paths=settings.unity_editor_fallback_paths,
         )
     )
-    unity_installation_discovery = UnityInstallationDiscoveryService(unity_installation_registry, settings, logger=logger)
+    unity_installation_discovery = UnityInstallationDiscoveryService(
+        unity_installation_registry, settings, logger=logger
+    )
     unity_bridge_registry = UnityBridgeRegistry()
     unity_bridge_registry.register(NoOpUnityBridgeBackend())
-    unity_bridge_registry.register(HttpUnityBridgeBackend(settings, logger=logger, resilience_controller=resilience))
+    unity_bridge_registry.register(
+        HttpUnityBridgeBackend(
+            settings, logger=logger, resilience_controller=resilience
+        )
+    )
     unity_session_registry = UnityEditorSessionRegistry()
     unity_project_discovery = UnityProjectDiscoveryService(settings, logger=logger)
     unity_project_service = UnityProjectService(logger=logger)
-    unity_project_resolver = UnityProjectResolver(unity_project_discovery, unity_project_service, logger=logger)
+    unity_project_resolver = UnityProjectResolver(
+        unity_project_discovery, unity_project_service, logger=logger
+    )
     unity_asset_service = UnityAssetService(logger=logger)
     unity_script_service = UnityScriptService(settings, logger=logger)
     unity_editor_ops = UnityEditorOperationService(logger=logger)
-    unity_launch_service = UnityLaunchIntegrationService(settings, system_runtime_service, logger=logger)
+    unity_launch_service = UnityLaunchIntegrationService(
+        settings, system_runtime_service, logger=logger
+    )
     unity_bridge_service = UnityBridgeService(
         unity_bridge_registry,
         backend_name=settings.unity_bridge_backend_default,
@@ -840,9 +1200,15 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         logger=logger,
         operation_registry=operation_registry,
     )
-    autonomy_verifier = MissionVerifier(vision_runtime=vision_runtime_service, ui_automation=ui_automation_service, logger=logger)
+    autonomy_verifier = MissionVerifier(
+        vision_runtime=vision_runtime_service,
+        ui_automation=ui_automation_service,
+        logger=logger,
+    )
     autonomy_reflector = MissionReflector(logger=logger)
-    autonomy_control = MissionControlService(mission_persistence, autonomy_state_manager, logger=logger)
+    autonomy_control = MissionControlService(
+        mission_persistence, autonomy_state_manager, logger=logger
+    )
     autonomy_service_runtime = AutonomyService(
         settings,
         mode_manager,
@@ -896,8 +1262,12 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         log_file=settings.resolved_log_file,
         logger=logger,
     )
-    self_improvement_patch_generator = SelfImprovementPatchGenerator(model_adapter=writing_model_adapter, logger=logger)
-    self_improvement_sandbox = SelfImprovementSandbox(data_dir=settings.resolved_data_dir, logger=logger)
+    self_improvement_patch_generator = SelfImprovementPatchGenerator(
+        model_adapter=writing_model_adapter, logger=logger
+    )
+    self_improvement_sandbox = SelfImprovementSandbox(
+        data_dir=settings.resolved_data_dir, logger=logger
+    )
     self_improvement_validator = SelfImprovementValidator(logger=logger)
     self_improvement_executor = SelfImprovementExecutor(logger=logger)
     self_improvement_runtime_service = SelfImprovementRuntimeService(
@@ -910,13 +1280,25 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         logger=logger,
         operation_registry=operation_registry,
     )
-    word_backend = None if settings.ui_backend_kind == "in_memory" else WordCOMBackend(logger=logger)
-    writing_context_resolver = WritingContextResolver(semantic_memory_service, vision_runtime_service, ui_automation_service, word_backend=word_backend, logger=logger)
+    word_backend = (
+        None
+        if settings.ui_backend_kind == "in_memory"
+        else WordCOMBackend(logger=logger)
+    )
+    writing_context_resolver = WritingContextResolver(
+        semantic_memory_service,
+        vision_runtime_service,
+        ui_automation_service,
+        word_backend=word_backend,
+        logger=logger,
+    )
     writing_style_analyzer = WritingStyleAnalyzer(writing_model_adapter)
     writing_analyzer = WritingAnalyzer()
     writing_generator = WritingGenerator(writing_model_adapter, settings)
     writing_continuation = WritingContinuationEngine(writing_generator)
-    writing_editor = WritingEditor(ui_automation_service, settings, word_backend=word_backend, logger=logger)
+    writing_editor = WritingEditor(
+        ui_automation_service, settings, word_backend=word_backend, logger=logger
+    )
     writing_runtime_service = WritingRuntimeService(
         settings,
         event_bus,
@@ -941,9 +1323,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     module_registry.register(CalculatorModule())
     module_registry.register(
         DataModule(
-            DataAnalyzer(
-                output_dir=settings.resolved_data_dir / "artifacts" / "data"
-            )
+            DataAnalyzer(output_dir=settings.resolved_data_dir / "artifacts" / "data")
         )
     )
     module_registry.register(WebModule())
@@ -951,7 +1331,9 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     module_registry.register(WriterModule())
     module_registry.register(WritingModule(writing_runtime_service))
     module_registry.register(DesktopAgentModule(lambda: desktop_agent_runtime_service))  # type: ignore[name-defined]
-    module_registry.register(InterfaceModule(ui_automation_service, semantic_memory_service))
+    module_registry.register(
+        InterfaceModule(ui_automation_service, semantic_memory_service)
+    )
     module_registry.register(VisionModule(vision_runtime_service))
     module_registry.register(VoiceModule())
     module_registry.register(VoiceInterfaceModule(voice_runtime_service))
@@ -959,6 +1341,8 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     module_registry.register(UnityModule(unity_runtime_service))
     module_registry.register(AutonomyModule(autonomy_service_runtime))
     module_registry.register(OperationsModule(process_runner))
+    module_registry.register(TerminalModule(terminal_runtime))
+    module_registry.register(FilesModule(file_navigator))
     module_registry.register_actions(action_registry)
     module_registry.register_tools(tool_registry)
     module_registry.register_capabilities(capability_registry)
@@ -994,7 +1378,9 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     install_builtin_tools(
         tool_registry,
         state_provider=lambda include_history=True: state_manager.snapshot(
-            action_names=[definition.name for definition in action_registry.list_actions()],
+            action_names=[
+                definition.name for definition in action_registry.list_actions()
+            ],
             tool_names=[definition.name for definition in tool_registry.list_tools()],
             include_history=include_history,
         ),
@@ -1052,12 +1438,22 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         event_bus=event_bus,
         telemetry=telemetry,
         log_directory=settings.resolved_logs_dir,
-        receipt_policy=ReceiptRetentionPolicy(max_count=settings.ops_receipt_retention_limit, max_age_seconds=settings.ops_retention_max_age_seconds),
-        event_policy=EventRetentionPolicy(max_count=settings.ops_event_history_limit, max_age_seconds=settings.ops_retention_max_age_seconds),
-        snapshot_policy=SnapshotRetentionPolicy(max_count=settings.ops_snapshot_history_limit, max_age_seconds=settings.ops_snapshot_retention_max_age_seconds),
+        receipt_policy=ReceiptRetentionPolicy(
+            max_count=settings.ops_receipt_retention_limit,
+            max_age_seconds=settings.ops_retention_max_age_seconds,
+        ),
+        event_policy=EventRetentionPolicy(
+            max_count=settings.ops_event_history_limit,
+            max_age_seconds=settings.ops_retention_max_age_seconds,
+        ),
+        snapshot_policy=SnapshotRetentionPolicy(
+            max_count=settings.ops_snapshot_history_limit,
+            max_age_seconds=settings.ops_snapshot_retention_max_age_seconds,
+        ),
         log_policy=LogRetentionPolicy(
             max_files=settings.log_file_backup_count,
-            max_total_bytes=settings.log_file_max_bytes * settings.log_file_backup_count,
+            max_total_bytes=settings.log_file_max_bytes
+            * settings.log_file_backup_count,
             max_age_seconds=settings.ops_log_retention_max_age_seconds,
         ),
     )
@@ -1065,9 +1461,13 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         operation_registry,
         event_bus=event_bus,
         poll_interval_seconds=settings.ops_watchdog_poll_interval_seconds,
-        hard_timeout_callback=lambda record: lifecycle_supervisor.attempt_auto_recover(record.service_name, reason=f"watchdog timeout: {record.operation_name}")
-        if record.service_name in {"system_runtime", "unity_runtime"}
-        else None,
+        hard_timeout_callback=lambda record: (
+            lifecycle_supervisor.attempt_auto_recover(
+                record.service_name, reason=f"watchdog timeout: {record.operation_name}"
+            )
+            if record.service_name in {"system_runtime", "unity_runtime"}
+            else None
+        ),
     )
     ops_runtime_service = OpsRuntimeService(
         settings=settings,
@@ -1101,11 +1501,30 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     runtime_service._ops_runtime_service = ops_runtime_service  # noqa: SLF001
     self_improvement_analyzer._ops_runtime = ops_runtime_service  # noqa: SLF001
-    lifecycle_supervisor.register("system_runtime", start=system_runtime_service.start, stop=system_runtime_service.stop, health=system_runtime_service.health)
-    lifecycle_supervisor.register("unity_runtime", start=unity_runtime_service.start, stop=unity_runtime_service.stop, health=unity_runtime_service.health)
-    lifecycle_supervisor.register("automation", start=automation_service.start, stop=automation_service.stop)
-    lifecycle_supervisor.register("runtime", start=runtime_service.start, stop=runtime_service.stop, health=runtime_service.health)
-    lifecycle_supervisor.register("ops_runtime", start=ops_runtime_service.start, stop=ops_runtime_service.stop)
+    lifecycle_supervisor.register(
+        "system_runtime",
+        start=system_runtime_service.start,
+        stop=system_runtime_service.stop,
+        health=system_runtime_service.health,
+    )
+    lifecycle_supervisor.register(
+        "unity_runtime",
+        start=unity_runtime_service.start,
+        stop=unity_runtime_service.stop,
+        health=unity_runtime_service.health,
+    )
+    lifecycle_supervisor.register(
+        "automation", start=automation_service.start, stop=automation_service.stop
+    )
+    lifecycle_supervisor.register(
+        "runtime",
+        start=runtime_service.start,
+        stop=runtime_service.stop,
+        health=runtime_service.health,
+    )
+    lifecycle_supervisor.register(
+        "ops_runtime", start=ops_runtime_service.start, stop=ops_runtime_service.stop
+    )
     lifecycle_supervisor.configure_auto_recovery(
         "system_runtime",
         AutoRecoveryPolicy(
@@ -1178,10 +1597,16 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         timeout_seconds=settings.attachment_processing_timeout_seconds,
         max_video_frames=settings.attachment_video_max_frames,
     )
-    processor_registry.register(TextDocumentProcessor(context_char_budget=settings.semantic_context_char_budget))
+    processor_registry.register(
+        TextDocumentProcessor(context_char_budget=settings.semantic_context_char_budget)
+    )
     processor_registry.register(ImageProcessor(ocr=local_media_adapters.ocr))
-    processor_registry.register(AudioProcessor(transcriber=local_media_adapters.transcribe))
-    processor_registry.register(VideoProcessor(analyzer=local_media_adapters.analyze_video))
+    processor_registry.register(
+        AudioProcessor(transcriber=local_media_adapters.transcribe)
+    )
+    processor_registry.register(
+        VideoProcessor(analyzer=local_media_adapters.analyze_video)
+    )
     multimodal_pipeline = MultimodalPipeline(attachment_service, processor_registry)
     return JarvisApplication(
         settings=settings,
@@ -1195,7 +1620,10 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         action_router=router,
         action_executor=action_executor,
         agent_controller=agent_controller,
+        neural_router_shadow=neural_router_shadow,
         tool_registry=tool_registry,
+        terminal_runtime=terminal_runtime,
+        file_navigator=file_navigator,
         provider_registry=provider_registry,
         model_catalog=model_catalog,
         model_router=model_router,
@@ -1205,6 +1633,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         multimodal_pipeline=multimodal_pipeline,
         local_hardware_diagnostics=local_hardware_diagnostics,
         local_runtime_service=local_runtime_service,
+        local_model_runtime_manager=local_model_runtime_manager,
         embedding_provider_registry=embedding_provider_registry,
         embedding_router=embedding_router,
         embedding_service=embedding_service,

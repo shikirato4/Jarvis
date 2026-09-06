@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from PySide6.QtGui import QTextCursor
 
 from jarvis.desktop_runtime.window import create_qt_application, pyside_available
 
@@ -71,6 +72,37 @@ def test_composer_can_be_reused_immediately_after_clear() -> None:
     app.processEvents()
 
     assert composer.text() == "hola jarvis"
+    composer.close()
+
+
+def test_composer_preserves_extreme_paste_selection_across_resize_cycles() -> None:
+    from jarvis.desktop_runtime.widgets import ChatComposerInput
+
+    app = create_qt_application()
+    composer = ChatComposerInput(minimum_height=54, maximum_height=220)
+    composer.resize(920, 54)
+    composer.show()
+    lines = [f"línea {index:03d}: Unicode 🚀" for index in range(520)]
+    base = "\n".join(lines)
+    payload = base + ("x" * (35143 - len(base)))
+    composer.setPlainText(payload)
+    cursor = composer.textCursor()
+    start, end = 12017, 12991
+    cursor.setPosition(start)
+    cursor.setPosition(end, QTextCursor.KeepAnchor)
+    composer.setTextCursor(cursor)
+
+    for width in (560, 1280, 760, 920):
+        composer.resize(width, composer.height())
+        composer.update_document_height()
+        app.processEvents()
+
+    selected = composer.textCursor()
+    assert len(composer.toPlainText()) == 35143
+    assert composer.document().blockCount() == 520
+    assert (selected.selectionStart(), selected.selectionEnd()) == (start, end)
+    assert composer.height() == 220
+    assert composer.verticalScrollBar().maximum() > 0
     composer.close()
 
 

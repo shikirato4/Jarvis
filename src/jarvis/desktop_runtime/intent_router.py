@@ -273,10 +273,34 @@ class DesktopIntentRouter:
             ).model_dump(mode="json")
             return result, self._summarize_writing_analysis(result), "writing_runtime.analyze"
         if decision.category == "writing_continue":
+            target_window = decision.target_window or self._active_window_title()
+            if not decision.approved:
+                advice = runtime.ui_window_access_advice(target_window, operation_name="write_text")
+                if advice.requires_confirmation:
+                    runtime.writing_context_preflight(
+                        {
+                            "prompt": decision.prompt,
+                            "target_window": target_window,
+                            "write_directly": True,
+                            "metadata": {"source": "desktop_chat", "action": "continue_preflight"},
+                        }
+                    )
+                    result = {
+                        "success": False,
+                        "confirmation_required": True,
+                        "message": advice.reason,
+                        "window_title": target_window,
+                        "security_decision": advice.decision,
+                        "data": {
+                            "matched_application": advice.matched_application,
+                            "policy_tags": advice.policy_tags or [],
+                        },
+                    }
+                    return result, str(advice.reason or "Se requiere confirmación."), "writing_runtime.preflight"
             result = runtime.writing_continue(
                 {
                     "prompt": decision.prompt,
-                    "target_window": decision.target_window or self._active_window_title(),
+                    "target_window": target_window,
                     "write_directly": True,
                     "metadata": {"source": "desktop_chat", "action": "continue", "approved": decision.approved},
                 }

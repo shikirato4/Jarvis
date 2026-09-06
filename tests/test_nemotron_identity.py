@@ -23,6 +23,7 @@ from jarvis.persistent_config import (
 
 CANONICAL = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
 GGUF = "lmstudio-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-Q4_K_M.gguf"
+QWEN_GGUF = "Qwen/Qwen3-8B-GGUF"
 
 
 @pytest.mark.parametrize(
@@ -107,7 +108,7 @@ def test_persistent_config_preserves_valid_local_url_model_and_aliases() -> None
     config = PersistentConfig(
         preferred_mode="local",
         local_base_url="http://127.0.0.1:1234/v1",
-        local_model=GGUF,
+        local_model=QWEN_GGUF,
         local_model_aliases=("lm-studio-loaded-model",),
     )
 
@@ -116,7 +117,7 @@ def test_persistent_config_preserves_valid_local_url_model_and_aliases() -> None
 
     assert restored.preferred_mode == "local"
     assert restored.local_base_url == "http://127.0.0.1:1234/v1"
-    assert restored.local_model == GGUF
+    assert restored.local_model == QWEN_GGUF
     assert restored.local_model_aliases == ("lm-studio-loaded-model",)
 
 
@@ -148,7 +149,7 @@ def test_legacy_environment_cannot_select_gpt_oss(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.llm_mode == "auto"
-    assert "nemotron" in settings.local_llm_model.casefold()
+    assert "qwen" in settings.local_llm_model.casefold()
     assert "gpt" + "-oss" not in settings.local_llm_model.casefold()
 
 

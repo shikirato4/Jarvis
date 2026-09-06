@@ -26,7 +26,7 @@ from .base import (
     WindowInfo,
     WriteTextRequest,
 )
-from .safeguards import assess_window_access, classify_risk, validate_hotkey, validate_mode, validate_text
+from .safeguards import UIWindowAccessAdvice, assess_window_access, classify_risk, validate_hotkey, validate_mode, validate_text
 
 
 class UIAutomationService:
@@ -764,6 +764,15 @@ class UIAutomationService:
         if any(candidate in lowered for candidate in configured + blocked):
             return []
         return self._discovered_application_names()
+
+    def window_access_advice(self, title: str | None, *, operation_name: str) -> UIWindowAccessAdvice:
+        """Evaluate window policy without performing or preparing the action."""
+        return assess_window_access(
+            self._settings,
+            title,
+            operation_name=operation_name,
+            discovered_applications=self._security_discovered_applications(title),
+        )
 
 
 def _split_text(text: str, block_size: int) -> list[str]:

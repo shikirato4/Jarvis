@@ -17,6 +17,7 @@ from .models import (
 )
 from .numpy_backend import NumpyMLPBackend
 from .router import NeuralRouter, ShadowRouter
+from .runtime import LazyTrainingShadowRouter
 from .training import NeuralRouterTrainingPipeline, should_promote
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "NeuralRouter",
     "NeuralRouterBackend",
     "NeuralRouterTrainingPipeline",
+    "LazyTrainingShadowRouter",
     "NumpyMLPBackend",
     "RouterExample",
     "RouterCheckpointStore",

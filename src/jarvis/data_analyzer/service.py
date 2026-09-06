@@ -4,9 +4,10 @@ import csv
 import io
 import json
 import math
+import re
 import statistics
 import zipfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from collections.abc import Callable
 from typing import Any
@@ -117,7 +118,8 @@ class DataAnalyzer:
             "ge": lambda left: left is not None and left >= value,
             "lt": lambda left: left is not None and left < value,
             "le": lambda left: left is not None and left <= value,
-            "contains": lambda left: value.casefold() in str(left).casefold(),
+            "contains": lambda left: left is not None
+            and str(value).casefold() in str(left).casefold(),
             "is_null": lambda left: left is None,
             "not_null": lambda left: left is not None,
         }
@@ -266,7 +268,9 @@ class DataAnalyzer:
             except csv.Error:
                 delimiter = ","
         try:
-            raw_rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
+            raw_rows = list(
+                csv.reader(io.StringIO(text), delimiter=delimiter, strict=True)
+            )
         except csv.Error as exc:
             raise DataAnalysisError("delimited data is corrupt") from exc
         if not raw_rows or not any(cell.strip() for cell in raw_rows[0]):
@@ -336,8 +340,11 @@ class DataAnalyzer:
                 root = ElementTree.fromstring(sheet_xml)
             except ElementTree.ParseError as exc:
                 raise DataAnalysisError("XLSX worksheet XML is corrupt") from exc
+            date_styles = cls._xlsx_date_style_indexes(archive, names)
+            date_epoch = cls._xlsx_date_epoch(archive, names)
             matrix: list[list[Any]] = []
             formula_count = 0
+            date_cell_count = 0
             for row in root.findall(f".//{_XLSX_NS}row"):
                 cells: list[Any] = []
                 for cell in row.findall(f"{_XLSX_NS}c"):
@@ -356,6 +363,16 @@ class DataAnalyzer:
                             raise DataAnalysisError("XLSX shared string index is invalid") from exc
                     else:
                         value = cls._coerce(raw)
+                    try:
+                        style_index = int(cell.get("s") or 0)
+                    except ValueError as exc:
+                        raise DataAnalysisError("XLSX cell style index is invalid") from exc
+                    if (
+                        style_index in date_styles
+                        and cls._is_number(value)
+                    ):
+                        value = date_epoch + timedelta(days=float(value))
+                        date_cell_count += 1
                     cells.append(value)
                 matrix.append(cells)
         if not matrix:
@@ -366,7 +383,76 @@ class DataAnalyzer:
             for raw in matrix[1:]
             if any(value is not None for value in raw)
         ]
-        return columns, rows, {"format": "xlsx", "formula_count": formula_count, "macros_executed": False}
+        return columns, rows, {
+            "format": "xlsx",
+            "formula_count": formula_count,
+            "date_cell_count": date_cell_count,
+            "macros_executed": False,
+        }
+
+    @classmethod
+    def _xlsx_date_style_indexes(
+        cls,
+        archive: zipfile.ZipFile,
+        names: set[str],
+    ) -> set[int]:
+        if "xl/styles.xml" not in names:
+            return set()
+        try:
+            root = ElementTree.fromstring(archive.read("xl/styles.xml"))
+        except ElementTree.ParseError as exc:
+            raise DataAnalysisError("XLSX styles are corrupt") from exc
+        custom_formats = {
+            int(node.get("numFmtId") or -1): str(node.get("formatCode") or "")
+            for node in root.findall(f".//{_XLSX_NS}numFmt")
+        }
+        built_in_date_formats = {
+            *range(14, 23),
+            *range(27, 37),
+            *range(45, 48),
+            *range(50, 59),
+        }
+        cell_formats = root.find(f"{_XLSX_NS}cellXfs")
+        if cell_formats is None:
+            return set()
+        date_styles: set[int] = set()
+        for index, style in enumerate(cell_formats.findall(f"{_XLSX_NS}xf")):
+            try:
+                format_id = int(style.get("numFmtId") or 0)
+            except ValueError as exc:
+                raise DataAnalysisError("XLSX number format is invalid") from exc
+            format_code = custom_formats.get(format_id, "")
+            if format_id in built_in_date_formats or cls._is_date_format_code(
+                format_code
+            ):
+                date_styles.add(index)
+        return date_styles
+
+    @staticmethod
+    def _is_date_format_code(format_code: str) -> bool:
+        if not format_code:
+            return False
+        normalized = re.sub(r'"[^"]*"|\[[^\]]*\]|\\.', "", format_code)
+        return bool(re.search(r"[ymdhis]", normalized, flags=re.IGNORECASE))
+
+    @staticmethod
+    def _xlsx_date_epoch(
+        archive: zipfile.ZipFile,
+        names: set[str],
+    ) -> datetime:
+        if "xl/workbook.xml" not in names:
+            return datetime(1899, 12, 30)
+        try:
+            root = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+        except ElementTree.ParseError as exc:
+            raise DataAnalysisError("XLSX workbook metadata is corrupt") from exc
+        properties = root.find(f"{_XLSX_NS}workbookPr")
+        uses_1904_epoch = (
+            properties is not None
+            and str(properties.get("date1904") or "").casefold()
+            in {"1", "true"}
+        )
+        return datetime(1904, 1, 1) if uses_1904_epoch else datetime(1899, 12, 30)
 
     @staticmethod
     def _decode(data: bytes) -> tuple[str, str]:

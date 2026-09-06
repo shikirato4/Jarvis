@@ -7,7 +7,7 @@ import pytest
 from jarvis.config import Settings
 from jarvis.models_runtime.base import ModelRequest
 from jarvis.models_runtime.nvidia_nim import NvidiaNimProvider
-from jarvis.security_runtime.secrets import EnvironmentSecretStore, NvidiaSecretManager
+from jarvis.security_runtime.secrets import NvidiaSecretManager
 
 
 RUN_LIVE = os.getenv("RUN_NVIDIA_LIVE_TESTS", "").strip().casefold() == "true"
@@ -19,10 +19,12 @@ RUN_LIVE = os.getenv("RUN_NVIDIA_LIVE_TESTS", "").strip().casefold() == "true"
 )
 def test_nvidia_live_health_and_minimal_inference() -> None:
     settings = Settings()
-    secret_manager = NvidiaSecretManager(
-        secure_store=None,
-        environment_store=EnvironmentSecretStore(),
+    fallback_secret = (
+        settings.nvidia_api_key.get_secret_value()
+        if settings.nvidia_api_key is not None
+        else None
     )
+    secret_manager = NvidiaSecretManager.from_system(fallback_value=fallback_secret)
     if secret_manager.resolve() is None:
         pytest.fail("RUN_NVIDIA_LIVE_TESTS=true requiere NVIDIA_API_KEY en el entorno.")
 

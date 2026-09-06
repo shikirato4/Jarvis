@@ -1,0 +1,41 @@
+{
+  "architecture": "Qwen3_5ForConditionalGeneration (text_config qwen3_5_text)",
+  "config": {
+    "attention_heads": 16,
+    "dtype": "bfloat16",
+    "full_attention_interval": 4,
+    "hidden_size": 4096,
+    "intermediate_size": 12288,
+    "key_value_heads": 4,
+    "layers": 32,
+    "max_position_embeddings": 262144,
+    "model_type": "qwen3_5",
+    "text_model_type": "qwen3_5_text",
+    "vocab_size": 248320
+  },
+  "full_bf16_checkpoint_downloaded_locally": false,
+  "metadata_files": {
+    "chat_template.jinja": "a4aee8afcf2e0711942cf848899be66016f8d14a889ff9ede07bca099c28f715",
+    "config.json": "d0883072e01861ed0b2d47be3c16c36a8e81c224c7ffaa310c6558fb3f932b05",
+    "identity_manifest.json": "c863c4697ef041068f2a845561addccd9f2cc57caff3f8873d0522cf6f4b7f68",
+    "production_chat_template.jinja": "75bb500d4fd61e5ba4cadb905a6e371f5be8dcaf79796827583c7d854c75f57d",
+    "tokenizer.json": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+    "tokenizer_config.json": "316230d6a809701f4db5ea8f8fc862bc3a6f3229c937c174e674ff3ca0a64ac8"
+  },
+  "model_id": "Qwen/Qwen3.5-9B",
+  "parameter_count": 8950000000,
+  "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+  "source": "huggingface",
+  "tokenizer": {
+    "chat_template_file": "chat_template.jinja",
+    "class": "Qwen2Tokenizer",
+    "eos_token_id": 248044,
+    "im_end_id": 248046,
+    "im_start_id": 248045,
+    "production_chat_template_file": "production_chat_template.jinja",
+    "tool_call_id": 248058,
+    "tool_response_id": 248066,
+    "vocab_size": 248320
+  },
+  "training_target": "Qwen3_5ForCausalLM text backbone, pending B3/B4 architecture smoke test"
+}

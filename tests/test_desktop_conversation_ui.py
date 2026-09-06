@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis.desktop_runtime.base import DesktopChatMessage
+from jarvis.desktop_runtime.base import DesktopChatMessage, DesktopChatResponse
 from jarvis.desktop_runtime.window import create_qt_application, pyside_available
 
 
@@ -141,14 +141,16 @@ def test_conversation_surface_is_wide_and_stable(tmp_path) -> None:
 def test_window_submit_chat_returns_before_background_work_finishes(tmp_path) -> None:
     app = create_qt_application()
     backend, window = _build_window(tmp_path)
-    original = window._desktop.send_chat  # noqa: SLF001
     release_background_work = Event()
     try:
-        def _slow_send_chat(text: str, **kwargs):
+        def _slow_send_chat_streaming(text: str, **kwargs):
             release_background_work.wait(timeout=10)
-            return original(text, **kwargs)
+            return DesktopChatResponse(
+                message=DesktopChatMessage(message_id="background-complete", role="assistant", content="Trabajo completado."),
+                raw_result={"ok": True},
+            )
 
-        window._desktop.send_chat = _slow_send_chat  # type: ignore[method-assign]  # noqa: SLF001
+        window._desktop.send_chat_streaming = _slow_send_chat_streaming  # type: ignore[method-assign]  # noqa: SLF001
         window.show()
         window._input.setText("calcula la derivada de x**2")  # noqa: SLF001
 
@@ -172,6 +174,36 @@ def test_window_submit_chat_returns_before_background_work_finishes(tmp_path) ->
         assert window._send_button.isEnabled() is True  # noqa: SLF001
     finally:
         release_background_work.set()
+        window.close()
+        backend.stop()
+        window._desktop.shutdown()  # noqa: SLF001
+
+
+def test_window_keeps_agentic_calculation_on_streaming_path(tmp_path) -> None:
+    app = create_qt_application()
+    backend, window = _build_window(tmp_path)
+    calls = []
+    try:
+        original = window._desktop.send_chat_async  # noqa: SLF001
+
+        def _capture(text: str, **kwargs):
+            calls.append(kwargs.get("metadata"))
+            return original(text, **kwargs)
+
+        window._desktop.send_chat_async = _capture  # type: ignore[method-assign]  # noqa: SLF001
+        window.show()
+        window._input.setText("calcula 781 por 94")  # noqa: SLF001
+
+        window._submit_chat()  # noqa: SLF001
+        app.processEvents()
+
+        assert calls and calls[0]["stream"] is True
+    finally:
+        deadline = time.perf_counter() + 5.0
+        while time.perf_counter() < deadline and window._pending_future is not None:  # noqa: SLF001
+            window.refresh_view()  # noqa: SLF001
+            app.processEvents()
+            time.sleep(0.05)
         window.close()
         backend.stop()
         window._desktop.shutdown()  # noqa: SLF001

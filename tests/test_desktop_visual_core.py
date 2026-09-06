@@ -35,12 +35,12 @@ def test_reactor_widget_and_window_boot(tmp_path) -> None:
         assert window.minimumHeight() <= 720  # noqa: SLF001
         assert window.minimumWidth() <= 1280  # noqa: SLF001
         assert window._conversation.minimumHeight() <= 320  # noqa: SLF001
-        assert window._focus_mode is True  # noqa: SLF001
-        assert window._left_panel.isHidden()  # noqa: SLF001
-        assert window._right_panel.isHidden()  # noqa: SLF001
-        window._set_focus_mode(False)  # noqa: SLF001
+        assert window._focus_mode is False  # noqa: SLF001
+        window.show()
+        app.processEvents()
         assert not window._left_panel.isHidden()  # noqa: SLF001
         assert not window._right_panel.isHidden()  # noqa: SLF001
+        assert window._reactor.isHidden()  # noqa: SLF001
         window.refresh_view()
         app.processEvents()
     finally:
@@ -161,11 +161,22 @@ def test_stitch_inspired_shell_maps_real_jarvis_surfaces(tmp_path) -> None:
         window.show()
         app.processEvents()
 
-        assert set(window._nav_buttons) == {"chat", "agent", "web", "context", "memory", "code", "learning", "settings"}  # noqa: SLF001
-        assert window._mode_badge.text().startswith("MODE")  # noqa: SLF001
-        assert "Nemotron" in window._model_badge.text()  # noqa: SLF001
-        assert "BLOCKED" in window._openai_badge.text()  # noqa: SLF001
-        assert "BLOCKED" in window._gemini_badge.text()  # noqa: SLF001
+        assert set(window._nav_buttons) == {  # noqa: SLF001
+            "chat",
+            "agent",
+            "activity",
+            "files",
+            "data",
+            "memory",
+            "tools",
+            "settings",
+        }
+        assert window._mode_badge.isHidden()  # noqa: SLF001
+        assert window._model_badge.isHidden()  # noqa: SLF001
+        assert window._openai_badge.isHidden()  # noqa: SLF001
+        assert window._gemini_badge.isHidden()  # noqa: SLF001
+        context = window._context_output.toPlainText()  # noqa: SLF001
+        assert "Qwen local + Nemotron online" in context or "Qwen 3.8" in context
         assert window._right_tabs.count() >= 7  # noqa: SLF001
     finally:
         window.close()

@@ -39,6 +39,7 @@ class ConversationContextRequest(JarvisBaseModel):
     history: list[ModelMessage] = Field(default_factory=list)
     tool_observations: list[ModelMessage] = Field(default_factory=list)
     attachment_context: list[ContextFragment] = Field(default_factory=list)
+    embedded_attachment_count: int = Field(default=0, ge=0)
     memory_candidates: list[ContextFragment] = Field(default_factory=list)
     current_message: ModelMessage
     max_context_tokens: int = Field(gt=0)

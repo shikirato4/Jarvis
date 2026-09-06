@@ -74,7 +74,11 @@ def enrich_model_request(
             + "\n\n".join(derived_sections)
         )
     prompt = f"{request.prompt or ''}{context}" or None
-    messages = _append_context_to_last_user_message(request.messages, context)
+    messages = _append_context_to_last_user_message(
+        request.messages,
+        context,
+        attachment_ids=attachment_ids,
+    )
     metadata = dict(request.metadata)
     metadata.update(
         {
@@ -96,17 +100,30 @@ def enrich_model_request(
 def _append_context_to_last_user_message(
     messages: list[ModelMessage],
     context: str,
+    *,
+    attachment_ids: list[str],
 ) -> list[ModelMessage]:
     copied = [message.model_copy(deep=True) for message in messages]
-    if not context:
+    if not context and not attachment_ids:
         return copied
     for index in range(len(copied) - 1, -1, -1):
         if copied[index].role == "user":
+            metadata = dict(copied[index].metadata)
+            metadata["attachment_ids"] = list(attachment_ids)
             copied[index] = copied[index].model_copy(
-                update={"content": f"{copied[index].content}{context}"}
+                update={
+                    "content": f"{copied[index].content}{context}",
+                    "metadata": metadata,
+                }
             )
             return copied
-    copied.append(ModelMessage(role="user", content=context.lstrip()))
+    copied.append(
+        ModelMessage(
+            role="user",
+            content=context.lstrip(),
+            metadata={"attachment_ids": list(attachment_ids)},
+        )
+    )
     return copied
 
 

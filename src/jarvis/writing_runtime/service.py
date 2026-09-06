@@ -101,6 +101,23 @@ class WritingRuntimeService(RuntimeServiceContract):
         except Exception as exc:
             raise self._phase_error("context", exc) from exc
 
+    def preflight_context(self, request: WritingContinuationRequest | dict):
+        """Validate locally available writing context without invoking a model."""
+        self._ensure_started()
+        payload = WritingContinuationRequest.model_validate(request)
+        try:
+            context = self._context_resolver.detect(
+                query=payload.prompt,
+                collection_name=payload.collection_name,
+                correlation_id=f"writing-preflight-{uuid4().hex[:8]}",
+                target_window=payload.target_window,
+            )
+            validate_target_window(context, expected=payload.target_window)
+            ensure_context_sufficiency(context)
+            return context
+        except Exception as exc:
+            raise self._phase_error("context", exc) from exc
+
     def continue_writing(self, request: WritingContinuationRequest | dict) -> WritingOperationReceipt:
         self._ensure_started()
         payload = WritingContinuationRequest.model_validate(request)

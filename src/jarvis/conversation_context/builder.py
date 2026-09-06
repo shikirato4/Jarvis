@@ -63,7 +63,9 @@ class ConversationContextBuilder:
             tool_observation_count=sum(
                 message.role == "tool" for message in tool_messages
             ),
-            attachment_context_count=len(attachments),
+            attachment_context_count=max(
+                len(attachments), request.embedded_attachment_count
+            ),
             memory_candidate_count=len(request.memory_candidates),
             memory_selected_count=selected_memories,
             estimated_context_tokens=estimated_tokens,
@@ -90,6 +92,8 @@ class ConversationContextBuilder:
         safety_margin_tokens: int = 512,
     ) -> ModelRequest:
         """Finalize a request after attachment enrichment and before provider I/O."""
+
+        history_messages = list(history)
 
         system_index = next(
             (
@@ -122,12 +126,24 @@ class ConversationContextBuilder:
             for index, message in enumerate(request.messages)
             if index not in {system_index, current_index}
         ]
+        embedded_attachment_ids = {
+            str(attachment_id)
+            for message in [*history_messages, *request.messages]
+            for attachment_id in message.metadata.get("attachment_ids", [])
+            if str(attachment_id)
+        }
+        embedded_attachment_ids.update(
+            str(attachment_id)
+            for attachment_id in request.metadata.get("attachment_ids", [])
+            if str(attachment_id)
+        )
         built = self.build(
             ConversationContextRequest(
                 system_message=system_message,
-                history=[*history, *embedded_history],
+                history=[*history_messages, *embedded_history],
                 tool_observations=list(tool_observations),
                 attachment_context=list(attachment_context),
+                embedded_attachment_count=len(embedded_attachment_ids),
                 memory_candidates=list(memory_candidates),
                 current_message=current_message,
                 max_context_tokens=max_context_tokens,

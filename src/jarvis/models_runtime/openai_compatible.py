@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import time
 from collections.abc import Callable, Iterator
@@ -143,12 +144,14 @@ class OpenAICompatibleProvider:
             )
             self._raise_for_status(response)
             body = response.json()
-            message = ((body.get("choices") or [{}])[0] or {}).get("message") or {}
+            choice = (body.get("choices") or [{}])[0] or {}
+            message = choice.get("message") or {}
             content = message.get("content") or ""
             if not isinstance(content, str):
                 content = json.dumps(content, ensure_ascii=False)
             tool_calls = _normalize_tool_calls(message.get("tool_calls"))
             usage_payload = body.get("usage") or {}
+            finish_reason = choice.get("finish_reason")
         except OpenAICompatibleError:
             raise
         except (httpx.TimeoutException, httpx.RequestError) as exc:
@@ -162,14 +165,27 @@ class OpenAICompatibleProvider:
             model_name=str(body.get("model") or self._configured_model),
             content=content,
             tool_calls=tool_calls,
-            raw=body,
+            raw=_without_private_reasoning(body),
             latency_ms=(time.perf_counter() - started_at) * 1000,
             usage=ModelUsage(
                 input_tokens=usage_payload.get("prompt_tokens"),
                 output_tokens=usage_payload.get("completion_tokens"),
                 total_tokens=usage_payload.get("total_tokens"),
             ),
-            metadata={"task_type": request.task_type},
+            metadata={
+                "task_type": request.task_type,
+                "finish_reason": (
+                    str(finish_reason) if finish_reason is not None else None
+                ),
+                "stream_closed_normally": True,
+                "incomplete": finish_reason is None
+                or str(finish_reason) not in {"stop", "tool_calls"},
+                "completion_contract_enforced": True,
+                "provider_text_length": len(content),
+                "prompt_tokens": usage_payload.get("prompt_tokens"),
+                "completion_tokens": usage_payload.get("completion_tokens"),
+                "requested_max_tokens": payload.get("max_tokens"),
+            },
         )
 
     def stream_infer(
@@ -184,6 +200,12 @@ class OpenAICompatibleProvider:
         self._validate_requested_model(model_name)
         payload = self._request_payload(request, temperature=temperature, stream=True)
         chunks = 0
+        reasoning_chunks = 0
+        finish_reason: str | None = None
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        streamed_tool_calls: dict[int, dict[str, str]] = {}
+        tool_calls_emitted = False
         try:
             with self._http_client().stream(
                 "POST",
@@ -207,10 +229,70 @@ class OpenAICompatibleProvider:
                     if not data:
                         continue
                     if data == "[DONE]":
-                        yield StreamChunk(done=True, metadata={"chunks": chunks})
+                        tool_calls = _normalize_streamed_tool_calls(streamed_tool_calls)
+                        # A valid provider may send a finish_reason-only final
+                        # choice (for example an empty but successful tool
+                        # turn).  Do not misclassify that as a protocol error;
+                        # only a stream with neither visible output nor a
+                        # terminal reason is malformed.
+                        if chunks == 0 and not tool_calls and finish_reason is None:
+                            raise self._protocol_error(
+                                ValueError("model stream contained no visible output")
+                            )
+                        yield StreamChunk(
+                            done=True,
+                            tool_calls=([] if tool_calls_emitted else tool_calls),
+                            metadata={
+                                "chunks": chunks,
+                                "reasoning_chunks": reasoning_chunks,
+                                "finish_reason": finish_reason,
+                                "stream_closed_normally": True,
+                                "incomplete": finish_reason
+                                not in {"stop", "tool_calls"},
+                                "completion_contract_enforced": True,
+                                "prompt_tokens": prompt_tokens,
+                                "completion_tokens": completion_tokens,
+                                "requested_max_tokens": payload.get("max_tokens"),
+                            },
+                        )
                         return
                     event = json.loads(data)
-                    delta = ((event.get("choices") or [{}])[0] or {}).get("delta") or {}
+                    usage = event.get("usage") or {}
+                    if isinstance(usage, dict):
+                        prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
+                        completion_tokens = usage.get(
+                            "completion_tokens", completion_tokens
+                        )
+                    choice = (event.get("choices") or [{}])[0] or {}
+                    delta = choice.get("delta") or {}
+                    if isinstance(delta.get("reasoning_content"), str) and delta.get(
+                        "reasoning_content"
+                    ):
+                        reasoning_chunks += 1
+                        # Expose only a sanitized phase signal; raw reasoning
+                        # tokens never leave the provider boundary.
+                        yield StreamChunk(
+                            metadata={
+                                "provider": self.provider_name,
+                                "model": self._configured_model,
+                                "reasoning_active": True,
+                            }
+                        )
+                    if choice.get("finish_reason") is not None:
+                        finish_reason = str(choice.get("finish_reason"))
+                    for call_delta in delta.get("tool_calls") or []:
+                        index = int(call_delta.get("index", 0))
+                        accumulated = streamed_tool_calls.setdefault(
+                            index,
+                            {"id": "", "name": "", "arguments": ""},
+                        )
+                        if call_delta.get("id"):
+                            accumulated["id"] = str(call_delta["id"])
+                        function = call_delta.get("function") or {}
+                        if function.get("name"):
+                            accumulated["name"] += str(function["name"])
+                        if function.get("arguments"):
+                            accumulated["arguments"] += str(function["arguments"])
                     text = delta.get("content") or ""
                     if text:
                         chunks += 1
@@ -221,6 +303,17 @@ class OpenAICompatibleProvider:
                                 "model": self._configured_model,
                             },
                         )
+                    if choice.get("finish_reason") == "tool_calls":
+                        tool_calls = _normalize_streamed_tool_calls(streamed_tool_calls)
+                        if tool_calls:
+                            tool_calls_emitted = True
+                            yield StreamChunk(
+                                tool_calls=tool_calls,
+                                metadata={
+                                    "provider": self.provider_name,
+                                    "model": self._configured_model,
+                                },
+                            )
         except OpenAICompatibleError:
             raise
         except (httpx.TimeoutException, httpx.RequestError) as exc:
@@ -233,8 +326,26 @@ class OpenAICompatibleProvider:
             json.JSONDecodeError,
         ) as exc:
             raise self._protocol_error(exc) from exc
+        trailing_tool_calls = _normalize_streamed_tool_calls(streamed_tool_calls)
+        if chunks == 0 and not trailing_tool_calls and finish_reason is None:
+            raise self._protocol_error(
+                ValueError("model stream closed without visible output")
+            )
         yield StreamChunk(
-            done=True, metadata={"chunks": chunks, "reason": "stream_closed"}
+            done=True,
+            tool_calls=([] if tool_calls_emitted else trailing_tool_calls),
+            metadata={
+                "chunks": chunks,
+                "reason": "stream_closed",
+                "reasoning_chunks": reasoning_chunks,
+                "finish_reason": finish_reason,
+                "stream_closed_normally": False,
+                "incomplete": True,
+                "completion_contract_enforced": True,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "requested_max_tokens": payload.get("max_tokens"),
+            },
         )
 
     def _http_client(self) -> httpx.Client:
@@ -276,11 +387,17 @@ class OpenAICompatibleProvider:
         if request.max_tokens is not None:
             payload["max_tokens"] = request.max_tokens
         if request.tools:
-            payload["tools"] = request.tools
+            # Provider adapters rewrite function names for their wire format.
+            # Keep the canonical request immutable across diagnostics/retries.
+            payload["tools"] = copy.deepcopy(request.tools)
         if request.tool_choice is not None:
-            payload["tool_choice"] = request.tool_choice
+            payload["tool_choice"] = copy.deepcopy(request.tool_choice)
         if request.response_format is not None:
-            payload["response_format"] = request.response_format
+            payload["response_format"] = copy.deepcopy(request.response_format)
+        if isinstance(request.metadata.get("chat_template_kwargs"), dict):
+            payload["chat_template_kwargs"] = dict(
+                request.metadata["chat_template_kwargs"]
+            )
         return payload
 
     def _attach_ephemeral_media(
@@ -375,6 +492,28 @@ class OpenAICompatibleProvider:
         raise NotImplementedError
 
 
+_PRIVATE_REASONING_KEYS = {
+    "reasoning_content",
+    "raw_reasoning_content",
+    "chain_of_thought",
+    "hidden_reasoning_tokens",
+}
+
+
+def _without_private_reasoning(value: Any) -> Any:
+    """Remove private reasoning recursively before a provider payload escapes."""
+
+    if isinstance(value, dict):
+        return {
+            key: _without_private_reasoning(item)
+            for key, item in value.items()
+            if str(key).casefold() not in _PRIVATE_REASONING_KEYS
+        }
+    if isinstance(value, list):
+        return [_without_private_reasoning(item) for item in value]
+    return value
+
+
 def _normalize_tool_calls(payload: Any) -> list[ModelToolCall]:
     if not isinstance(payload, list):
         return []
@@ -404,6 +543,23 @@ def _normalize_tool_calls(payload: Any) -> list[ModelToolCall]:
             arguments = str(raw_arguments)
         normalized.append(ModelToolCall(id=call_id, name=name, arguments=arguments))
     return normalized
+
+
+def _normalize_streamed_tool_calls(
+    accumulated: dict[int, dict[str, str]],
+) -> list[ModelToolCall]:
+    payload = [
+        {
+            "id": item.get("id") or f"stream-tool-{index}",
+            "function": {
+                "name": item.get("name", ""),
+                "arguments": item.get("arguments", "{}"),
+            },
+        }
+        for index, item in sorted(accumulated.items())
+        if item.get("name")
+    ]
+    return _normalize_tool_calls(payload)
 
 
 def _provider_message(message: ModelMessage) -> dict[str, Any]:

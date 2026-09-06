@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/schemas/agentic-lora-v1-record.json",
+  "title": "JARVIS Agentic LoRA v1 canonical record",
+  "type": "object",
+  "required": ["schema_version", "record_id", "split", "locale", "category_tags", "tools", "messages", "expected_behavior"],
+  "properties": {
+    "schema_version": {"const": "jarvis.agentic_lora.v1"},
+    "record_id": {"type": "string", "pattern": "^(train|validation|heldout|hard_regression)_[a-z0-9_]+$"},
+    "split": {"enum": ["train", "validation", "heldout", "hard_regression"]},
+    "locale": {"enum": ["es-MX", "en-US", "mixed"]},
+    "category_tags": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "tools": {"type": "array", "items": {"$ref": "#/$defs/tool"}},
+    "messages": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/message"}},
+    "expected_behavior": {"type": "object"}
+  },
+  "$defs": {
+    "tool": {
+      "type": "object",
+      "required": ["type", "function"],
+      "properties": {
+        "type": {"const": "function"},
+        "function": {
+          "type": "object",
+          "required": ["name", "description", "parameters"],
+          "properties": {
+            "name": {"type": "string", "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"},
+            "description": {"type": "string", "minLength": 1},
+            "parameters": {"type": "object"}
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "message": {
+      "type": "object",
+      "required": ["role"],
+      "properties": {
+        "role": {"enum": ["system", "user", "assistant", "tool"]},
+        "content": {},
+        "name": {"type": "string"},
+        "tool_call_id": {"type": "string"},
+        "tool_calls": {"type": "array"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .base import WritingModelAdapter
 from .models import WritingAnalysisResult, WritingGeneratedBlock
+from .parsing import normalize_confidence
 
 
 class WritingGenerator:
@@ -33,10 +34,15 @@ class WritingGenerator:
         )
         if response and str(response.get("continuation_text", "")).strip():
             text = str(response["continuation_text"]).strip()
-            confidence = float(response.get("confidence") or 0.7)
-            notes = [str(item) for item in response.get("style_notes", [])]
+            confidence = self._normalize_confidence(response.get("confidence"))
+            raw_notes = response.get("style_notes", [])
+            notes = [str(item) for item in raw_notes] if isinstance(raw_notes, (list, tuple, set)) else [str(raw_notes)]
             return WritingGeneratedBlock(index=1, text=text, word_count=len(text.split()), confidence=confidence, style_notes=notes)
         return self._fallback(analysis, prompt=prompt, desired_words=desired_words)
+
+    @staticmethod
+    def _normalize_confidence(value: object) -> float:
+        return normalize_confidence(value)
 
     @staticmethod
     def _fallback(analysis: WritingAnalysisResult, *, prompt: str, desired_words: int) -> WritingGeneratedBlock:

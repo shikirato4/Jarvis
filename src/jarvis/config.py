@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from typing import Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from jarvis.core.modes import ExecutionMode
+from jarvis.reasoning import ReasoningPreference
 from jarvis.runtime_paths import resolve_user_data_path, user_logs_dir
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -103,18 +105,34 @@ class Settings(BaseSettings):
     )
     nvidia_timeout_seconds: float = 90.0
     nvidia_healthcheck_timeout_seconds: float = 5.0
+    nvidia_reasoning_min_completion_tokens: int = Field(
+        default=512,
+        gt=0,
+        validation_alias=AliasChoices(
+            "NVIDIA_REASONING_MIN_COMPLETION_TOKENS",
+            "JARVIS_NVIDIA_REASONING_MIN_COMPLETION_TOKENS",
+            "nvidia_reasoning_min_completion_tokens",
+        ),
+    )
+    reasoning_preference: ReasoningPreference = Field(
+        default=ReasoningPreference.AUTO,
+        validation_alias=AliasChoices(
+            "REASONING_PREFERENCE", "JARVIS_REASONING_PREFERENCE", "reasoning_preference"
+        ),
+    )
     nvidia_circuit_failure_threshold: int = 3
     nvidia_circuit_cooldown_seconds: float = 30.0
     local_llm_base_url: str = Field(
-        default="http://127.0.0.1:8000/v1",
+        default="http://127.0.0.1:8081/v1",
         validation_alias=AliasChoices("LOCAL_LLM_BASE_URL", "JARVIS_LOCAL_LLM_BASE_URL", "local_llm_base_url"),
     )
     local_llm_model: str = Field(
-        default="nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4",
+        # This is the promoted local profile's advertised model identifier.
+        default="Qwen3.5-9B-IQ4_XS",
         validation_alias=AliasChoices("LOCAL_LLM_MODEL", "JARVIS_LOCAL_LLM_MODEL", "local_llm_model"),
     )
     local_llm_model_aliases: tuple[str, ...] = Field(
-        default=(),
+        default=("Qwen3.5-9B-IQ4_XS",),
         validation_alias=AliasChoices(
             "LOCAL_LLM_MODEL_ALIASES",
             "JARVIS_LOCAL_LLM_MODEL_ALIASES",
@@ -123,6 +141,43 @@ class Settings(BaseSettings):
     )
     local_llm_timeout_seconds: float = 120.0
     local_llm_healthcheck_timeout_seconds: float = 5.0
+    local_runtime_autostart: bool = True
+    local_runtime_model_path: Path = Path(
+        "models/llm/qwen3.5-9b/Qwen3.5-9B-IQ4_XS.gguf"
+    )
+    local_runtime_cuda_binary: Path = Path(
+        "runtimes/llama-cpp-cuda/llama-server.exe"
+    )
+    local_runtime_vulkan_binary: Path = Path(
+        "runtimes/llama-cpp-vulkan/llama-server.exe"
+    )
+    local_runtime_cuda_base_url: str = "http://127.0.0.1:8081/v1"
+    local_runtime_vulkan_base_url: str = "http://127.0.0.1:8080/v1"
+    local_runtime_context_size: int = Field(default=8192, gt=0)
+    local_runtime_parallel: int = Field(default=1, gt=0)
+    local_runtime_profile_id: str = Field(
+        default="qwen35-9b-iq4-xs",
+        validation_alias=AliasChoices(
+            "LOCAL_RUNTIME_PROFILE_ID",
+            "JARVIS_LOCAL_RUNTIME_PROFILE_ID",
+            "local_runtime_profile_id",
+        ),
+    )
+    local_runtime_context_override: int | None = Field(
+        default=None,
+        gt=0,
+        validation_alias=AliasChoices(
+            "LOCAL_RUNTIME_CONTEXT_OVERRIDE",
+            "JARVIS_LOCAL_RUNTIME_CONTEXT_OVERRIDE",
+            "local_runtime_context_override",
+        ),
+    )
+    local_runtime_ready_timeout_seconds: float = Field(default=120.0, gt=0)
+    local_runtime_poll_interval_seconds: float = Field(default=0.5, gt=0)
+    local_runtime_health_interval_seconds: float = Field(default=5.0, ge=0)
+    local_runtime_stop_timeout_seconds: float = Field(default=10.0, gt=0)
+    local_runtime_recovery_attempts: int = Field(default=2, gt=0)
+    local_runtime_stop_on_shutdown: bool = True
     local_cpu_offload_gb: str = Field(
         default="auto",
         validation_alias=AliasChoices("LOCAL_CPU_OFFLOAD_GB", "JARVIS_LOCAL_CPU_OFFLOAD_GB", "local_cpu_offload_gb"),
@@ -296,6 +351,14 @@ class Settings(BaseSettings):
     agent_max_steps: int = Field(default=8, gt=0)
     agent_timeout_seconds: float = Field(default=120.0, gt=0)
     agent_max_repeated_action_signature: int = Field(default=2, gt=0)
+    neural_router_shadow_enabled: bool = True
+    neural_router_routing_enabled: bool = True
+    neural_router_min_confidence: float = Field(default=0.10, ge=0.0, le=1.0)
+    neural_router_min_score_margin: float = Field(default=0.03, ge=0.0, le=1.0)
+    neural_router_feature_dimension: int = Field(default=256, gt=0)
+    neural_router_hidden_dimension: int = Field(default=32, gt=0)
+    neural_router_epochs: int = Field(default=180, gt=0)
+    neural_router_learning_rate: float = Field(default=0.08, gt=0)
     system_runtime_enabled: bool = True
     system_backend_kind: str = "native"
     system_search_roots: tuple[Path, ...] = ()
@@ -396,7 +459,9 @@ class Settings(BaseSettings):
     research_default_max_sources: int = 6
     research_default_max_findings: int = 20
     research_max_concurrent_tasks: int = 3
-    research_watchdog_timeout_ms: int = 45_000
+    # Synthesis may legitimately exceed the generic UI watchdog when using a
+    # remote model; keep it bounded but avoid cancelling healthy live research.
+    research_watchdog_timeout_ms: int = 120_000
     research_require_citations: bool = True
     indexing_runtime_enabled: bool = True
     indexing_auto_sync_on_start: bool = False
@@ -603,7 +668,21 @@ class Settings(BaseSettings):
 
     @property
     def resolved_workspace_root(self) -> Path:
-        return self.workspace_root.resolve()
+        configured = self.workspace_root.expanduser().resolve()
+        candidates = [configured]
+        # Launchers commonly run from the parent directory (jarvis/), while
+        # the checkout lives in jarvis/Jarvis/. Prefer a directory that is
+        # demonstrably a project root instead of relying on cwd shape.
+        if not (configured / "pyproject.toml").exists() and (configured / "Jarvis").is_dir():
+            candidates.insert(0, (configured / "Jarvis").resolve())
+        if (configured == Path.cwd().resolve()) and _REPO_ROOT not in candidates:
+            candidates.append(_REPO_ROOT)
+        selected = next((path for path in candidates if (path / "pyproject.toml").exists()), candidates[0])
+        logging.getLogger("jarvis.config").info(
+            "workspace_root_resolved",
+            extra={"configured": str(configured), "candidates": [str(path) for path in candidates], "selected": str(selected)},
+        )
+        return selected
 
     @property
     def resolved_logs_dir(self) -> Path:
@@ -623,21 +702,58 @@ class Settings(BaseSettings):
 
     @property
     def resolved_voice_coqui_speaker_wav(self) -> Path | None:
-        if self.voice_coqui_speaker_wav is None:
-            return None
-        return self.voice_coqui_speaker_wav.resolve()
+        return self._resolve_voice_resource(self.voice_coqui_speaker_wav, "coqui_speaker_wav")
 
     @property
     def resolved_voice_clone_sample_path(self) -> Path | None:
-        if self.voice_clone_sample_path is None:
+        return self._resolve_voice_resource(self.voice_clone_sample_path, "clone_sample")
+
+    def _resolve_voice_resource(self, configured: Path | None, kind: str) -> Path | None:
+        if configured is None:
             return None
-        return self.voice_clone_sample_path.resolve()
+        configured = configured.expanduser()
+        candidates: list[Path] = []
+        if configured.is_absolute():
+            candidates.append(configured.resolve())
+            folded_parts = [part.casefold() for part in configured.parts]
+            if "voice_samples" in folded_parts:
+                index = folded_parts.index("voice_samples")
+                suffix = Path(*configured.parts[index:])
+                candidates.append((self.resolved_workspace_root / suffix).resolve())
+        else:
+            candidates.append((self.resolved_workspace_root / configured).resolve())
+            candidates.append((_REPO_ROOT / configured).resolve())
+        candidates = list(dict.fromkeys(candidates))
+        selected = next((path for path in candidates if path.exists()), candidates[0])
+        logging.getLogger("jarvis.config").info(
+            "voice_resource_path_resolved",
+            extra={"kind": kind, "configured": str(configured), "candidates": [str(path) for path in candidates], "selected": str(selected), "exists": selected.exists()},
+        )
+        return selected
 
     @property
     def resolved_image_model_path(self) -> Path:
+        candidates = self.image_model_path_candidates
+        selected = next((path for path in candidates if path.exists()), candidates[0])
+        logging.getLogger("jarvis.config").info(
+            "image_model_path_resolved",
+            extra={"configured": str(self.image_model_path), "cwd": str(Path.cwd()), "repo_root": str(_REPO_ROOT), "candidates": [str(path) for path in candidates], "selected": str(selected), "exists": selected.exists()},
+        )
+        return selected
+
+    @property
+    def image_model_path_candidates(self) -> tuple[Path, ...]:
+        """Return deterministic checkpoint candidates independent of cwd."""
         if self.image_model_path.is_absolute():
-            return self.image_model_path.resolve()
-        return (self.resolved_workspace_root / self.image_model_path).resolve()
+            return (self.image_model_path.resolve(),)
+        configured_root = self.workspace_root.expanduser().resolve()
+        candidates = [
+            (self.resolved_workspace_root / self.image_model_path).resolve(),
+            (configured_root / "Jarvis" / self.image_model_path).resolve(),
+        ]
+        if configured_root == Path.cwd().resolve():
+            candidates.append((_REPO_ROOT / self.image_model_path).resolve())
+        return tuple(dict.fromkeys(candidates))
 
     @property
     def resolved_image_output_dir(self) -> Path:

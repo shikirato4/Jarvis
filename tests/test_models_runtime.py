@@ -20,7 +20,7 @@ LOCAL_MODEL = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
 
 
 class FakeLocalProvider:
-    provider_name = "nemotron_omni_local"
+    provider_name = "qwen_local"
     provider_kind = ProviderKind.LOCAL
     configured_model = LOCAL_MODEL
     capabilities = ProviderCapabilities(text=True, streaming=True, reasoning=True)
@@ -70,19 +70,20 @@ def _application(tmp_path: Path):
     )
     application = build_application(settings)
     fake = FakeLocalProvider()
-    application.provider_registry._providers["nemotron_omni_local"] = fake  # noqa: SLF001
+    application.provider_registry._providers.pop("qwen_local", None)  # noqa: SLF001
+    application.provider_registry._providers["qwen_local"] = fake  # noqa: SLF001
     application.model_service._coordinator._local = fake  # noqa: SLF001
     application.model_service._coordinator._selected_mode = application.model_service.provider_selection().selected_mode.LOCAL  # noqa: SLF001
     return application
 
 
-def test_build_application_registers_only_hybrid_nemotron_providers(tmp_path: Path) -> None:
+def test_build_application_registers_online_and_qwen_local_providers(tmp_path: Path) -> None:
     application = _application(tmp_path)
 
     assert [
         provider.provider_name
         for provider in application.provider_registry.list_providers()
-    ] == ["nemotron_omni_local", "nvidia_nim"]
+    ] == ["nvidia_nim", "qwen_local"]
 
 
 def test_model_catalog_keeps_capabilities_on_coordinator_profiles() -> None:
@@ -105,7 +106,7 @@ def test_model_service_routes_inference_through_required_coordinator(tmp_path: P
         ModelRequest(task_type="assistant", prompt="hola")
     )
 
-    assert response.provider_name == "nemotron_omni_local"
+    assert response.provider_name == "qwen_local"
     assert response.model_name == LOCAL_MODEL
     assert response.content == "respuesta local"
 
@@ -120,7 +121,7 @@ def test_model_service_streams_through_required_coordinator(tmp_path: Path) -> N
     )
 
     assert "".join(chunk.text for chunk in chunks) == "respuesta local"
-    assert chunks[-1].metadata["active_provider"] == "nemotron_omni_local"
+    assert chunks[-1].metadata["active_provider"] == "qwen_local"
 
 
 def test_local_hash_embeddings_preserve_semantic_memory_without_network(tmp_path: Path) -> None:

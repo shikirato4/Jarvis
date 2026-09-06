@@ -4,7 +4,6 @@ import ast
 import math
 import operator
 import re
-from typing import Any
 
 
 class CalculatorExpressionError(ValueError):

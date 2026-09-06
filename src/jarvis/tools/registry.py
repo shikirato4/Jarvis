@@ -13,6 +13,7 @@ from jarvis.core.errors import ConfigurationError, ToolExecutionError, ToolNotFo
 from .models import ToolExecutionStatus, ToolInvocationReceipt, ToolResult
 
 if TYPE_CHECKING:
+    from jarvis.action_executor import ActionExecutor
     from jarvis.actions.router import ActionRouter
     from jarvis.config import Settings
     from jarvis.core.events import EventBus
@@ -31,6 +32,7 @@ class ToolContext:
     models: "ModelService"
     event_bus: "EventBus"
     logger: logging.Logger
+    action_executor: "ActionExecutor | None" = None
     correlation_id: str = field(default_factory=lambda: str(uuid4()))
     dry_run: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -54,12 +56,14 @@ class ToolRegistry:
         models: "ModelService",
         event_bus: "EventBus",
         logger: logging.Logger | None = None,
+        action_executor: "ActionExecutor | None" = None,
     ) -> None:
         self._settings = settings
         self._memory = memory
         self._action_router = action_router
         self._models = models
         self._event_bus = event_bus
+        self._action_executor = action_executor
         self._logger = logger or logging.getLogger("jarvis.tools")
         self._definitions: dict[str, ToolDefinition] = {}
 
@@ -95,6 +99,7 @@ class ToolRegistry:
             action_router=self._action_router,
             models=self._models,
             event_bus=self._event_bus,
+            action_executor=self._action_executor,
             logger=self._logger,
             correlation_id=correlation_id,
             dry_run=dry_run,

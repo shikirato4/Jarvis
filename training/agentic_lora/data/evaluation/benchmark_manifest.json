@@ -1,0 +1,19 @@
+{
+  "benchmark_version": "agentic-eval-v1",
+  "end_to_end": 220,
+  "future_namespaces_included": [],
+  "hard_regression": 80,
+  "heldout_families": [
+    "aquarium",
+    "drone_sim",
+    "energy_grid_sim",
+    "museum",
+    "observatory",
+    "spaceship"
+  ],
+  "model_surface": 380,
+  "schema_version": "jarvis.agentic_lora.v1",
+  "source_sha256": "085989ef9480870f5c26e0fc72c0e34089d2bf9876109f884d7b8dfc87b9ef20",
+  "total": 600,
+  "unseen_tool": 240
+}

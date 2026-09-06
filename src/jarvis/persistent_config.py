@@ -13,11 +13,14 @@ from jarvis.runtime_paths import user_config_dir
 
 logger = logging.getLogger(__name__)
 
-LOCAL_PROVIDER = "nemotron_omni_local"
-LOCAL_BASE_URL = "http://127.0.0.1:8000/v1"
-LOCAL_MODEL = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
+LOCAL_PROVIDER = "qwen_local"
+LOCAL_BASE_URL = "http://127.0.0.1:8081/v1"
+LOCAL_MODEL = "Qwen3.5-9B-IQ4_XS"
+REASONING_PREFERENCE = "auto"
 _SECRET_TERMS = ("key", "token", "password", "secret", "pin", "credential", "private")
 _LEGACY_MARKERS = ("oll" + "ama", "gpt" + "_oss", "gpt" + "-oss")
+_PRE_RUNTIME_MANAGER_URL = "http://127.0.0.1:8000/v1"
+_PRE_RUNTIME_MANAGER_MODEL = "Qwen 3.8 quantized"
 
 
 class PersistentConfigWriteError(OSError):
@@ -31,6 +34,7 @@ class PersistentConfig:
     local_base_url: str = LOCAL_BASE_URL
     local_model: str = LOCAL_MODEL
     local_model_aliases: tuple[str, ...] = ()
+    reasoning_preference: str = REASONING_PREFERENCE
     allow_online_for_public_tasks: bool = False
     require_confirm_online: bool = True
     extra: dict[str, Any] = field(default_factory=dict, repr=False)
@@ -115,6 +119,7 @@ def _config_from_payload(data: dict[str, Any]) -> PersistentConfig:
         "local_base_url",
         "local_model",
         "local_model_aliases",
+        "reasoning_preference",
         "allow_online_for_public_tasks",
         "require_confirm_online",
     }
@@ -143,6 +148,7 @@ def _payload_from_config(config: PersistentConfig) -> dict[str, Any]:
             ),
             "local_model": _safe_local_model(config.local_model),
             "local_model_aliases": list(config.local_model_aliases),
+            "reasoning_preference": _normalize_reasoning(config.reasoning_preference),
             "allow_online_for_public_tasks": bool(config.allow_online_for_public_tasks),
             "require_confirm_online": bool(config.require_confirm_online),
         }
@@ -173,6 +179,14 @@ def _migrate_payload(data: dict[str, Any]) -> dict[str, Any]:
     legacy_provider = _has_legacy_marker(str(migrated.get("local_provider", "")))
     legacy_model = _has_legacy_marker(str(migrated.get("local_model", "")))
     legacy_url = ":11434" in str(migrated.get("local_base_url", ""))
+    pre_runtime_manager_url = (
+        str(migrated.get("local_base_url", "")).rstrip("/").casefold()
+        == _PRE_RUNTIME_MANAGER_URL.casefold()
+    )
+    pre_runtime_manager_model = (
+        str(migrated.get("local_model", "")).strip().casefold()
+        == _PRE_RUNTIME_MANAGER_MODEL.casefold()
+    )
     legacy_fields: list[str] = []
     if legacy_provider:
         legacy_fields.append("local_provider")
@@ -193,20 +207,25 @@ def _migrate_payload(data: dict[str, Any]) -> dict[str, Any]:
     migrated["local_provider"] = LOCAL_PROVIDER
     migrated["local_base_url"] = (
         LOCAL_BASE_URL
-        if legacy_url
+        if legacy_url or pre_runtime_manager_url
         else str(migrated.get("local_base_url") or LOCAL_BASE_URL)
     )
     migrated["local_model"] = (
         LOCAL_MODEL
-        if legacy_model
+        if legacy_model or pre_runtime_manager_model
         else _safe_local_model(str(migrated.get("local_model") or LOCAL_MODEL))
     )
+    if pre_runtime_manager_url:
+        legacy_fields.append("local_base_url_pre_runtime_manager")
+    if pre_runtime_manager_model:
+        legacy_fields.append("local_model_pre_runtime_manager")
     aliases = migrated.get("local_model_aliases", ())
     if not isinstance(aliases, (list, tuple)):
         aliases = ()
     migrated["local_model_aliases"] = tuple(
         str(alias).strip() for alias in aliases if str(alias).strip()
     )
+    migrated["reasoning_preference"] = _normalize_reasoning(migrated.get("reasoning_preference", REASONING_PREFERENCE))
     if legacy_fields:
         logger.warning(
             "persistent_config_legacy_detected",
@@ -215,16 +234,26 @@ def _migrate_payload(data: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def _normalize_reasoning(value: object) -> str:
+    normalized = str(value or REASONING_PREFERENCE).strip().casefold()
+    return normalized if normalized in {"off", "low", "medium", "xhigh", "auto"} else REASONING_PREFERENCE
+
+
 def _safe_local_model(value: str) -> str:
-    from jarvis.models_runtime.nemotron_identity import (
-        InvalidNemotronIdentityError,
-        NemotronIdentity,
+    from jarvis.models_runtime.qwen_identity import (
+        InvalidQwenIdentityError,
+        QwenIdentity,
     )
 
-    try:
-        return NemotronIdentity(configured_model=value).configured_model
-    except InvalidNemotronIdentityError:
-        return LOCAL_MODEL
+    for family in ("qwen3.5", "qwen3.8"):
+        try:
+            return QwenIdentity(
+                configured_model=value,
+                expected_model_family=family,
+            ).configured_model
+        except InvalidQwenIdentityError:
+            continue
+    return LOCAL_MODEL
 
 
 def _normalize_mode(value: str) -> str:

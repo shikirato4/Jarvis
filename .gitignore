@@ -21,3 +21,8 @@ models/**/*.pth
 *.tmp
 *.pyc
 *.egg-info/
+
+# Generated packages and downloaded CUDA runtime binaries
+/build/
+/dist/
+/runtimes/llama-cpp-cuda/

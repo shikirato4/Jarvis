@@ -106,6 +106,20 @@ def _settings(tmp_path) -> Settings:
     )
 
 
+def test_desktop_code_agent_uses_canonical_workspace_root(tmp_path) -> None:
+    checkout = tmp_path / "Jarvis"
+    checkout.mkdir()
+    (checkout / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0.0.0'\n")
+    settings = _settings(tmp_path)
+    backend, desktop = build_desktop_runtime(settings)
+    try:
+        service = desktop._code_agent_service()  # noqa: SLF001
+        assert service.executor.project_root == checkout.resolve()
+    finally:
+        backend.stop()
+        desktop.shutdown()
+
+
 def test_desktop_generate_patch_does_not_apply_patch(tmp_path) -> None:
     backend, desktop = build_desktop_runtime(_settings(tmp_path))
     fake = FakeCodeAgent()
@@ -310,7 +324,7 @@ def test_desktop_selector_mode_is_sent_to_generate_patch(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not pyside_available(), reason="PySide6 not available")
-def test_desktop_focus_layout_prioritizes_chat_transcript(tmp_path) -> None:
+def test_desktop_stitch_layout_prioritizes_chat_with_context_rails(tmp_path) -> None:
     from jarvis.desktop_runtime.window import JarvisDesktopWindow
 
     app = create_qt_application()
@@ -321,11 +335,12 @@ def test_desktop_focus_layout_prioritizes_chat_transcript(tmp_path) -> None:
         app.processEvents()
 
         chat_card = window._conversation.parentWidget()  # noqa: SLF001
-        assert window._focus_mode is True  # noqa: SLF001
+        assert window._focus_mode is False  # noqa: SLF001
         assert chat_card.minimumHeight() >= 400
         assert window.minimumHeight() >= 720
-        assert not window._left_panel.isVisible()  # noqa: SLF001
-        assert not window._right_panel.isVisible()  # noqa: SLF001
+        assert window._left_panel.isVisible()  # noqa: SLF001
+        assert window._right_panel.isVisible()  # noqa: SLF001
+        assert window._conversation.width() >= 700  # noqa: SLF001
     finally:
         window.close()
         backend.stop()

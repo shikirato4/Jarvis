@@ -1,0 +1,37 @@
+{
+  "audit_version": "spot-audit-v1",
+  "errors": [],
+  "records_audited": 60,
+  "selection": {
+    "categories": {
+      "action_vs_information": 5,
+      "argument_extraction": 5,
+      "capability_present": 7,
+      "continuation": 3,
+      "correct_tool_selection": 5,
+      "irrelevant_distractors": 2,
+      "missing_required_tool": 3,
+      "multi_tool": 4,
+      "no_false_capability_denial": 3,
+      "no_false_success": 4,
+      "observation_grounding": 5,
+      "output_concision": 2,
+      "parameter_ambiguity": 2,
+      "safe_partial_completion": 3,
+      "security_confirmation": 4,
+      "tool_failure": 3
+    },
+    "content": {
+      "control": 1,
+      "fictitious": 17,
+      "real": 42
+    },
+    "locales": {
+      "en-US": 20,
+      "es-MX": 30,
+      "mixed": 10
+    }
+  },
+  "systematic_issues": [],
+  "verdict": "PASS"
+}
