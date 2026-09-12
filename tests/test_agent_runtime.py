@@ -1006,6 +1006,67 @@ def test_agent_truncated_final_auto_continues_without_rerunning_tool() -> None:
     assert result.segment_completion_tokens == [0, 100, 40]
 
 
+def test_agent_initial_information_text_auto_continues_without_tools() -> None:
+    executor, _events = _executor([])
+    raw_responses = iter(
+        [
+            _response(
+                content="Puedes buscar desde el Explorador ",
+                metadata={
+                    "completion_contract_enforced": True,
+                    "finish_reason": "length",
+                    "stream_closed_normally": True,
+                    "incomplete": True,
+                    "completion_tokens": 100,
+                },
+            ),
+            _response(
+                content="o mediante PowerShell.",
+                metadata={
+                    "completion_contract_enforced": True,
+                    "finish_reason": "stop",
+                    "stream_closed_normally": True,
+                    "incomplete": False,
+                    "completion_tokens": 30,
+                },
+            ),
+        ]
+    )
+    policy = OutputCompletionPolicy(Settings(_env_file=None))
+    continuation_requests: list[ModelRequest] = []
+
+    def infer(request: ModelRequest) -> ModelResponse:
+        prepared = policy.prepare_request(request)
+
+        def infer_next(continuation: ModelRequest) -> ModelResponse:
+            continuation_requests.append(continuation)
+            return next(raw_responses)
+
+        return policy.complete_response(
+            prepared,
+            next(raw_responses),
+            infer_next=infer_next,
+        )
+
+    result = AgentController(
+        infer_model=infer,
+        action_executor=executor,
+    ).run(
+        AgentRunRequest(
+            user_message="¿Cómo puedo buscar un archivo en Windows?",
+        )
+    )
+
+    assert result.status is AgentRunStatus.COMPLETED
+    assert result.final_answer == (
+        "Puedes buscar desde el Explorador o mediante PowerShell."
+    )
+    assert result.auto_continuation_count == 1
+    assert result.model_request_count == 2
+    assert continuation_requests[0].tools == []
+    assert continuation_requests[0].tool_choice is None
+
+
 def test_agent_controller_replans_after_tool_failure() -> None:
     def failing(_context, _payload: _ValuePayload) -> ActionResult:
         raise RuntimeError("private failure detail")
@@ -1322,3 +1383,25 @@ def test_file_final_omits_paths_not_present_in_real_observations() -> None:
     assert "InventedGame" not in grounded
     assert "ruta no verificada omitida" in grounded
     assert "no apareció en las observaciones" in grounded
+
+
+def test_file_final_keeps_observed_windows_path_despite_json_escaping() -> None:
+    observed_path = r"C:\Users\example\Documents\report.txt"
+    observations = [
+        ActionObservation(
+            run_id="run-1",
+            call_id="call-1",
+            action="files.search",
+            status=ActionStatus.SUCCESS,
+            message="verified",
+            data={"items": [{"path": observed_path}], "verified": True},
+        )
+    ]
+
+    grounded = AgentController._ground_file_paths(  # noqa: SLF001
+        f"Encontrado: `{observed_path}`",
+        observations,
+    )
+
+    assert observed_path in grounded
+    assert "ruta no verificada omitida" not in grounded

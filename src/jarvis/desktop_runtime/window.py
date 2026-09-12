@@ -17,6 +17,7 @@ from .widgets import (
 )
 from .activity_graph import ActivityGraphWidget
 from jarvis.image_runtime.presentation import format_image_progress, format_probe_status
+from jarvis.web_search import SearchMode, decide_search_mode
 
 try:
     from PySide6.QtCore import QBuffer, QEvent, QIODevice, QRect, QSize, Qt, QTimer
@@ -144,6 +145,11 @@ if QApplication is not None:
             painter.drawLine(c, size - 3, c, 4)
             painter.drawLine(c, 4, 4, c)
             painter.drawLine(c, 4, size - 4, c)
+        elif kind == "research":
+            painter.drawEllipse(3, 3, 9, 9)
+            painter.drawLine(11, 11, size - 3, size - 3)
+            painter.drawLine(size - 5, 2, size - 5, 7)
+            painter.drawLine(size - 8, 5, size - 2, 5)
         painter.end()
         return QIcon(pixmap)
 
@@ -167,6 +173,7 @@ if QApplication is not None:
             self._state = None
             self._nav_buttons: dict[str, QPushButton] = {}
             self._attachment_chip_buttons: list[QPushButton] = []
+            self._deep_research_requested = False
             self.setWindowTitle("JARVIS Desktop")
             self.setAcceptDrops(True)
             self._build_ui()
@@ -671,6 +678,28 @@ if QApplication is not None:
             mode_row.addWidget(self._reasoning_selector)
             mode_row.addStretch(1)
 
+            self._deep_research_button = QPushButton("Deep Research")
+            self._deep_research_button.setObjectName("DeepResearchToggle")
+            self._deep_research_button.setCheckable(True)
+            self._deep_research_button.setIcon(_stitch_icon("research", size=16))
+            self._deep_research_button.setAccessibleName("Deep Research")
+            self._deep_research_button.setToolTip(
+                "Deep Research\nSearch, read, and compare multiple sources."
+            )
+            self._deep_research_button.setProperty("deepResearch", False)
+            self._deep_research_button.toggled.connect(
+                self._toggle_deep_research
+            )
+            mode_row.addWidget(self._deep_research_button)
+
+            self._stop_research_button = QPushButton("Stop")
+            self._stop_research_button.setObjectName("ResearchStopButton")
+            self._stop_research_button.setAccessibleName("Stop Deep Research")
+            self._stop_research_button.setToolTip("Stop Deep Research")
+            self._stop_research_button.clicked.connect(self._stop_deep_research)
+            self._stop_research_button.hide()
+            mode_row.addWidget(self._stop_research_button)
+
             self._attach_button = QPushButton("+")
             self._attach_button.setObjectName("ComposerToolButton")
             self._attach_button.setAccessibleName("Adjuntar archivos")
@@ -715,6 +744,13 @@ if QApplication is not None:
             self._attachment_preview.hide()
             composer_layout.addWidget(self._attachment_preview)
 
+            self._research_activity = QLabel()
+            self._research_activity.setObjectName("ResearchActivity")
+            self._research_activity.setAccessibleName("Research activity")
+            self._research_activity.setWordWrap(True)
+            self._research_activity.hide()
+            composer_layout.addWidget(self._research_activity)
+
             composer_row = QHBoxLayout()
             composer_row.setSpacing(8)
             self._input = ChatComposerInput()
@@ -722,6 +758,12 @@ if QApplication is not None:
             self._input.setPlaceholderText("Message JARVIS or type '/' for commands...")
             self._input.submit_requested.connect(self._submit_chat)
             self._input.installEventFilter(self)
+            self._input.textChanged.connect(self._update_slash_command_menu)
+            self._slash_command_menu = QMenu(self._input)
+            deep_action = self._slash_command_menu.addAction(
+                "/deepresearch    Investigate deeply across multiple web sources"
+            )
+            deep_action.triggered.connect(self._select_deep_research_command)
             composer_row.addWidget(self._input, 1)
             self._send_button = QPushButton()
             self._send_button.setObjectName("ComposerSendButton")
@@ -1571,7 +1613,38 @@ if QApplication is not None:
                 self._splitter.setSizes([260, max(width - 260, 1), 0])
             else:
                 self._apply_shell_mode()
+            if hasattr(self, "_deep_research_button"):
+                self._deep_research_button.setText(
+                    "" if width < 1360 else "Deep Research"
+                )
             QTimer.singleShot(0, self._sync_stitch_chat_width)
+
+        def _toggle_deep_research(self, checked: bool) -> None:
+            self._deep_research_requested = checked
+            self._deep_research_button.setProperty("deepResearch", checked)
+            self._deep_research_button.style().unpolish(self._deep_research_button)
+            self._deep_research_button.style().polish(self._deep_research_button)
+
+        def _select_deep_research_command(self) -> None:
+            current = self._input.text().strip()
+            remainder = current[1:].strip() if current.startswith("/") else current
+            self._input.setText(f"/deepresearch {remainder}".rstrip() + " ")
+            self._input.setFocus()
+
+        def _update_slash_command_menu(self) -> None:
+            text = self._input.text().strip().casefold()
+            if text == "/" or (text.startswith("/") and "deepresearch".startswith(text[1:])):
+                if not self._slash_command_menu.isVisible():
+                    self._slash_command_menu.popup(
+                        self._input.mapToGlobal(self._input.rect().bottomLeft())
+                    )
+            elif self._slash_command_menu.isVisible():
+                self._slash_command_menu.close()
+
+        def _stop_deep_research(self) -> None:
+            if self._desktop.cancel_active_research():
+                self._set_processing_state(True, "STOPPING RESEARCH")
+                self._stop_research_button.setEnabled(False)
 
         def _sync_stitch_chat_width(self) -> None:
             if not hasattr(self, "_chat_card") or not hasattr(self, "_center_panel"):
@@ -1890,7 +1963,17 @@ if QApplication is not None:
             self._input.clear()
             self._input.setFocus()
             self._sending = True
-            self._set_processing_state(True, "PROCESSING")
+            explicit_deep = self._deep_research_button.isChecked() or text.casefold().startswith("/deepresearch")
+            search_mode = SearchMode.DEEP if explicit_deep else decide_search_mode(text)
+            self._set_processing_state(
+                True,
+                "RESEARCHING" if search_mode is not SearchMode.NO_WEB else "PROCESSING",
+            )
+            self._stop_research_button.setVisible(search_mode is SearchMode.DEEP)
+            self._stop_research_button.setEnabled(True)
+            self._research_activity.setVisible(search_mode is SearchMode.DEEP)
+            if search_mode is SearchMode.DEEP:
+                self._research_activity.setText("Planning research…")
             self._pending_new_turn_text = text
             correlation_id = f"desktop-ui-{int(perf_counter() * 1000)}"
             self._pending_correlation_id = correlation_id
@@ -1905,6 +1988,7 @@ if QApplication is not None:
                     correlation_id=correlation_id,
                     metadata={
                         "stream": self._should_stream_chat(text),
+                        "search_mode": search_mode.value,
                         "attachment_ids": [item["id"] for item in pending_attachments],
                     },
                 )
@@ -2262,6 +2346,11 @@ if QApplication is not None:
                 self._pending_correlation_id = None
                 self._sending = False
                 self._set_processing_state(False)
+                self._stop_research_button.hide()
+                self._stop_research_button.setEnabled(True)
+                self._research_activity.hide()
+                if self._deep_research_button.isChecked():
+                    self._deep_research_button.setChecked(False)
             signature = self._render_signature(state)
             if signature != self._last_render_signature:
                 self._last_render_signature = signature
@@ -2279,6 +2368,15 @@ if QApplication is not None:
                 self._render_metrics(state)
             else:
                 self._desktop.note_ui_refresh(applied=False)
+            if self._sending and self._research_activity.isVisible():
+                research = self._desktop.research_progress()
+                if research:
+                    self._research_activity.setText(
+                        f"{research.get('message') or 'Researching'}  ·  "
+                        f"{int(research.get('sources_discovered') or 0)} found  ·  "
+                        f"{int(research.get('sources_opened') or 0)} reviewed  ·  "
+                        f"{int(research.get('domains') or 0)} domains"
+                    )
             if not self._is_processing and not state.busy:
                 self._sync_reactor_state(state)
             live_voice_states = {"LISTENING", "TRANSCRIBING", "PROCESSING", "ERROR"}

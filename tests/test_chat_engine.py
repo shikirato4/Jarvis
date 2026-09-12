@@ -8,14 +8,20 @@ from jarvis.desktop_runtime.intent_router import DesktopIntentRouter
 from jarvis.desktop_runtime.service import DesktopRuntimeService
 from jarvis.config import Settings
 from jarvis.models_runtime.base import ModelRequest, ModelResponse, ModelToolCall, ProviderHealth, ProviderKind
-from jarvis.modules.web_module import build_web_search_action
 from jarvis.models_runtime.hybrid import (
     LLMMode,
     ProviderCapabilities,
     ProviderOperationalState,
     ProviderStatus,
 )
-from jarvis.web_search import WebSearchHit, WebSearchProviderStatus, WebSearchResponse
+from jarvis.web_search import (
+    RawPage,
+    SourceFetcher,
+    WebSearchHit,
+    WebSearchProviderStatus,
+    WebSearchResponse,
+)
+from jarvis.models_runtime.nvidia_nim import NvidiaUnavailableError
 
 
 class MutableDesktopModelProvider:
@@ -575,6 +581,29 @@ def test_desktop_intent_router_classifies_operational_prompts() -> None:
     assert decision.literal_text == "hola"
 
 
+def _install_web_research(application, provider) -> None:
+    def resolver(*_args, **_kwargs):
+        return [(2, 1, 6, "", ("93.184.216.34", 443))]
+
+    def transport(url: str, _timeout: float, _max_bytes: int) -> RawPage:
+        return RawPage(
+            url=url,
+            content_type="text/html",
+            body=(
+                b"<html><title>Fuente sobre tecnologia</title><article>"
+                b"Noticia reciente de tecnologia con evidencia, fecha y fuente oficial."
+                b"</article></html>"
+            ),
+            headers={"content-type": "text/html; charset=utf-8"},
+        )
+
+    application.web_research_orchestrator.provider = provider
+    application.web_research_orchestrator.fetcher = SourceFetcher(
+        resolver=resolver,
+        transport=transport,
+    )
+
+
 def test_chat_engine_routes_writing_continue_to_runtime(tmp_path) -> None:
     from jarvis.writing_runtime.models import WritingGeneratedBlock
 
@@ -853,21 +882,20 @@ def test_chat_engine_research_current_news_uses_nemotron_web_tool(tmp_path) -> N
     )
     fake_web = FakeDesktopWebProvider()
     app = build_application(settings)
-    web_action = build_web_search_action(fake_web)
-    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
-    provider = WebToolDesktopModelProvider()
+    _install_web_research(app, fake_web)
+    provider = MutableDesktopModelProvider(
+        content="Resumen verificado de tecnología. [S1]"
+    )
     _install_local_provider(app, provider)
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
         response = desktop.send_chat("investiga noticias recientes de tecnologia")
 
-        assert fake_web.calls == ["noticias recientes de tecnologia"]
-        assert len(provider.requests) == 2
-        assert provider.requests[0].messages[-1].role == "user"
-        assert provider.requests[1].messages[-1].role == "tool"
-        assert "Fuente sobre tecnologia" in provider.requests[1].messages[-1].content
+        assert fake_web.calls
+        assert fake_web.calls[0] == "investiga noticias recientes de tecnologia"
         assert "https://example.com/tech" in response.message.content
+        assert response.raw_result["research"]["metrics"]["opened_sources"] == 1
     finally:
         app.stop()
 
@@ -882,9 +910,8 @@ def test_chat_engine_research_preserves_sources_when_nemotron_fails_after_tool(t
     )
     fake_web = FakeDesktopWebProvider()
     app = build_application(settings)
-    web_action = build_web_search_action(fake_web)
-    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
-    _install_local_provider(app, WebToolDesktopModelProvider(fail_after_tool=True))
+    _install_web_research(app, fake_web)
+    _install_local_provider(app, MutableDesktopModelProvider(fail=True))
     app.start()
     try:
         desktop = DesktopRuntimeService(app)
@@ -892,7 +919,260 @@ def test_chat_engine_research_preserves_sources_when_nemotron_fails_after_tool(t
 
         assert "https://example.com/tech" in response.message.content
         assert "provider unavailable" not in response.message.content.casefold()
-        assert response.raw_result.get("status") == "failed"
+        assert response.raw_result.get("status") == "partial"
+        assert str(response.raw_result.get("fallback_reason", "")).startswith(
+            "synthesis_provider_failure:"
+        )
+    finally:
+        app.stop()
+
+
+def test_deep_research_repairs_unsupported_claims_with_typed_model_messages(tmp_path) -> None:
+    class RepairingProvider(MutableDesktopModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.requests: list[ModelRequest] = []
+
+        def infer(self, request, *, model_name, temperature, timeout_seconds):  # noqa: ARG002
+            self.requests.append(request)
+            content = (
+                "Esta afirmación factual extensa no incluye respaldo verificable y debe pasar por la fase de reparación."
+                if len(self.requests) == 1
+                else "La evidencia recuperada respalda la conclusión. [S1]"
+            )
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content=content,
+                latency_ms=1.0,
+            )
+
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    _install_web_research(app, FakeDesktopWebProvider())
+    provider = RepairingProvider()
+    _install_local_provider(app, provider)
+    app.start()
+    try:
+        response = DesktopRuntimeService(app).send_chat(
+            "/deepresearch investiga noticias recientes de tecnologia",
+            metadata={"search_mode": "deep"},
+        )
+
+        assert len(provider.requests) == 2
+        assert all(hasattr(message, "role") for message in provider.requests[1].messages)
+        assert "https://example.com/tech" in response.message.content
+        assert response.raw_result["status"] == "completed_with_repairs"
+    finally:
+        app.stop()
+
+
+def test_deep_research_retries_a_transient_synthesis_provider_failure(tmp_path) -> None:
+    class TransientProvider(MutableDesktopModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def infer(self, request, *, model_name, temperature, timeout_seconds):  # noqa: ARG002
+            self.calls += 1
+            if self.calls == 1:
+                raise NvidiaUnavailableError(
+                    "temporary HTTP 503",
+                    provider_name="nvidia_nim",
+                    status_code=503,
+                )
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content="La evidencia recuperada respalda la conclusión. [S1]",
+                latency_ms=1.0,
+            )
+
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    _install_web_research(app, FakeDesktopWebProvider())
+    provider = TransientProvider()
+    _install_local_provider(app, provider)
+    app.start()
+    try:
+        response = DesktopRuntimeService(app).send_chat(
+            "/deepresearch investiga noticias recientes de tecnologia",
+            metadata={"search_mode": "deep"},
+        )
+
+        assert provider.calls == 2
+        assert response.raw_result["status"] == "completed_with_repairs"
+        assert response.raw_result["synthesis"]["attempts"][0]["provider_error"] == "service_unavailable"
+    finally:
+        app.stop()
+
+
+def test_deep_research_buffers_length_continuation_into_one_valid_response(tmp_path) -> None:
+    class TruncatedProvider(MutableDesktopModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.requests: list[ModelRequest] = []
+
+        def infer(self, request, *, model_name, temperature, timeout_seconds):  # noqa: ARG002
+            self.requests.append(request)
+            first = len(self.requests) == 1
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content=(
+                    "La evidencia recuperada"
+                    if first
+                    else " respalda esta explicación general. [S1]"
+                ),
+                latency_ms=1.0,
+                metadata={
+                    "finish_reason": "length" if first else "stop",
+                    "stream_closed_normally": True,
+                    "incomplete": first,
+                    "completion_tokens": 100,
+                    "requested_max_tokens": request.max_tokens,
+                },
+            )
+
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    _install_web_research(app, FakeDesktopWebProvider())
+    provider = TruncatedProvider()
+    _install_local_provider(app, provider)
+    app.start()
+    try:
+        response = DesktopRuntimeService(app).send_chat(
+            "/deepresearch investiga noticias recientes de tecnologia",
+            metadata={"search_mode": "deep"},
+        )
+
+        assert len(provider.requests) == 2
+        assert "[S1]" in provider.requests[0].messages[-1].content
+        assert any(
+            "[S1]" in message.content
+            for message in provider.requests[1].messages
+        )
+        assert response.message.content.count("La evidencia recuperada") == 1
+        assert "https://example.com/tech" in response.message.content
+        assert response.raw_result["status"] == "completed"
+        assert response.raw_result["model"]["metadata"]["auto_continuation_count"] == 1
+        assert response.raw_result["synthesis"]["attempts"][0]["continuations"] == 1
+    finally:
+        app.stop()
+
+
+def test_deep_research_rejects_s20_then_repairs_with_real_source(tmp_path) -> None:
+    class InvalidCitationProvider(MutableDesktopModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def infer(self, request, *, model_name, temperature, timeout_seconds):  # noqa: ARG002
+            self.calls += 1
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content=(
+                    "Una afirmación fabricada usa una fuente inexistente. [S20]"
+                    if self.calls == 1
+                    else "La evidencia real respalda la conclusión. [S1]"
+                ),
+                latency_ms=1.0,
+            )
+
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    _install_web_research(app, FakeDesktopWebProvider())
+    provider = InvalidCitationProvider()
+    _install_local_provider(app, provider)
+    app.start()
+    try:
+        response = DesktopRuntimeService(app).send_chat(
+            "/deepresearch investiga noticias recientes de tecnologia",
+            metadata={"search_mode": "deep"},
+        )
+
+        assert provider.calls == 2
+        assert "S20" not in response.message.content
+        assert "https://example.com/tech" in response.message.content
+        assert response.raw_result["status"] == "completed_with_repairs"
+    finally:
+        app.stop()
+
+
+def test_deep_research_uses_short_error_after_three_invalid_syntheses(tmp_path) -> None:
+    class EmptyProvider(MutableDesktopModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def infer(self, request, *, model_name, temperature, timeout_seconds):  # noqa: ARG002
+            self.calls += 1
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content="",
+                latency_ms=1.0,
+                metadata={"finish_reason": "stop", "stream_closed_normally": True},
+            )
+
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    _install_web_research(app, FakeDesktopWebProvider())
+    provider = EmptyProvider()
+    _install_local_provider(app, provider)
+    app.start()
+    try:
+        response = DesktopRuntimeService(app).send_chat(
+            "/deepresearch investiga noticias recientes de tecnologia",
+            metadata={"search_mode": "deep"},
+        )
+
+        assert provider.calls == 3
+        assert response.raw_result["status"] == "partial_validation"
+        assert response.raw_result["synthesis"]["max_attempts"] == 3
+        assert "no pudo completar una síntesis válida" in response.message.content
+        assert "https://example.com/tech" not in response.message.content
     finally:
         app.stop()
 
@@ -916,6 +1196,46 @@ def test_chat_engine_malware_rat_request_gets_useful_safe_refusal(tmp_path) -> N
         assert response.raw_result.get("category") == "malware_offensive"
     finally:
         app.stop()
+
+
+def test_shared_registry_exposes_file_and_web_tools_provider_independently(tmp_path) -> None:
+    settings = Settings(
+        _env_file=None,
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    controller = app.agent_controller
+
+    all_names = {
+        item["function"]["name"]
+        for item in controller.available_tool_schemas()
+    }
+    file_names = {
+        item["function"]["name"]
+        for item in controller.available_tool_schemas(
+            "Busca en mis archivos dónde mencioné Brave"
+        )
+    }
+    web_names = {
+        item["function"]["name"]
+        for item in controller.available_tool_schemas(
+            "Busca en internet las últimas novedades de NVIDIA"
+        )
+    }
+    before_mode_switch = len(all_names)
+    app.model_service.set_llm_mode(LLMMode.LOCAL)
+    local_count = len(controller.available_tool_schemas())
+    app.model_service.set_llm_mode(LLMMode.NVIDIA_API)
+    online_count = len(controller.available_tool_schemas())
+
+    assert "files.search" in file_names
+    assert "files.read_text" in all_names
+    assert "web.search" in web_names
+    assert local_count == online_count == before_mode_switch
 
 
 def test_chat_engine_capability_query_uses_manifest_with_guided_agent_mode(tmp_path) -> None:

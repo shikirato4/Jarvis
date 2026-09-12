@@ -42,6 +42,15 @@ class SearchPayload(BaseModel):
     timeout_seconds: float = Field(default=10.0, gt=0, le=30)
 
 
+class ContentSearchPayload(BaseModel):
+    query: str
+    scope: str = "workspace"
+    path: str | None = None
+    max_results: int = Field(default=30, ge=1, le=100)
+    max_bytes: int = Field(default=300_000, ge=1_000, le=1_000_000)
+    timeout_seconds: float = Field(default=10.0, gt=0, le=30)
+
+
 class StatPayload(PathPayload):
     sha256: bool = False
 
@@ -96,6 +105,7 @@ class FilesModule:
             ("files.resolve_path", "Resolve a Windows file or folder path, workspace path, or known folder such as Downloads/Descargas.", ResolvePayload, lambda p: {"path": str(self.runtime.resolve_path(p.path, base=p.base))}, ActionRisk.SAFE),
             ("files.list", "List files and folders (archivos y carpetas) with bounded pagination and metadata.", ListPayload, lambda p: self.runtime.list_directory(**p.model_dump()), ActionRisk.SAFE),
             ("files.search", "Search/buscar a file or folder by filename, extension or safe pattern inside a bounded scope.", SearchPayload, lambda p: self.runtime.search(**p.model_dump()), ActionRisk.SAFE),
+            ("files.search_content", "Search semantically and lexically inside bounded local text files, returning matched excerpts with provenance.", ContentSearchPayload, lambda p: self.runtime.search_content(**p.model_dump()), ActionRisk.SAFE),
             ("files.stat", "Inspect file/folder size, type, timestamps, attributes and optional SHA-256 metadata.", StatPayload, lambda p: self.runtime.stat(p.path, sha256=p.sha256), ActionRisk.SAFE),
             ("files.read_text", "Read bounded UTF-8/text content from a regular text file; never returns raw binary bytes.", ReadPayload, lambda p: self.runtime.read_text(**p.model_dump()), ActionRisk.SAFE),
             ("files.create_directory", "Create a real directory/carpeta and verify it exists.", CreateDirectoryPayload, lambda p: self.runtime.create_directory(**p.model_dump()), ActionRisk.SAFE),

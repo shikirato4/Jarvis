@@ -894,7 +894,7 @@ class OutputCompletionPolicy:
             and response.metadata.get("finish_reason") == "length"
             and not response.tool_calls
             and request.metadata.get("agent_phase")
-            not in {"structured_tool_call", "agent_initial"}
+            != "structured_tool_call"
             and attempts < self._max_continuations_for(request)
         )
 
@@ -985,6 +985,9 @@ class OutputCompletionPolicy:
         return estimated_tokens_from_text(text)
 
     def _max_continuations_for(self, request: ModelRequest) -> int:
+        configured = request.metadata.get("max_output_continuations")
+        if isinstance(configured, int):
+            return max(0, min(configured, self.max_auto_continuations))
         if self._request_class(request) == "EXTENDED_LONG_FORM":
             return self.extended_max_auto_continuations
         return self.max_auto_continuations

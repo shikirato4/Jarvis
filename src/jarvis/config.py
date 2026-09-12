@@ -114,6 +114,60 @@ class Settings(BaseSettings):
             "nvidia_reasoning_min_completion_tokens",
         ),
     )
+    brave_search_api_key: SecretStr | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        validation_alias=AliasChoices(
+            "BRAVE_SEARCH_API_KEY",
+            "JARVIS_BRAVE_SEARCH_API_KEY",
+            "BRAVE_API_KEY",
+            "brave_search_api_key",
+        ),
+    )
+    you_search_api_key: SecretStr | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        validation_alias=AliasChoices("YDC_API_KEY", "JARVIS_YDC_API_KEY", "you_search_api_key"),
+    )
+    exa_search_api_key: SecretStr | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+        validation_alias=AliasChoices("EXA_API_KEY", "JARVIS_EXA_API_KEY", "exa_search_api_key"),
+    )
+    searxng_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("SEARXNG_BASE_URL", "JARVIS_SEARXNG_BASE_URL", "searxng_base_url"),
+    )
+    web_search_provider: str = "brave"
+    web_search_enabled: bool | None = None
+    web_search_max_results: int = Field(default=5, ge=1, le=10)
+    web_search_timeout_seconds: float = Field(default=8.0, ge=1.0, le=20.0)
+    web_search_health_ttl_seconds: float = Field(default=300.0, ge=0.0, le=3600.0)
+    search_quick_max_queries: int = Field(default=1, ge=1, le=4)
+    search_normal_max_queries: int = Field(default=3, ge=1, le=8)
+    search_deep_max_queries: int = Field(default=10, ge=2, le=30)
+    search_max_results_per_query: int = Field(default=8, ge=1, le=10)
+    search_max_total_results: int = Field(default=80, ge=5, le=300)
+    search_quick_max_pages: int = Field(default=3, ge=1, le=10)
+    search_normal_max_pages: int = Field(default=6, ge=1, le=20)
+    search_deep_max_pages: int = Field(default=12, ge=2, le=40)
+    search_max_bytes_per_page: int = Field(default=2_000_000, ge=50_000, le=10_000_000)
+    search_max_evidence_chunks: int = Field(default=36, ge=1, le=200)
+    search_max_context_tokens: int = Field(default=12_000, ge=512, le=64_000)
+    search_max_research_rounds: int = Field(default=3, ge=1, le=8)
+    search_request_timeout_seconds: float = Field(default=12.0, ge=1.0, le=60.0)
+    search_query_cache_ttl_seconds: float = Field(default=120.0, ge=0.0, le=3600.0)
+    search_fetch_cache_ttl_seconds: float = Field(default=600.0, ge=0.0, le=86_400.0)
+    search_max_concurrent_queries: int = Field(default=3, ge=1, le=8)
+    search_max_concurrent_fetches: int = Field(default=4, ge=1, le=12)
+    search_max_rate_limit_backoff_seconds: float = Field(default=2.0, ge=0.0, le=10.0)
+    search_min_information_gain: float = Field(default=0.08, ge=0.0, le=1.0)
+    search_max_stagnant_rounds: int = Field(default=1, ge=1, le=3)
+    search_file_max_results: int = Field(default=30, ge=1, le=100)
+    search_file_max_bytes: int = Field(default=300_000, ge=10_000, le=2_000_000)
     reasoning_preference: ReasoningPreference = Field(
         default=ReasoningPreference.AUTO,
         validation_alias=AliasChoices(
@@ -351,6 +405,8 @@ class Settings(BaseSettings):
     agent_max_steps: int = Field(default=8, gt=0)
     agent_timeout_seconds: float = Field(default=120.0, gt=0)
     agent_max_repeated_action_signature: int = Field(default=2, gt=0)
+    pre_lora_agentic_scaffold_enabled: bool = True
+    pre_lora_agentic_profile: Literal["off", "compact", "full"] = "full"
     neural_router_shadow_enabled: bool = True
     neural_router_routing_enabled: bool = True
     neural_router_min_confidence: float = Field(default=0.10, ge=0.0, le=1.0)
@@ -446,6 +502,11 @@ class Settings(BaseSettings):
     research_visible_sources: int = 5
     research_synthesis_max_tokens: int = 900
     research_short_max_tokens: int = 220
+    research_final_answer_max_tokens: int = Field(default=1_200, ge=256, le=8_192)
+    research_deep_final_max_tokens: int = Field(default=1_800, ge=512, le=12_000)
+    research_final_output_reserve_tokens: int = Field(default=1_800, ge=256, le=12_000)
+    research_max_synthesis_attempts: int = Field(default=3, ge=1, le=3)
+    research_max_output_continuations: int = Field(default=2, ge=0, le=2)
     unity_allowed_bridge_commands: tuple[str, ...] = ()
     unity_blocked_bridge_commands: tuple[str, ...] = ()
     unity_require_confirmation_for_editor_commands: bool = True

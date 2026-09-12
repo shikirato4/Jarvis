@@ -9,6 +9,7 @@ __pycache__/
 *.env
 runtime/
 runtime_*/
+.tmp_research_v2_*/
 outputs/
 outputs/images/
 models/**/*.safetensors

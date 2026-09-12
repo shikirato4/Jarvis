@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from jarvis.cognition.capabilities import install_cognitive_capabilities
 from jarvis.cognition.orchestrator import CognitiveOrchestrator
 from jarvis.config import Settings
@@ -11,7 +13,8 @@ from jarvis.modules.security_module import SecurityModule
 from jarvis.modules.system_module import SystemModule
 from jarvis.modules.vision_module import VisionModule
 from jarvis.modules.voice_interface_module import VoiceInterfaceModule
-from jarvis.models_runtime.base import ModelResponse, ModelToolCall, ProviderKind
+from jarvis.models_runtime.base import ModelResponse, ProviderKind
+from jarvis.web_search import RawPage, SourceFetcher, WebSearchHit, WebSearchResponse
 
 
 class _NoOpDependency:
@@ -79,49 +82,66 @@ def test_orchestrator_routes_science_and_security_to_specialized_runtimes() -> N
     assert orchestrator._infer_intent("evalua esta contrasena password123", {}, correlation_id="routing-security") == "security"  # noqa: SLF001
 
 
-def test_chat_engine_routes_research_request(tmp_path) -> None:
+@pytest.mark.parametrize("provider_kind", [ProviderKind.LOCAL, ProviderKind.REMOTE])
+def test_chat_engine_routes_research_request_through_shared_pipeline(tmp_path, provider_kind) -> None:
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
         ui_backend_kind="in_memory",
+        local_runtime_autostart=False,
+        nvidia_api_key=None,
+        web_search_enabled=False,
     )
     app, desktop = build_desktop_runtime(settings)
     requests = []
 
     def infer(request):
         requests.append(request)
-        if request.messages[-1].role == "tool":
-            return ModelResponse(
-                provider_name="nemotron-test",
-                provider_kind=ProviderKind.LOCAL,
-                logical_model=request.logical_model or "general_assistant",
-                model_name="nemotron-test",
-                content="Investigación completada.",
-                latency_ms=1.0,
-            )
         return ModelResponse(
             provider_name="nemotron-test",
-            provider_kind=ProviderKind.LOCAL,
+            provider_kind=provider_kind,
             logical_model=request.logical_model or "general_assistant",
             model_name="nemotron-test",
-            tool_calls=[
-                ModelToolCall(
-                    id="research-1",
-                    name="research.run_task",
-                    arguments={"query": "agujeros negros"},
-                )
-            ],
+            content="Investigación completada con evidencia. [S1]",
             latency_ms=1.0,
         )
 
-    app.agent_controller._infer_model = infer  # noqa: SLF001
+    class FakeWeb:
+        def search(self, query, *, max_results=5):  # noqa: ARG002
+            return WebSearchResponse(
+                status="ok",
+                provider="fake",
+                query=query,
+                hits=[
+                    WebSearchHit(
+                        title="Agujeros negros",
+                        url="https://example.com/black-holes",
+                        snippet="Evidencia astronómica",
+                        rank=1,
+                    )
+                ],
+            )
+
+    app.web_research_orchestrator.provider = FakeWeb()
+    app.web_research_orchestrator.fetcher = SourceFetcher(
+        resolver=lambda *_args, **_kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
+        transport=lambda url, _timeout, _max_bytes: RawPage(
+            url=url,
+            content_type="text/html",
+            body=b"<article>Agujeros negros evidencia astronomica fuente primaria</article>",
+            headers={"content-type": "text/html"},
+        ),
+    )
+    app.model_service.infer = infer  # type: ignore[method-assign]
     try:
         response = desktop.send_chat("investiga agujeros negros")
         assert response.message.content
         assert "orchestrated" not in response.message.content
-        assert response.raw_result.get("task_id")
-        assert [request.messages[-1].role for request in requests] == ["user", "tool"]
+        assert response.raw_result["research"]["session_id"]
+        assert len(requests) == 1
+        assert requests[0].metadata["search_mode"] == "normal"
     finally:
         app.stop()
 

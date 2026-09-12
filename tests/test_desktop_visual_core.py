@@ -21,10 +21,14 @@ def test_reactor_widget_and_window_boot(tmp_path) -> None:
     assert reactor.minimumSizeHint().height() <= 220
 
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
         ui_backend_kind="in_memory",
+        local_runtime_autostart=False,
+        nvidia_api_key=None,
+        web_search_enabled=False,
     )
     backend, desktop = build_desktop_runtime(settings)
     try:
@@ -58,10 +62,14 @@ def test_window_geometry_fits_available_screen(tmp_path) -> None:
     available = screen.availableGeometry()
 
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
         ui_backend_kind="in_memory",
+        local_runtime_autostart=False,
+        nvidia_api_key=None,
+        web_search_enabled=False,
     )
     backend, desktop = build_desktop_runtime(settings)
     try:
@@ -69,11 +77,16 @@ def test_window_geometry_fits_available_screen(tmp_path) -> None:
         window.show()
         app.processEvents()
 
-        frame = window.frameGeometry()
-        assert frame.width() <= available.width()
-        assert frame.height() <= available.height()
+        # On Windows a maximized native frame intentionally extends its
+        # invisible resize border a few pixels beyond availableGeometry
+        # (for example y=-7, height=available+7).  The Qt-managed client
+        # geometry is the user-visible area we actually need to constrain.
+        client = window.geometry()
+        assert client.width() <= available.width()
+        assert client.height() <= available.height()
         assert window.minimumSizeHint().height() <= available.height()
     finally:
+        window.close()
         backend.stop()
 
 
@@ -87,10 +100,14 @@ def test_window_geometry_defaults_are_safe_for_full_hd(tmp_path, monkeypatch) ->
     monkeypatch.setattr(JarvisDesktopWindow, "_available_geometry", lambda self: QRect(0, 0, 1920, 1080))
 
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
         ui_backend_kind="in_memory",
+        local_runtime_autostart=False,
+        nvidia_api_key=None,
+        web_search_enabled=False,
     )
     backend, desktop = build_desktop_runtime(settings)
     try:
@@ -116,10 +133,14 @@ def test_window_refresh_skips_full_repaint_when_state_is_unchanged(tmp_path) -> 
 
     app = create_qt_application()
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
         ui_backend_kind="in_memory",
+        local_runtime_autostart=False,
+        nvidia_api_key=None,
+        web_search_enabled=False,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
     )
@@ -150,10 +171,14 @@ def test_stitch_inspired_shell_maps_real_jarvis_surfaces(tmp_path) -> None:
 
     app = create_qt_application()
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
         ui_backend_kind="in_memory",
+        local_runtime_autostart=False,
+        nvidia_api_key=None,
+        web_search_enabled=False,
     )
     backend, desktop = build_desktop_runtime(settings)
     try:
@@ -176,7 +201,7 @@ def test_stitch_inspired_shell_maps_real_jarvis_surfaces(tmp_path) -> None:
         assert window._openai_badge.isHidden()  # noqa: SLF001
         assert window._gemini_badge.isHidden()  # noqa: SLF001
         context = window._context_output.toPlainText()  # noqa: SLF001
-        assert "Qwen local + Nemotron online" in context or "Qwen 3.8" in context
+        assert "Modelo activo/configurado: Qwen3.5-9B-IQ4_XS" in context
         assert window._right_tabs.count() >= 7  # noqa: SLF001
     finally:
         window.close()

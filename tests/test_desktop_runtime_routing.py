@@ -6,9 +6,15 @@ from jarvis.bootstrap import build_application
 from jarvis.config import Settings
 from jarvis.core.errors import JarvisError
 from jarvis.desktop import build_desktop_runtime
-from jarvis.models_runtime.base import ModelRequest, ModelResponse, ModelToolCall, ProviderKind
-from jarvis.modules.web_module import build_web_search_action
+from jarvis.models_runtime.base import (
+    ModelRequest,
+    ModelResponse,
+    ModelToolCall,
+    ModelUsage,
+    ProviderKind,
+)
 from jarvis.routing.models import TaskRequest
+from jarvis.web_search import RawPage, SourceFetcher
 
 
 class FixedModelResponse:
@@ -18,7 +24,10 @@ class FixedModelResponse:
         self.model_name = "fixed"
         self.fallback_used = False
         self.provider_name = "nemotron_omni_local"
+        self.provider_kind = ProviderKind.LOCAL
         self.tool_calls = list(tool_calls or [])
+        self.usage = ModelUsage()
+        self.metadata: dict[str, object] = {}
 
     def model_dump(self, mode: str = "json") -> dict:
         return {
@@ -26,7 +35,11 @@ class FixedModelResponse:
             "logical_model": self.logical_model,
             "model_name": self.model_name,
             "fallback_used": self.fallback_used,
+            "provider_name": self.provider_name,
+            "provider_kind": self.provider_kind.value,
             "tool_calls": [call.model_dump(mode="json") for call in self.tool_calls],
+            "usage": self.usage.model_dump(mode="json"),
+            "metadata": self.metadata,
         }
 
 
@@ -34,6 +47,19 @@ def _install_model_inference(app, infer_model) -> None:
     """Install the same model double on direct and agent-mediated chat paths."""
     app.runtime_service.infer_model = infer_model  # type: ignore[method-assign]
     app.agent_controller._infer_model = infer_model  # type: ignore[method-assign]  # noqa: SLF001
+
+
+def _install_research_pages(app, provider) -> None:
+    app.web_research_orchestrator.provider = provider
+    app.web_research_orchestrator.fetcher = SourceFetcher(
+        resolver=lambda *_args, **_kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
+        transport=lambda url, _timeout, _max_bytes: RawPage(
+            url=url,
+            content_type="text/html",
+            body=b"<article>Actualidad tecnologica verificada en la fuente recuperada.</article>",
+            headers={"content-type": "text/html"},
+        ),
+    )
 
 
 def _install_desktop_tool_model(app, *, goal: str, final_content: str) -> None:
@@ -209,22 +235,11 @@ def test_desktop_chat_web_query_uses_brave_context_when_available(tmp_path, monk
             )
 
     fake_web = FakeWeb()
-    web_action = build_web_search_action(fake_web)
-    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
+    _install_research_pages(app, fake_web)
 
     def _infer_model(request: ModelRequest):
         captured.append(request)
-        if request.messages[-1].role != "tool":
-            return FixedModelResponse(
-                tool_calls=[
-                    ModelToolCall(
-                        id="web-routing-1",
-                        name="web.search",
-                        arguments={"query": "noticias de tecnologia hoy"},
-                    )
-                ]
-            )
-        return FixedModelResponse("Busque en la web.\n\nResumen:\nActualidad tecnologica.\n\nFuentes:\n1. Tech News - example.com")
+        return FixedModelResponse("Busque en la web con evidencia recuperada. [S1]")
 
     _install_model_inference(app, _infer_model)
     desktop._voice.speak_response = lambda _text: None  # type: ignore[method-assign]  # noqa: SLF001
@@ -232,9 +247,9 @@ def test_desktop_chat_web_query_uses_brave_context_when_available(tmp_path, monk
         response = desktop.send_chat("busca noticias de tecnologia hoy")
 
         assert "Busque en la web" in response.message.content
-        assert [request.messages[-1].role for request in captured] == ["user", "tool"]
-        assert captured[1].messages[-1].name == "web.search"
-        assert response.raw_result["provider"] == "brave"
+        assert len(captured) == 1
+        assert captured[0].metadata["source"] == "web_research"
+        assert response.raw_result["research"]["metrics"]["opened_sources"] == 1
     finally:
         app.stop()
 
@@ -264,23 +279,9 @@ def test_desktop_chat_reports_local_model_timeout_after_web_sources(tmp_path, mo
             )
 
     fake_web = FakeWeb()
-    web_action = build_web_search_action(fake_web)
-    app.action_registry.get("web.search").handler = web_action.handler  # type: ignore[union-attr]
-    calls = 0
+    _install_research_pages(app, fake_web)
 
     def _infer_then_timeout(_request):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            return FixedModelResponse(
-                tool_calls=[
-                    ModelToolCall(
-                        id="web-timeout-1",
-                        name="web.search",
-                        arguments={"query": "noticias de tecnologia hoy"},
-                    )
-                ]
-            )
         raise TimeoutError("timed out")
 
     _install_model_inference(app, _infer_then_timeout)
@@ -288,11 +289,11 @@ def test_desktop_chat_reports_local_model_timeout_after_web_sources(tmp_path, mo
     try:
         response = desktop.send_chat("busca noticias de tecnologia hoy")
 
-        assert "fuentes ya habían sido recuperadas" in response.message.content
+        assert "Recuperé evidencia" in response.message.content
         assert "Tech News" in response.message.content
         assert "Traceback" not in response.message.content
-        assert response.raw_result["error_type"] == "TimeoutError"
-        assert response.raw_result["provider"] == "brave"
+        assert response.raw_result["status"] == "partial"
+        assert response.raw_result["synthesis_error"] == "provider_timeout"
     finally:
         app.stop()
 

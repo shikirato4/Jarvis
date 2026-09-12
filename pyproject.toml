@@ -70,6 +70,10 @@ where = ["src"]
 pythonpath = ["src"]
 testpaths = ["tests"]
 addopts = "-p no:cacheprovider"
+markers = [
+  "integration: exercises an explicitly opted-in real external service",
+  "e2e: exercises a complete end-to-end path and may require external infrastructure",
+]
 norecursedirs = [
   ".git",
   ".venv",

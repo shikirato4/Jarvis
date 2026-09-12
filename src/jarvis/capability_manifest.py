@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections import defaultdict
+from typing import Any
+
 
 _REAL_CAPABILITIES = (
     "Chat híbrido con Nemotron 3 Nano Omni: NVIDIA API o endpoint NVFP4 local según el modo elegido.",
@@ -51,16 +54,49 @@ def is_capability_query(text: str) -> bool:
     )
 
 
-def get_capabilities_summary() -> str:
+def build_capability_manifest(
+    tool_schemas: list[dict[str, Any]] | None = None,
+    *,
+    deep_research_available: bool = False,
+) -> dict[str, tuple[str, ...]]:
+    """Build a compact provider-neutral manifest from executable schemas."""
+
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for schema in tool_schemas or []:
+        function = schema.get("function") if isinstance(schema, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        if not isinstance(name, str) or not name:
+            continue
+        category = name.split(".", 1)[0] if "." in name else "general"
+        if name not in grouped[category]:
+            grouped[category].append(name)
+    if deep_research_available:
+        grouped["web"].append("web.deep_research")
+    return {
+        category: tuple(sorted(set(names)))
+        for category, names in sorted(grouped.items())
+    }
+
+
+def get_capabilities_summary(
+    tool_schemas: list[dict[str, Any]] | None = None,
+    *,
+    deep_research_available: bool = False,
+) -> str:
+    manifest = build_capability_manifest(
+        tool_schemas,
+        deep_research_available=deep_research_available,
+    )
     lines = [
         "Puedo ayudarte con funciones reales de Jarvis:",
         "",
         *_format_items(_REAL_CAPABILITIES),
-        "",
-        "Limites actuales:",
-        "",
-        *_format_items(_NOT_ENABLED),
     ]
+    if manifest:
+        lines.extend(["", "Capacidades ejecutables disponibles ahora:", ""])
+        for category, names in manifest.items():
+            lines.append(f"- {category}: {', '.join(names)}")
+    lines.extend(["", "Limites actuales:", "", *_format_items(_NOT_ENABLED)])
     return "\n".join(lines)
 
 

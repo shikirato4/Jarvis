@@ -12,6 +12,8 @@ from jarvis.security_runtime.secrets import NvidiaSecretManager
 
 RUN_LIVE = os.getenv("RUN_NVIDIA_LIVE_TESTS", "").strip().casefold() == "true"
 
+pytestmark = [pytest.mark.integration, pytest.mark.e2e]
+
 
 @pytest.mark.skipif(
     not RUN_LIVE,

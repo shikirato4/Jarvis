@@ -97,10 +97,14 @@ class FakeCodeAgent:
 
 def _settings(tmp_path) -> Settings:
     return Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
         ui_backend_kind="in_memory",
+        local_runtime_autostart=False,
+        nvidia_api_key=None,
+        web_search_enabled=False,
         voice_audio_output_backend_default="in_memory",
         voice_tts_provider_default="in_memory",
     )
@@ -190,13 +194,31 @@ def test_desktop_pin_is_not_persisted_or_rendered(tmp_path) -> None:
         desktop.shutdown()
 
 
-def test_desktop_service_sanitizes_dev_action_exceptions(tmp_path) -> None:
+def test_desktop_service_sanitizes_dev_action_exceptions(tmp_path, monkeypatch) -> None:
+    import jarvis.desktop_runtime.service as desktop_service
+
     class ExplodingCodeAgent(FakeCodeAgent):
         def llm_status(self):
             raise RuntimeError("token=abc123 leaked from .env")
 
     backend, desktop = build_desktop_runtime(_settings(tmp_path))
     desktop._code_agent = ExplodingCodeAgent()  # noqa: SLF001
+    monkeypatch.setattr(
+        desktop_service,
+        "detect_environment",
+        lambda **_kwargs: SimpleNamespace(
+            internet_available=False,
+            local_endpoint=LocalEndpointStatus(
+                available=False,
+                reachable=False,
+                models=[],
+            ),
+            recommended_mode="local",
+            recommended_local_provider="qwen_local",
+            recommended_local_model="Qwen3.5-9B-IQ4_XS",
+            warnings=[],
+        ),
+    )
     try:
         result = desktop.execute_dev_action("doctor")
         rendered = str(result)

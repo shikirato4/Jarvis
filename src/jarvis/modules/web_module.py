@@ -20,15 +20,18 @@ class WebSearchPayload(BaseModel):
 def build_web_search_action(provider: WebSearchProvider) -> ActionDefinition:
     def search(_context: ActionContext, payload: WebSearchPayload) -> ActionResult:
         response = provider.search(payload.query, max_results=payload.max_results)
-        successful = response.status in {"ok", "empty"}
+        # A bounded provider failure is a valid tool observation. Returning it
+        # to the model as data lets local and online agents continue normally
+        # (and explain the limitation) without pretending that Brave worked.
+        successful = response.status != "blocked"
         return ActionResult(
             status=(
                 ExecutionStatus.SUCCESS if successful else ExecutionStatus.FAILED
             ),
             message=(
-                "web search completed"
+                "web search request handled"
                 if successful
-                else "web search was not completed"
+                else "web search request blocked"
             ),
             data=response.model_dump(mode="json"),
         )
@@ -36,8 +39,9 @@ def build_web_search_action(provider: WebSearchProvider) -> ActionDefinition:
     return ActionDefinition(
         name="web.search",
         description=(
-            "Search the public web for current information. Use only when the "
-            "user needs recent facts or external sources; never include secrets."
+            "Search the public web or Internet for current information (buscar, "
+            "busca, noticias, novedades, fuentes). Use only when the user needs "
+            "recent facts or external sources; never include secrets."
         ),
         payload_model=WebSearchPayload,
         handler=search,
@@ -49,7 +53,7 @@ def build_web_search_action(provider: WebSearchProvider) -> ActionDefinition:
 
 class WebModule:
     name = "web"
-    description = "Public web search exposed as a Nemotron agent tool."
+    description = "Public web search exposed as a provider-neutral JARVIS agent tool."
 
     def __init__(
         self,

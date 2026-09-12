@@ -1,0 +1,166 @@
+{
+  "candidate": {
+    "argument_validity_rate": 1.0,
+    "by_category": {
+      "action_vs_information": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "argument_extraction": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "capability_absent": {
+        "count": 1,
+        "selection_accuracy": 1.0
+      },
+      "capability_present": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "correct_tool_selection": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "irrelevant_distractors": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "multi_tool": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "no_false_capability_denial": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "no_false_success": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "output_concision": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "parameter_ambiguity": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "tool_failure": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      }
+    },
+    "by_surface": {
+      "fictitious_tool": {
+        "count": 10,
+        "selection_accuracy": 0.8
+      },
+      "non_tool_control": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "real_tool": {
+        "count": 11,
+        "selection_accuracy": 0.6364
+      }
+    },
+    "cases": 23,
+    "first_response_nonempty_rate": 1.0,
+    "mean_latency_ms": 6948.43,
+    "mean_prompt_tokens": 884.13,
+    "runtime_failures": 0,
+    "tool_selection_accuracy": 0.7391,
+    "unnecessary_tool_rate": 0.0435
+  },
+  "control": {
+    "argument_validity_rate": 1.0,
+    "by_category": {
+      "action_vs_information": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "argument_extraction": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "capability_absent": {
+        "count": 1,
+        "selection_accuracy": 1.0
+      },
+      "capability_present": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "correct_tool_selection": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "irrelevant_distractors": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "multi_tool": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "no_false_capability_denial": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "no_false_success": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "output_concision": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "parameter_ambiguity": {
+        "count": 2,
+        "selection_accuracy": 0.5
+      },
+      "tool_failure": {
+        "count": 2,
+        "selection_accuracy": 0.0
+      }
+    },
+    "by_surface": {
+      "fictitious_tool": {
+        "count": 10,
+        "selection_accuracy": 0.8
+      },
+      "non_tool_control": {
+        "count": 2,
+        "selection_accuracy": 1.0
+      },
+      "real_tool": {
+        "count": 11,
+        "selection_accuracy": 0.6364
+      }
+    },
+    "cases": 23,
+    "first_response_nonempty_rate": 1.0,
+    "mean_latency_ms": 5024.51,
+    "mean_prompt_tokens": 347.61,
+    "runtime_failures": 0,
+    "tool_selection_accuracy": 0.7391,
+    "unnecessary_tool_rate": 0.0435
+  },
+  "delta": {
+    "argument_validity_rate": 0.0,
+    "first_response_nonempty_rate": 0.0,
+    "mean_latency_ms": 1923.92,
+    "tool_selection_accuracy": 0.0,
+    "unnecessary_tool_rate": 0.0
+  },
+  "deterministic": {
+    "max_tokens": 512,
+    "seed": 42,
+    "temperature": 0,
+    "top_p": 1
+  },
+  "evaluation_source": "C:\\Users\\shiki\\Documents\\jarvis\\Jarvis\\training\\agentic_lora\\data\\canonical\\validation.jsonl",
+  "model": "Qwen3.5-9B-IQ4_XS",
+  "sample_size_per_arm": 23
+}

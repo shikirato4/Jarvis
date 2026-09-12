@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -134,6 +135,37 @@ class QwenLocalProvider(OpenAICompatibleProvider):
                     f"{str(system_message.get('content') or '').rstrip()}\n"
                     f"{budget_instruction}"
                 )
+        # The controller normally supplies an already-selected subset. Keep a
+        # defensive provider boundary for direct callers: remove duplicate
+        # schemas and do not expose terminal execution for an informational
+        # "how/which command" question.
+        tools_by_name: dict[str, dict[str, Any]] = {}
+        for tool in payload.get("tools", []):
+            function = tool.get("function") if isinstance(tool, dict) else None
+            name = function.get("name") if isinstance(function, dict) else None
+            if isinstance(name, str) and name:
+                tools_by_name.setdefault(name, tool)
+        payload["tools"] = list(tools_by_name.values())
+        user_text = " ".join(
+            str(message.get("content") or "")
+            for message in payload.get("messages", [])
+            if isinstance(message, dict) and message.get("role") == "user"
+        )
+        folded = "".join(
+            character
+            for character in unicodedata.normalize("NFKD", user_text.casefold())
+            if not unicodedata.combining(character)
+        ).lstrip("¿¡ ")
+        informational_terminal = bool(
+            re.match(r"(?:como|que|how|what)\b", folded)
+            and re.search(r"\b(?:comando|command|terminal|python|version)\b", folded)
+        )
+        if informational_terminal:
+            payload["tools"] = [
+                tool
+                for tool in payload["tools"]
+                if not str(tool.get("function", {}).get("name", "")).startswith("terminal.")
+            ]
         # Jarvis keeps dotted action ids internally, while llama.cpp validates
         # function names against the OpenAI wire grammar. Encode only the wire
         # payload and restore canonical ids at the provider boundary.
@@ -167,111 +199,8 @@ class QwenLocalProvider(OpenAICompatibleProvider):
                 function["name"] = self._wire_tool_names.get(
                     function.get("name"), function.get("name")
                 )
-        # The default local context is 4096 tokens. Sending every registered
-        # action schema can exceed it before Qwen sees the user message. Keep
-        # the full registry for large-context servers, but on the compact
-        # default select schemas whose names/descriptions match the request;
-        # calculator expressions explicitly retain the calculator action.
-        if len(payload.get("tools", [])) > 16:
-            # Capability-awareness system messages enumerate every namespace.
-            # Intent must come from the user's words or "files" in that catalog
-            # falsely suppresses terminal tools.
-            user_text = " ".join(
-                str(message.get("content") or "")
-                for message in payload.get("messages", [])
-                if isinstance(message, dict) and message.get("role") == "user"
-            )
-            text = (
-                user_text
-                or " ".join(
-                    str(message.get("content") or "")
-                    for message in payload.get("messages", [])
-                    if isinstance(message, dict)
-                )
-            ).casefold()
-            words = set(re.findall(r"[a-záéíóúñ_]{3,}", text))
-            file_intent = bool(
-                words
-                & {
-                    "file",
-                    "files",
-                    "archivo",
-                    "archivos",
-                    "folder",
-                    "carpeta",
-                    "carpetas",
-                    "descargas",
-                    "downloads",
-                    "documentos",
-                    "documents",
-                }
-            )
-            empty_file_search_observed = any(
-                isinstance(message, dict)
-                and message.get("role") == "tool"
-                and str(message.get("name") or "").replace("__", ".")
-                == "files.search"
-                and '"items":[]' in str(message.get("content") or "").replace(" ", "")
-                for message in payload.get("messages", [])
-            )
-            terminal_action_intent = self._terminal_action_intent(text, words)
-            ranked: list[tuple[int, int, dict[str, Any]]] = []
-            for tool in payload["tools"]:
-                function = tool.get("function", {})
-                wire_name = str(function.get("name", "")).casefold()
-                canonical_name = wire_name.replace("__", ".")
-                namespace = canonical_name.split(".", 1)[0]
-                description = str(function.get("description", "")).casefold()
-                name_tokens = set(re.findall(r"[a-záéíóúñ_]{3,}", canonical_name))
-                description_tokens = set(re.findall(r"[a-záéíóúñ_]{3,}", description))
-                score = 0
-                if canonical_name and canonical_name in text:
-                    score += 100
-                if namespace in words:
-                    score += 30
-                if file_intent and namespace == "files":
-                    score += 60
-                elif file_intent and namespace in {"terminal", "operations"}:
-                    score -= 20
-                score += 8 * len(words & name_tokens)
-                score += len(words & description_tokens)
-                if score:
-                    ranked.append((score, -len(ranked), tool))
-            ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-            selected = [item[2] for item in ranked]
-            if terminal_action_intent or empty_file_search_observed:
-                terminal_tools = [
-                    tool
-                    for tool in payload["tools"]
-                    if str(tool.get("function", {}).get("name", "")).startswith(
-                        "terminal__"
-                    )
-                ]
-                selected = terminal_tools + [
-                    tool for tool in selected if tool not in terminal_tools
-                ]
-            if file_intent and not empty_file_search_observed:
-                # Do not prepend the whole files namespace: fourteen schemas
-                # consumed ~2K tokens in a measured 4096-token request. The
-                # ranked subset retains operations named/described by the user
-                # and leaves a real continuation budget after observations.
-                selected = [
-                    tool
-                    for tool in selected
-                    if not str(tool.get("function", {}).get("name", "")).startswith(
-                        ("terminal__", "operations__")
-                    )
-                ]
-            if any(char.isdigit() for char in text) and any(
-                char in text for char in "+-*/×÷%"
-            ):
-                selected.extend(
-                    tool
-                    for tool in payload["tools"]
-                    if tool not in selected
-                    and tool.get("function", {}).get("name") == "calculator__evaluate"
-                )
-            payload["tools"] = selected[:8]
+        # Tool relevance is owned by AgenticPromptPolicy. The provider only
+        # applies the defensive direct-call rules above and wire-renames ids.
         # llama.cpp/Qwen exposes a verified binary switch for thinking. LOW is
         # served by that non-thinking mode so a modest completion budget cannot
         # be consumed entirely by hidden reasoning; MEDIUM/XHIGH keep thinking
@@ -291,48 +220,6 @@ class QwenLocalProvider(OpenAICompatibleProvider):
                 request.metadata["chat_template_kwargs"]
             )
         return payload
-
-    @staticmethod
-    def _terminal_action_intent(text: str, words: set[str]) -> bool:
-        """Keep terminal tools for explicit machine-action requests only."""
-        action_words = {
-            "check",
-            "comprueba",
-            "compruebe",
-            "ejecuta",
-            "ejecute",
-            "inspect",
-            "limpia",
-            "limpiar",
-            "borra",
-            "borrar",
-            "vacía",
-            "vacia",
-            "flush",
-            "revisa",
-            "revise",
-            "run",
-            "verifica",
-            "verifique",
-        }
-        machine_terms = {
-            "python",
-            "terminal",
-            "version",
-            "versión",
-            "instalada",
-            "installed",
-            "dns",
-            "cache",
-            "caché",
-        }
-        informational = (
-            text.lstrip().startswith(("¿cómo", "como ", "cómo ", "what ", "qué "))
-            or "qué comando" in text
-            or "como puedo" in text
-            or "cómo puedo" in text
-        )
-        return bool(words & action_words and words & machine_terms) and not informational
 
     def _restore_tool_names(self, response):
         reverse = {

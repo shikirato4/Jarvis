@@ -266,6 +266,102 @@ vLLM declara soporte para esas cuatro opciones; un adaptador futuro que no sopor
 
 El equipo usado para esta auditoría tiene aproximadamente 13.9 GiB de RAM, PyTorch 2.11 CPU-only, CUDA no disponible, ningún GPU NVFP4 verificable y vLLM ausente. El diagnóstico local rechaza el lanzamiento porque NVFP4 requiere NVIDIA Blackwell con compute capability 10.0 o superior, CUDA/backend compatible y memoria suficiente; el repositorio oficial del checkpoint publica aproximadamente 22.4 GB de archivos. Por tanto, **NVFP4 no fue ejecutado en este equipo**. La arquitectura, endpoint, launcher y failover sí se verifican con mocks y un servidor HTTP OpenAI-compatible real, y quedan listos para hardware compatible o un host externo.
 
+## Research System V2: Web y archivos compartidos
+
+`web.search`, `files.search`, `files.search_content` y `files.read_text` se
+registran en la capa común de acciones. El modelo local y el online reciben el
+mismo registro y sólo el subconjunto relevante para cada petición.
+
+Configura el `.env` situado en la raíz del repositorio:
+
+```dotenv
+BRAVE_SEARCH_API_KEY=tu_clave
+YDC_API_KEY=tu_clave_you
+EXA_API_KEY=tu_clave_exa
+SEARXNG_BASE_URL=http://127.0.0.1:8080
+JARVIS_WEB_SEARCH_PROVIDER=brave
+JARVIS_WEB_SEARCH_ENABLED=true
+```
+
+`BRAVE_SEARCH_API_KEY` es el nombre canónico. Por compatibilidad también se
+aceptan `JARVIS_BRAVE_SEARCH_API_KEY` y `BRAVE_API_KEY`. El archivo `.env` se
+resuelve desde la raíz del proyecto, aunque JARVIS se inicie desde otra carpeta.
+
+Comprobaciones seguras:
+
+```powershell
+python -m jarvis web status
+python -m jarvis web health
+python -m jarvis web search "OpenAI" --max-results 1
+```
+
+`status` no consume peticiones y muestra You, Brave, Exa y SearXNG por separado;
+`health` hace una consulta mínima por proveedor configurado. You es el buscador
+general preferido, Exa aporta recuperación semántica/técnica y highlights,
+Brave se conserva como proveedor completo y SearXNG es cobertura local opcional.
+El router elige por intención, disponibilidad y profundidad; un fallo temporal
+no desactiva permanentemente ninguna herramienta.
+
+### Web Search y Deep Research
+
+JARVIS separa `ResearchDepth` (`NONE`, `NORMAL`, `DEEP`) de `SourceScope`
+(`AUTO`, `FILES`, `WEB`, `FILES_AND_WEB`). Una petición explícita a archivos
+nunca llama a Web ni cambia silenciosamente de fuente; una petición combinada
+busca ambos lados, conserva procedencia y jamás incorpora fragmentos privados a
+las consultas públicas.
+
+JARVIS normaliza, deduplica y ordena
+los candidatos, abre un conjunto diverso de páginas públicas, extrae fragmentos
+relevantes y conserva la relación entre evidencia, fuente y cita. El mismo
+orquestador se usa con el modelo local y con el online; el LLM sintetiza la
+evidencia, pero no controla la búsqueda ni puede inventar URLs válidas.
+
+`auto` elige `no_web`, `quick` o `normal` según intención y freshness; nunca
+activa `deep` por sí solo. Usa el botón **Deep Research** o
+`/deepresearch <pregunta>` para el presupuesto amplio y adaptativo. Durante la
+ejecución la UI muestra únicamente actividad operacional y cifras reales; Stop
+cancela rondas y peticiones pendientes de forma cooperativa.
+
+```powershell
+python -m jarvis web search "OpenAI latest" --mode normal
+python -m jarvis web research "current small multimodal open-source models" --deep
+```
+
+Los límites centrales por defecto son techos de seguridad, no objetivos de
+calidad: 1/3/10 consultas para
+quick/normal/deep, 3/6/12 páginas, 8 resultados por consulta, 80 candidatos
+totales, 36 fragmentos, 12 000 tokens de contexto, 3 rondas, concurrencia 3/4
+para consultas/lecturas, timeout de 12 s y cachés de 120/600 s. Todas las
+opciones aparecen en `.env.example` con el prefijo `JARVIS_SEARCH_`. La
+investigación se detiene por cobertura de requisitos, contradicciones e
+información nueva; si llega a un techo sin cobertura, informa estado parcial.
+
+SearXNG no es requisito de arranque. Una instalación local reproducible está
+documentada en `docs/searxng.md`; JARVIS lo detecta únicamente cuando
+`SEARXNG_BASE_URL` está configurado y el health check responde.
+
+La síntesis reserva 1 800 tokens de salida para Deep Research (1 200 en
+búsqueda normal), desactiva razonamiento oculto durante la redacción final y
+permite como máximo dos continuaciones internas. Una respuesta cortada se
+fusiona y deduplica antes de crear la única burbuja final. Si las citas fallan,
+se intenta una reparación y luego una síntesis compacta; los tres intentos son
+el límite absoluto y todos vuelven a pasar por validación de IDs y URLs.
+
+El lector sólo permite HTTP(S) público, valida DNS y cada redirección, bloquea
+localhost/LAN/link-local/metadata/credenciales, limita bytes y tipos de
+contenido, y marca cada pasaje como no confiable. Las pruebas unitarias bloquean
+tráfico externo por defecto; las pruebas reales viven en `tests/integration/` y
+sólo se activan con `RUN_WEB_RESEARCH_LIVE_TESTS=1` o
+`RUN_WEB_RESEARCH_E2E=1`. La regresión médica general del fallo de síntesis se
+activa aparte con `RUN_CANCER_DEEP_RESEARCH_E2E=1`.
+
+El agente obtiene sus capacidades ejecutables del registro central de acciones,
+no de una lista aprendida por el modelo. Local y online reciben la misma fuente
+de verdad; cuando el catálogo crece se seleccionan schemas relevantes para la
+consulta. El manifiesto visible agrupa nombres reales como `files.search`,
+`files.read_text`, `web.search` y la capacidad orquestada
+`web.deep_research`.
+
 ## Adjuntos multimodales (`+`)
 
 El botón `+` está junto al campo de chat y abre categorías para imágenes, video, audio, documentos, texto, código y otros archivos seguros. Admite selección múltiple, arrastrar/soltar, pegar desde el portapapeles, teclado (`Enter`/`Space` para abrir y `Esc` para cerrar), vista previa, nombre/formato/tamaño/estado, cancelar, eliminar y reintentar. Puedes enviar texto junto con varios archivos; cambiar de modo no borra la cola.

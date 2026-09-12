@@ -8,6 +8,7 @@ from jarvis.actions.registry import ActionRegistry
 from jarvis.actions.router import ActionRouter
 from jarvis.action_executor import ActionExecutor, TypedActionSecurityGate
 from jarvis.agent_runtime import AgentController
+from jarvis.agent_runtime.prompt_policy import AgenticPromptPolicy
 from jarvis.attachments import (
     AttachmentService,
     AttachmentTypeRegistry,
@@ -150,7 +151,7 @@ from jarvis.writing_runtime import (
     WritingStyleAnalyzer,
 )
 from jarvis.writing_runtime.base import WritingModelAdapter
-from jarvis.web_search import build_web_search_provider
+from jarvis.web_search import WebResearchOrchestrator, build_web_search_router
 from jarvis.data_analyzer import DataAnalyzer
 from jarvis.routing.task_router import TaskRouter
 from jarvis.services.runtime import JarvisRuntimeService
@@ -297,6 +298,7 @@ class JarvisApplication:
     unity_runtime_service: UnityRuntimeService
     autonomy_service_runtime: AutonomyService
     research_runtime_service: ResearchRuntimeService
+    web_research_orchestrator: WebResearchOrchestrator
     science_runtime_service: ScienceRuntimeService
     security_runtime_service: SecurityRuntimeService
     self_improvement_runtime_service: SelfImprovementRuntimeService
@@ -668,6 +670,9 @@ class JarvisApplication:
 
 def build_application(settings: Settings | None = None) -> JarvisApplication:
     settings = settings or Settings()
+    # Web search belongs to the shared action layer, not to a local or remote
+    # model provider. Reuse one provider for research and the agent tool loop.
+    web_search_provider = build_web_search_router(settings)
     settings.prepare_environment()
     configure_logging(
         settings.log_level,
@@ -677,6 +682,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         backup_count=settings.log_file_backup_count,
     )
     logger = logging.getLogger("jarvis.app")
+    web_research_orchestrator = WebResearchOrchestrator(
+        web_search_provider,
+        settings,
+        logger=logger,
+    )
     detect_legacy_model_configuration()
     database = Database(
         settings.sqlalchemy_database_url, settings.sqlalchemy_engine_options()
@@ -932,12 +942,20 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         event_sink=event_bus.publish,
         shadow_observer=neural_router_shadow,
         max_repeated_signature=settings.agent_max_repeated_action_signature,
+        prompt_policy=AgenticPromptPolicy(
+            profile=(
+                settings.pre_lora_agentic_profile
+                if settings.pre_lora_agentic_scaffold_enabled
+                else "off"
+            )
+        ),
     )
     terminal_runtime = TerminalRuntime(event_sink=event_bus.publish)
     file_navigator = FileNavigator(
         settings.resolved_workspace_root,
         event_sink=event_bus.publish,
     )
+    web_research_orchestrator.file_navigator = file_navigator
     tool_registry = ToolRegistry(
         settings,
         memory_service,
@@ -1231,7 +1249,8 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         memory_service,
         vision_runtime_service,
         system_runtime_service,
-        web_provider=build_web_search_provider(),
+        web_provider=web_search_provider,
+        web_research=web_research_orchestrator,
         logger=logger,
     )
     research_analyzer = ResearchAnalyzer(research_model_adapter)
@@ -1326,7 +1345,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
             DataAnalyzer(output_dir=settings.resolved_data_dir / "artifacts" / "data")
         )
     )
-    module_registry.register(WebModule())
+    module_registry.register(WebModule(lambda: web_search_provider))
     module_registry.register(SecurityModule(security_runtime_service))
     module_registry.register(WriterModule())
     module_registry.register(WritingModule(writing_runtime_service))
@@ -1644,6 +1663,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         unity_runtime_service=unity_runtime_service,
         autonomy_service_runtime=autonomy_service_runtime,
         research_runtime_service=research_runtime_service,
+        web_research_orchestrator=web_research_orchestrator,
         science_runtime_service=science_runtime_service,
         security_runtime_service=security_runtime_service,
         self_improvement_runtime_service=self_improvement_runtime_service,

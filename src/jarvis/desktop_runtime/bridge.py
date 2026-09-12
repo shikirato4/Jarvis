@@ -27,11 +27,20 @@ class DesktopRuntimeBridge:
     def route_task(self, request: TaskRequest):
         return self._app.runtime_service.route(TaskRequest.model_validate(request))
 
+    def publish(self, event_name: str, payload: dict[str, Any]) -> None:
+        self._app.event_bus.publish(event_name, payload)
+
     def runtime_snapshot(self):
         return self._app.runtime_service.snapshot()
 
     def infer_model(self, request):
         return self._app.runtime_service.infer_model(request)
+
+    def selected_model_mode(self) -> str:
+        return self._app.model_service.provider_selection().selected_mode.value
+
+    def selected_model_context_tokens(self) -> int | None:
+        return self._app.model_service.provider_selection().capabilities.max_context_tokens
 
     def hud_dashboard(self) -> dict[str, Any]:
         return self._app.hud_runtime_service.dashboard()

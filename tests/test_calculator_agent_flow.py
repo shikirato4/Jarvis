@@ -131,10 +131,12 @@ def test_calculation_flows_nemotron_tool_result_nemotron() -> None:
     assert names == [
         "agent_controller.started",
         "agent_controller.model_requested",
+        "agent_controller.tool_calls_pending",
         "agent_controller.tool_requested",
         "action_executor.started",
         "action_executor.succeeded",
         "agent_controller.tool_observed",
+        "agent_controller.continuation_started",
         "agent_controller.model_requested",
         "agent_controller.completed",
     ]

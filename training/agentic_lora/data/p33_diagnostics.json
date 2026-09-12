@@ -1,0 +1,126 @@
+{
+  "brave_touched": false,
+  "cloud_used": false,
+  "completion": {
+    "continuation_tools_removed": true,
+    "continuations": 1,
+    "final_finish_reason": "stop",
+    "finish_reasons": [
+      "length",
+      "stop"
+    ],
+    "initial_budget": 2048,
+    "one_logical_answer": true,
+    "owner": "ModelService.OutputCompletionPolicy",
+    "request_class": "LONG_FORM_CHAT",
+    "segments": 2
+  },
+  "completion_matrix": [
+    {
+      "continuation": "bounded textual",
+      "explicit_cap": "authoritative",
+      "owner": "ModelService",
+      "path": "short/normal/long/extended chat"
+    },
+    {
+      "continuation": "bounded textual; schemas removed",
+      "explicit_cap": "authoritative",
+      "owner": "ModelService",
+      "path": "agent initial text"
+    },
+    {
+      "continuation": "never textual; one structured retry",
+      "explicit_cap": "authoritative",
+      "owner": "AgentController",
+      "path": "structured tool call"
+    },
+    {
+      "continuation": "bounded textual; no tools",
+      "explicit_cap": "authoritative",
+      "owner": "ModelService",
+      "path": "post-tool final"
+    },
+    {
+      "continuation": "bounded rounds/gain/sufficiency",
+      "explicit_cap": "query/page/round limits",
+      "owner": "WebResearchOrchestrator",
+      "path": "research planning/search"
+    },
+    {
+      "continuation": "before validation; max 2 plus max 3 repair attempts",
+      "explicit_cap": "research ceiling",
+      "owner": "ModelService then citation validator",
+      "path": "Deep Research synthesis/repair"
+    },
+    {
+      "continuation": "single logical stream",
+      "explicit_cap": "authoritative",
+      "owner": "ModelService",
+      "path": "desktop streaming"
+    },
+    {
+      "continuation": "single logical response",
+      "explicit_cap": "authoritative",
+      "owner": "ModelService",
+      "path": "non-streaming runtime service"
+    }
+  ],
+  "cost_usd": 0,
+  "deterministic_research": {
+    "citation_valid": true,
+    "duplicate_queries": 0,
+    "invalid_ids": [],
+    "parsed_citation_ids": [
+      "S1",
+      "S2"
+    ],
+    "rendered_verified_links": true,
+    "search_rounds": 1,
+    "searches": 4,
+    "source_ids": {
+      "S1": "source-3a42918cf2ac",
+      "S2": "source-ed9f56a5a7fd"
+    },
+    "source_ids_stable": true,
+    "sources": 2,
+    "status": "completed",
+    "stop_reason": "evidence_sufficient",
+    "synthesis_prompt_stable": true,
+    "task_success": true,
+    "unknown_numeric_id_not_promoted": true
+  },
+  "legacy_prompt_research": {
+    "arms": {
+      "compact": {
+        "cases": 2,
+        "exact_sequence_rate": 0.5,
+        "extra_search_cases": 0,
+        "missing_required_search_cases": 1,
+        "task_success_rate": 1.0
+      },
+      "control": {
+        "cases": 2,
+        "exact_sequence_rate": 0.5,
+        "extra_search_cases": 0,
+        "missing_required_search_cases": 1,
+        "task_success_rate": 1.0
+      },
+      "full": {
+        "cases": 2,
+        "exact_sequence_rate": 0.5,
+        "extra_search_cases": 1,
+        "missing_required_search_cases": 0,
+        "task_success_rate": 0.5
+      }
+    },
+    "available": true
+  },
+  "passed": true,
+  "phase": "P3.3",
+  "root_causes": {
+    "deep_research_source_only_fallback": "legacy explicit synthesis cap disabled automatic continuation; citation/fallback handling saw an incomplete or failed synthesis",
+    "research_sequence_50_percent": "exact-call-count metric conflated one sufficient search, one missing search, and one bounded extra-search loop",
+    "simple_information_length": "agent_initial was explicitly excluded from textual continuation"
+  },
+  "training_started": false
+}

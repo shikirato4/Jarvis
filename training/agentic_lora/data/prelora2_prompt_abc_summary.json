@@ -1,0 +1,179 @@
+{
+  "compact": {
+    "argument_validity": 1.0,
+    "by_category": {
+      "action_vs_information": {
+        "count": 3,
+        "tool_selection": 1.0
+      },
+      "capability_absent": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "capability_present": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "failure_recovery": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "false_execution": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "files": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "multi_tool": {
+        "count": 2,
+        "tool_selection": 1.0
+      },
+      "research": {
+        "count": 2,
+        "tool_selection": 0.5
+      },
+      "terminal": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "unseen_tool": {
+        "count": 1,
+        "tool_selection": 1.0
+      }
+    },
+    "cases": 14,
+    "failure_recovery": 1.0,
+    "false_execution_rate": 0.0,
+    "final_nonempty_rate": 1.0,
+    "first_tool_accuracy": 1.0,
+    "mean_cumulative_prompt_tokens": 2071.5,
+    "mean_total_latency_ms": 8498.94,
+    "multi_tool_continuation": 0.9286,
+    "runtime_failures": 0,
+    "tool_selection_accuracy": 0.9286,
+    "unnecessary_tool_rate": 0.0
+  },
+  "control": {
+    "argument_validity": 1.0,
+    "by_category": {
+      "action_vs_information": {
+        "count": 3,
+        "tool_selection": 0.6667
+      },
+      "capability_absent": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "capability_present": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "failure_recovery": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "false_execution": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "files": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "multi_tool": {
+        "count": 2,
+        "tool_selection": 1.0
+      },
+      "research": {
+        "count": 2,
+        "tool_selection": 0.5
+      },
+      "terminal": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "unseen_tool": {
+        "count": 1,
+        "tool_selection": 1.0
+      }
+    },
+    "cases": 14,
+    "failure_recovery": 1.0,
+    "false_execution_rate": 0.0,
+    "final_nonempty_rate": 0.9286,
+    "first_tool_accuracy": 0.9286,
+    "mean_cumulative_prompt_tokens": 1306.79,
+    "mean_total_latency_ms": 4487.24,
+    "multi_tool_continuation": 0.9286,
+    "runtime_failures": 0,
+    "tool_selection_accuracy": 0.8571,
+    "unnecessary_tool_rate": 0.0714
+  },
+  "deterministic": {
+    "max_tokens": 512,
+    "seed": 42,
+    "temperature": 0,
+    "top_p": 1
+  },
+  "full": {
+    "argument_validity": 1.0,
+    "by_category": {
+      "action_vs_information": {
+        "count": 3,
+        "tool_selection": 1.0
+      },
+      "capability_absent": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "capability_present": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "failure_recovery": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "false_execution": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "files": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "multi_tool": {
+        "count": 2,
+        "tool_selection": 1.0
+      },
+      "research": {
+        "count": 2,
+        "tool_selection": 0.5
+      },
+      "terminal": {
+        "count": 1,
+        "tool_selection": 1.0
+      },
+      "unseen_tool": {
+        "count": 1,
+        "tool_selection": 1.0
+      }
+    },
+    "cases": 14,
+    "failure_recovery": 1.0,
+    "false_execution_rate": 0.0,
+    "final_nonempty_rate": 0.9286,
+    "first_tool_accuracy": 1.0,
+    "mean_cumulative_prompt_tokens": 7417.14,
+    "mean_total_latency_ms": 6184.75,
+    "multi_tool_continuation": 0.9286,
+    "runtime_failures": 0,
+    "tool_selection_accuracy": 0.9286,
+    "unnecessary_tool_rate": 0.0
+  },
+  "model": "Qwen3.5-9B-IQ4_XS",
+  "sample_size_per_arm": 14,
+  "source": "prelora2_dev_cases.py"
+}

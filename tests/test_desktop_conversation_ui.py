@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from concurrent.futures import Future
 import time
 from threading import Event
 from types import SimpleNamespace
@@ -240,6 +241,78 @@ def test_window_submit_chat_clears_input_and_prevents_double_submit(tmp_path) ->
             window.refresh_view()  # noqa: SLF001
             app.processEvents()
             time.sleep(0.05)
+        window.close()
+        backend.stop()
+        window._desktop.shutdown()  # noqa: SLF001
+
+
+def test_deep_research_button_and_slash_command_use_the_same_backend_mode(tmp_path) -> None:
+    app = create_qt_application()
+    backend, window = _build_window(tmp_path)
+    calls: list[tuple[str, dict]] = []
+
+    def _capture(text: str, **kwargs):
+        calls.append((text, dict(kwargs.get("metadata") or {})))
+        future: Future = Future()
+        future.set_result(
+            DesktopChatResponse(
+                message=DesktopChatMessage(message_id=f"done-{len(calls)}", role="assistant", content="Done [S1]."),
+                raw_result={"search_mode": "deep"},
+            )
+        )
+        return future
+
+    try:
+        window._desktop.send_chat_async = _capture  # type: ignore[method-assign]  # noqa: SLF001
+        window.show()
+        window._deep_research_button.setChecked(True)  # noqa: SLF001
+        window._input.setText("compare current multimodal models")  # noqa: SLF001
+        window._submit_chat()  # noqa: SLF001
+        app.processEvents()
+        window.refresh_view()
+        app.processEvents()
+
+        window._last_submit_at = 0.0  # noqa: SLF001
+        window._input.setText("/deepresearch compare current multimodal models")  # noqa: SLF001
+        window._submit_chat()  # noqa: SLF001
+        app.processEvents()
+
+        assert [item[1]["search_mode"] for item in calls] == ["deep", "deep"]
+        assert calls[0][0] == "compare current multimodal models"
+        assert calls[1][0].startswith("/deepresearch")
+        assert window._deep_research_button.accessibleName() == "Deep Research"  # noqa: SLF001
+        assert "Search, read" in window._deep_research_button.toolTip()  # noqa: SLF001
+        assert window._stop_research_button.isVisible()  # noqa: SLF001
+        assert window._research_activity.isVisible()  # noqa: SLF001
+    finally:
+        window.close()
+        backend.stop()
+        window._desktop.shutdown()  # noqa: SLF001
+
+
+def test_deep_research_progress_exposes_only_operational_metrics(tmp_path) -> None:
+    create_qt_application()
+    backend, window = _build_window(tmp_path)
+    try:
+        backend.event_bus.publish(
+            "deep_research.progress",
+            {
+                "correlation_id": "research-test",
+                "stage": "reading",
+                "message": "Reading selected sources",
+                "sources_discovered": 12,
+                "sources_opened": 4,
+                "domains": 3,
+            },
+        )
+
+        progress = window._desktop.research_progress()  # noqa: SLF001
+
+        assert progress["stage"] == "reading"
+        assert progress["sources_discovered"] == 12
+        assert "prompt" not in progress
+        assert "reasoning" not in progress
+    finally:
         window.close()
         backend.stop()
         window._desktop.shutdown()  # noqa: SLF001

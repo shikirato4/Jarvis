@@ -18,6 +18,7 @@ class ResearchRetriever:
         vision_runtime,
         system_runtime,
         web_provider=None,
+        web_research=None,
         logger=None,
     ) -> None:
         self._settings = settings
@@ -26,6 +27,7 @@ class ResearchRetriever:
         self._vision_runtime = vision_runtime
         self._system_runtime = system_runtime
         self._web_provider = web_provider
+        self._web_research = web_research
         self._logger = logger
         self.last_trace: list[dict[str, object]] = []
 
@@ -98,6 +100,11 @@ class ResearchRetriever:
     ) -> tuple[list[ResearchSource], list[ResearchEvidence]]:
         if self._web_provider is None:
             return [], []
+        if (
+            self._web_research is not None
+            and self._web_research.provider is self._web_provider
+        ):
+            return self._from_advanced_web(task)
         try:
             response = self._web_provider.search(
                 task.query,
@@ -137,6 +144,72 @@ class ResearchRetriever:
                     score=max(0.4, 0.75 - ((index - 1) * 0.05)),
                 )
             )
+        return sources, evidence
+
+    def _from_advanced_web(
+        self, task: ResearchTask
+    ) -> tuple[list[ResearchSource], list[ResearchEvidence]]:
+        mode = str(task.metadata.get("search_mode") or "deep")
+        try:
+            session = self._web_research.run(task.query, mode=mode)
+        except Exception as exc:
+            if self._logger is not None:
+                self._logger.warning(
+                    "research_web_orchestration_degraded",
+                    extra={"error_type": type(exc).__name__},
+                )
+            return [], []
+        candidate_map = {item.source_id: item for item in session.candidates}
+        fetched_map = {
+            item.source_id: item for item in session.opened_sources if item.status == "ok"
+        }
+        sources: list[ResearchSource] = []
+        source_map: dict[str, ResearchSource] = {}
+        for source_id, fetched in fetched_map.items():
+            candidate = candidate_map.get(source_id)
+            source = ResearchSource(
+                source_id=f"web-{source_id}",
+                kind=ResearchSourceKind.WEB,
+                provider_name=(candidate.provider if candidate else "web"),
+                display_name=fetched.title,
+                location=fetched.final_url,
+                trust_level=("high" if candidate and candidate.primary_source else "medium"),
+                freshness=fetched.published_at or fetched.updated_at or "retrieved",
+                metadata={
+                    "category": candidate.source_category if candidate else "unknown",
+                    "retrieved_at": fetched.retrieved_at.isoformat(),
+                    "untrusted": True,
+                },
+                capabilities=("search", "read", "cite"),
+            )
+            sources.append(source)
+            source_map[source_id] = source
+        evidence = [
+            ResearchEvidence(
+                evidence_id=item.evidence_id,
+                task_id=task.task_id,
+                source=source_map[item.source_id],
+                content=item.text,
+                excerpt=item.text[:280],
+                citation=item.url,
+                metadata={
+                    "topic": item.evidence_type,
+                    "citation_id": item.citation_id,
+                    "page": item.page,
+                    "untrusted": True,
+                },
+                score=item.relevance_score,
+            )
+            for item in session.evidence
+            if item.source_id in source_map
+        ]
+        task.metadata["web_research"] = {
+            "session_id": session.session_id,
+            "mode": session.mode.value,
+            **session.metrics.model_dump(mode="json"),
+            "citation_count": len(session.citations),
+            "status": session.status,
+        }
         return sources, evidence
 
     def _from_semantic_memory(self, task: ResearchTask, *, correlation_id: str) -> tuple[list[ResearchSource], list[ResearchEvidence]]:

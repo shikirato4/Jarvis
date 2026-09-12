@@ -320,6 +320,41 @@ QPushButton#ComposerToolButton::menu-indicator {{
     image: none;
     width: 0px;
 }}
+QPushButton#DeepResearchToggle {{
+    background: transparent;
+    border: 1px solid {palette.border};
+    border-radius: 4px;
+    color: {palette.text_dim};
+    padding: 7px 11px;
+    min-height: 18px;
+}}
+QPushButton#DeepResearchToggle:hover {{
+    background: {palette.cyan_soft};
+    border: 1px solid {palette.border_bright};
+    color: {palette.text};
+}}
+QPushButton#DeepResearchToggle:focus {{
+    border: 1px solid {palette.cyan_strong};
+}}
+QPushButton#DeepResearchToggle:checked {{
+    background: {palette.cyan_soft};
+    border: 1px solid {palette.border_bright};
+    color: {palette.cyan_strong};
+}}
+QPushButton#ResearchStopButton {{
+    background: transparent;
+    border: 1px solid rgba(255, 123, 156, 0.45);
+    color: {palette.alert};
+    padding: 7px 10px;
+}}
+QLabel#ResearchActivity {{
+    background: {palette.cyan_soft};
+    border: 1px solid {palette.border};
+    border-radius: 4px;
+    color: {palette.text_dim};
+    padding: 7px 10px;
+    font-size: 9pt;
+}}
 QPushButton#ComposerSendButton {{
     background: {palette.cyan_strong};
     border: none;

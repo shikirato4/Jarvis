@@ -23,7 +23,7 @@ from jarvis.persistent_config import (
 
 CANONICAL = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
 GGUF = "lmstudio-community/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-Q4_K_M.gguf"
-QWEN_GGUF = "Qwen/Qwen3-8B-GGUF"
+QWEN_GGUF = "Qwen3.5-9B-IQ4_XS"
 
 
 @pytest.mark.parametrize(

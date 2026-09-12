@@ -49,7 +49,7 @@ from jarvis.services import (
     summarize_system_operation,
     summarize_writing_receipt,
 )
-from jarvis.web_search import build_web_search_provider
+from jarvis.web_search import SearchMode, build_web_search_provider, decide_search_mode
 
 
 class DesktopRuntimeService:
@@ -72,6 +72,7 @@ class DesktopRuntimeService:
             jarvis_app.settings,
             context_builder=self._context_builder,
             agent_controller=jarvis_app.agent_controller,
+            web_research=jarvis_app.web_research_orchestrator,
         )
         self._voice = DesktopVoiceController(
             jarvis_app.voice_runtime_service,
@@ -89,6 +90,7 @@ class DesktopRuntimeService:
         self._completed_chat_requests: dict[str, object] = {}
         self._active_stream_id: str | None = None
         self._active_stream_cancel: Event | None = None
+        self._active_research_cancel: Event | None = None
         self._progress_message_by_correlation: dict[str, str] = {}
         self._conversation: list[DesktopChatMessage] = [
             DesktopChatMessage(
@@ -123,6 +125,7 @@ class DesktopRuntimeService:
             "action": "none",
             "summary": "Code Agent listo. Genera patches revisables; nada se aplica automaticamente.",
         }
+        self._research_progress: dict[str, Any] = {}
         self._attachment_request_id = f"desktop-draft-{uuid4()}"
         if event_bus is not None and hasattr(event_bus, "subscribe"):
             event_bus.subscribe("image.generation_progress", self._on_image_progress)
@@ -135,6 +138,29 @@ class DesktopRuntimeService:
         payload: dict[str, Any],
     ) -> None:
         """Project the canonical runtime activity stream into live Thinking."""
+
+        if event_name == "deep_research.progress":
+            correlation_id = str(payload.get("correlation_id") or "").strip()
+            with self._state_lock:
+                self._research_progress = dict(payload)
+                message_id = self._progress_message_by_correlation.get(correlation_id)
+            if message_id:
+                metrics = (
+                    f"{int(payload.get('sources_discovered') or 0)} sources found · "
+                    f"{int(payload.get('sources_opened') or 0)} reviewed · "
+                    f"{int(payload.get('domains') or 0)} domains"
+                )
+                self._replace_conversation_message(
+                    message_id,
+                    self._conversation_message_content(message_id),
+                    metadata={
+                        "thinking": {
+                            "status": "researching",
+                            "lines": [str(payload.get("message") or "Researching"), metrics],
+                        }
+                    },
+                )
+            return
 
         if not event_name.startswith(
             (
@@ -165,6 +191,10 @@ class DesktopRuntimeService:
                 }
             },
         )
+
+    def research_progress(self) -> dict[str, Any]:
+        with self._state_lock:
+            return dict(self._research_progress)
 
     def _conversation_message_content(self, message_id: str) -> str:
         with self._state_lock:
@@ -617,6 +647,7 @@ class DesktopRuntimeService:
         source: str = "text",
         correlation_id: str | None = None,
         metadata: dict | None = None,
+        _research_cancel_event: Event | None = None,
     ):
         self.start_backend()
         if correlation_id is not None:
@@ -668,6 +699,12 @@ class DesktopRuntimeService:
                     memory_candidates=memory_candidates,
                     correlation_id=correlation_id,
                     request_finalized=request_finalized,
+                    cancellation_check=(
+                        _research_cancel_event.is_set
+                        if _research_cancel_event is not None
+                        else None
+                    ),
+                    search_mode=(metadata or {}).get("search_mode", "auto"),
                 )
             else:
                 response = self._chat.handle(
@@ -677,6 +714,12 @@ class DesktopRuntimeService:
                     memory_candidates=memory_candidates,
                     correlation_id=correlation_id,
                     request_finalized=request_finalized,
+                    cancellation_check=(
+                        _research_cancel_event.is_set
+                        if _research_cancel_event is not None
+                        else None
+                    ),
+                    search_mode=(metadata or {}).get("search_mode", "auto"),
                 )
         elapsed_ms = (perf_counter() - started_at) * 1000
         response.message.metadata.setdefault("source", source)
@@ -749,8 +792,11 @@ class DesktopRuntimeService:
                     extra={"correlation_id": request_id, "source": source},
                 )
                 return existing
-        use_stream = bool((metadata or {}).get("stream"))
+        requested_search_mode = (metadata or {}).get("search_mode", "auto")
+        resolved_search_mode = decide_search_mode(text, requested_search_mode)
+        use_stream = bool((metadata or {}).get("stream")) and resolved_search_mode is SearchMode.NO_WEB
         stream_cancel_event: Event | None = None
+        research_cancel_event: Event | None = None
         future: Future = Future()
         with self._state_lock:
             self._request_futures[request_id] = future
@@ -760,6 +806,11 @@ class DesktopRuntimeService:
                 stream_cancel_event = Event()
                 self._active_stream_id = request_id
                 self._active_stream_cancel = stream_cancel_event
+            elif resolved_search_mode is not SearchMode.NO_WEB:
+                if self._active_research_cancel is not None:
+                    self._active_research_cancel.set()
+                research_cancel_event = Event()
+                self._active_research_cancel = research_cancel_event
         self._set_busy_state(True, "STREAMING" if use_stream else "PROCESSING")
 
         def _cleanup(*, key: str = request_id) -> None:
@@ -767,6 +818,11 @@ class DesktopRuntimeService:
                 current = self._request_futures.get(key)
                 if current is future:
                     self._request_futures.pop(key, None)
+                if (
+                    research_cancel_event is not None
+                    and self._active_research_cancel is research_cancel_event
+                ):
+                    self._active_research_cancel = None
 
         def _copy_result(worker_future: Future) -> None:
             if future.cancelled():
@@ -799,11 +855,20 @@ class DesktopRuntimeService:
                     source=source,
                     correlation_id=request_id,
                     metadata=metadata,
+                    _research_cancel_event=research_cancel_event,
                 )
             worker_future.add_done_callback(_copy_result)
 
         Timer(0.01, _start_worker).start()
         return future
+
+    def cancel_active_research(self) -> bool:
+        with self._state_lock:
+            event = self._active_research_cancel
+            if event is None:
+                return False
+            event.set()
+            return True
 
     def send_chat_streaming(
         self,
@@ -815,6 +880,18 @@ class DesktopRuntimeService:
         _admitted_cancel_event: Event | None = None,
     ):
         self.start_backend()
+        resolved_search_mode = decide_search_mode(
+            text,
+            (metadata or {}).get("search_mode", "auto"),
+        )
+        if resolved_search_mode is not SearchMode.NO_WEB:
+            return self.send_chat(
+                text,
+                source=source,
+                correlation_id=correlation_id,
+                metadata={**(metadata or {}), "stream": False},
+                _research_cancel_event=_admitted_cancel_event,
+            )
         correlation_id = correlation_id or f"desktop-stream-{uuid4().hex[:12]}"
         route_to_agent = self._should_route_stream_to_agent(text)
         history = self._model_history_snapshot()
@@ -1614,7 +1691,11 @@ class DesktopRuntimeService:
             and any(word in folded for word in ("archivo", "archivos", "ruta", "dirección", "direccion", "carpeta"))
             and "files.search" in available
         )
-        return dns_action or file_search
+        calculation = (
+            any(word in folded for word in ("calcula", "calcular", "calculate"))
+            and "calculator.evaluate" in available
+        )
+        return dns_action or file_search or calculation
 
     @staticmethod
     def _has_operational_language(text: str) -> bool:
@@ -2253,7 +2334,7 @@ class DesktopRuntimeService:
                     "status": "streaming",
                     "last_result": dict(self._last_dev_result),
                 }
-        web_status = build_web_search_provider().status()
+        web_status = build_web_search_provider(self._jarvis.settings).status()
         try:
             image_status = self._jarvis.runtime_service.image_status()
         except Exception as exc:  # noqa: BLE001
@@ -2366,7 +2447,7 @@ class DesktopRuntimeService:
             )
             code_llm = code.llm_status()
             hybrid_llm = self.llm_status()
-            web_status = build_web_search_provider().status()
+            web_status = build_web_search_provider(self._jarvis.settings).status()
             return {
                 "status": "ok",
                 "internet_available": env.internet_available,

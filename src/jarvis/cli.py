@@ -48,7 +48,7 @@ from jarvis.unity_runtime.base import (
 )
 from jarvis.ui_automation.base import ClickRequest, FocusWindowRequest, MoveMouseRequest, ShortcutRequest, UIAutomationMode, WriteTextRequest
 from jarvis.voice_runtime.base import VoiceSessionRequest
-from jarvis.web_search import build_web_search_provider
+from jarvis.web_search import SearchMode, WebResearchOrchestrator, build_web_search_router
 from jarvis.writing_runtime.models import WritingContinuationRequest, WritingMode
 
 
@@ -152,7 +152,7 @@ def doctor() -> None:
         local_model_aliases=settings.local_llm_model_aliases,
         nvidia_configured=secret_manager.status().configured,
     )
-    web_status = build_web_search_provider().status()
+    web_status = build_web_search_router().status()
     nvidia_provider = NvidiaNimProvider(settings, secret_manager=secret_manager)
     local_provider = QwenLocalProvider(settings)
     selected_mode = PersistentModeStore(default_mode=LLMMode(settings.llm_mode)).load()
@@ -291,42 +291,121 @@ def chat(prompt: str, stream: bool = typer.Option(False, "--stream")) -> None:
 
 @web_app.command("status")
 def web_status(json_output: bool = typer.Option(False, "--json")) -> None:
-    status = build_web_search_provider().status()
-    payload = status.model_dump(mode="json")
+    router = build_web_search_router()
+    statuses = router.statuses()
+    payload = {"aggregate": router.status().model_dump(mode="json"), "providers": [item.model_dump(mode="json") for item in statuses]}
     if json_output:
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
-    typer.echo(
-        "\n".join(
-            [
-                "Jarvis Web Search",
-                f"Provider: {status.provider}",
-                f"Enabled: {str(status.enabled).lower()}",
-                f"Available: {str(status.available).lower()}",
-                f"API key: configured {str(status.configured).lower()}",
-                "Sends private context: no",
-                "OpenAI: blocked",
-                "Gemini: blocked",
-                f"Message: {status.message}",
-            ]
-        )
-    )
+    lines = ["Jarvis Web Search"]
+    for status in statuses:
+        lines.extend([
+            "",
+            f"Provider: {status.provider}",
+            f"Configured: {str(status.configured).lower()}",
+            f"API key: configured {str(status.configured).lower()}",
+            f"Healthy: {_optional_bool(status.working)}",
+            f"Available: {str(status.available).lower()}",
+            f"Role: {getattr(next((provider for provider in router.providers if provider.provider == status.provider), None), 'role', 'general')}",
+            f"Message: {status.message}",
+        ])
+    lines.extend(["", "Sends private file content: no"])
+    typer.echo("\n".join(lines))
+
+
+@web_app.command("health")
+def web_health(
+    force: bool = typer.Option(False, "--force", help="Ignore the in-process health cache."),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    router = build_web_search_router()
+    statuses = router.statuses(force=force)
+    payload = {"providers": [item.model_dump(mode="json") for item in statuses]}
+    if json_output:
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+    lines = ["Jarvis Web Search Health"]
+    for status in statuses:
+        lines.extend(["", f"Provider: {status.provider}", f"Configured: {str(status.configured).lower()}", f"Authenticated: {_optional_bool(status.authenticated)}", f"Reachable: {_optional_bool(status.reachable)}", f"Working: {_optional_bool(status.working)}", f"Status: {status.error_code or status.configuration_state}", f"Message: {status.message}"])
+    typer.echo("\n".join(lines))
 
 
 @web_app.command("search")
-def web_search(query: str, max_results: int = typer.Option(5, "--max-results"), json_output: bool = typer.Option(False, "--json")) -> None:
-    result = build_web_search_provider().search(query, max_results=max_results)
+def web_search(
+    query: str,
+    max_results: int = typer.Option(5, "--max-results"),
+    mode: SearchMode = typer.Option(SearchMode.NORMAL, "--mode"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    settings = Settings(
+        web_search_max_results=max_results,
+        search_max_results_per_query=max_results,
+    )
+    orchestrator = WebResearchOrchestrator(build_web_search_router(settings), settings)
+    session = orchestrator.run(query, mode=mode)
     if json_output:
-        typer.echo(json.dumps(result.model_dump(mode="json"), indent=2, default=str))
+        typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, default=str))
         return
-    lines = [f"Web Search: {result.provider} · {len(result.hits)} fuentes · respuesta local", f"Status: {result.status}", result.message]
-    if result.hits:
-        lines.append("")
-        lines.append("Fuentes:")
-        for hit in result.hits:
-            lines.append(f"{hit.rank}. {hit.title} — {hit.source}")
-            lines.append(f"   {hit.url}")
+    metrics = session.metrics
+    lines = [
+        f"Research mode: {session.mode.value}",
+        f"Status: {session.status}",
+        f"Rounds: {metrics.search_rounds}",
+        f"Queries: {metrics.queries_count}",
+        f"Raw results: {metrics.raw_results}",
+        f"Unique results: {metrics.unique_results}",
+        f"Unique domains: {metrics.unique_domains}",
+        f"Pages opened: {metrics.opened_sources}",
+        f"Evidence chunks: {metrics.evidence_chunks}",
+    ]
+    if session.citations:
+        lines.extend(["", "Fuentes leídas:"])
+        for source in session.citations:
+            lines.append(f"{source.citation_id}. {source.title} — {source.domain}")
+            lines.append(f"   {source.url}")
+    if session.errors:
+        lines.extend(["", f"Error: {session.errors[0]}"])
     typer.echo("\n".join(lines))
+
+
+@web_app.command("research")
+def web_research(
+    query: str,
+    deep: bool = typer.Option(False, "--deep"),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    selected = SearchMode.DEEP if deep else SearchMode.NORMAL
+    settings = Settings()
+    session = WebResearchOrchestrator(
+        build_web_search_router(settings), settings
+    ).run(query, mode=selected)
+    if json_output:
+        typer.echo(json.dumps(session.model_dump(mode="json"), indent=2, default=str))
+        return
+    metrics = session.metrics
+    lines = [
+        f"Research mode: {session.mode.value}",
+        f"Status: {session.status}",
+        f"Rounds: {metrics.search_rounds}",
+        f"Queries: {metrics.queries_count}",
+        f"Raw results: {metrics.raw_results}",
+        f"Unique results: {metrics.unique_results}",
+        f"Unique domains: {metrics.unique_domains}",
+        f"Pages opened: {metrics.opened_sources}",
+        f"Evidence chunks: {metrics.evidence_chunks}",
+    ]
+    if session.citations:
+        lines.extend(["", "Fuentes leídas:"])
+        for source in session.citations:
+            lines.append(f"{source.citation_id}. {source.title} — {source.domain}")
+            lines.append(f"   {source.url}")
+    if session.errors:
+        lines.extend(["", f"Error: {session.errors[0]}"])
+    typer.echo("\n".join(lines))
+
+
+def _optional_bool(value: bool | None) -> str:
+    return "unknown" if value is None else str(value).lower()
 
 
 @image_app.command("status")

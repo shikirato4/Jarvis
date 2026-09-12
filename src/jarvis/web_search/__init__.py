@@ -1,19 +1,93 @@
 from __future__ import annotations
 
-from .models import WebSearchHit, WebSearchProviderStatus, WebSearchRequest, WebSearchResponse
-from .providers import BraveSearchProvider, DisabledWebSearchProvider, build_web_search_provider
+from .fetcher import RawPage, SourceFetcher, UnsafeUrlError, normalize_url, validate_public_url
+from .models import (
+    CitationValidation,
+    CitationRecord,
+    EvidenceChunk,
+    FetchedSource,
+    FreshnessRequirement,
+    FreshnessWindow,
+    ResearchPlan,
+    ResearchDepth,
+    ResearchIntent,
+    ResearchRequirement,
+    RequirementStatus,
+    SearchMode,
+    SourceScope,
+    SourceCandidate,
+    WebResearchSession,
+    WebSearchHit,
+    WebSearchProviderStatus,
+    WebSearchRequest,
+    WebSearchResponse,
+)
+from .providers import (
+    BraveSearchProvider,
+    DisabledWebSearchProvider,
+    ExaSearchProvider,
+    SearXNGSearchProvider,
+    YouSearchProvider,
+    build_web_search_provider,
+    check_brave_search_health,
+)
+from .provider_router import WebProviderRouter, build_web_search_router
+from .intent import parse_research_intent, public_web_topic, resolve_auto_scope
+from .research import (
+    SearchPlanner,
+    WebResearchOrchestrator,
+    decide_search_mode,
+    detect_freshness,
+    rank_and_deduplicate,
+    select_diverse_sources,
+)
 from .router import build_grounded_web_prompt, should_use_web_search
 from .sanitizer import sanitize_web_query
 
 __all__ = [
     "BraveSearchProvider",
+    "YouSearchProvider",
+    "ExaSearchProvider",
+    "SearXNGSearchProvider",
+    "WebProviderRouter",
     "DisabledWebSearchProvider",
+    "CitationValidation",
+    "CitationRecord",
+    "EvidenceChunk",
+    "FetchedSource",
+    "FreshnessRequirement",
+    "FreshnessWindow",
+    "RawPage",
+    "ResearchPlan",
+    "ResearchDepth",
+    "ResearchIntent",
+    "ResearchRequirement",
+    "RequirementStatus",
+    "SearchMode",
+    "SourceScope",
+    "SearchPlanner",
+    "SourceCandidate",
+    "SourceFetcher",
+    "UnsafeUrlError",
+    "WebResearchOrchestrator",
+    "WebResearchSession",
     "WebSearchHit",
     "WebSearchProviderStatus",
     "WebSearchRequest",
     "WebSearchResponse",
     "build_grounded_web_prompt",
     "build_web_search_provider",
+    "build_web_search_router",
+    "check_brave_search_health",
+    "decide_search_mode",
+    "detect_freshness",
+    "normalize_url",
+    "parse_research_intent",
+    "public_web_topic",
+    "resolve_auto_scope",
+    "rank_and_deduplicate",
     "sanitize_web_query",
     "should_use_web_search",
+    "select_diverse_sources",
+    "validate_public_url",
 ]

@@ -26,7 +26,7 @@ class ResearchRunPayload(BaseModel):
     collection_name: str | None = None
     paths: list[str] = Field(default_factory=list)
     image_paths: list[str] = Field(default_factory=list)
-    source_scope: tuple[str, ...] = ("semantic_memory", "workspace", "simulated")
+    source_scope: tuple[str, ...] = ("semantic_memory", "workspace", "web", "simulated")
     simulated_sources: list[dict[str, Any]] = Field(default_factory=list)
     persist_results: bool = True
     run_via_autonomy: bool = False

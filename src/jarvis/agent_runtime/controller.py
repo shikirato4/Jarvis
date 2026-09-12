@@ -25,6 +25,7 @@ from jarvis.models_runtime.base import (
 )
 
 from .models import AgentOutcomeCode, AgentRunRequest, AgentRunResult, AgentRunStatus
+from .prompt_policy import AgenticPromptPolicy
 
 
 ModelInference = Callable[[ModelRequest], ModelResponse]
@@ -82,6 +83,7 @@ class AgentController:
         shadow_observer: ShadowObserver | None = None,
         clock: Callable[[], float] = monotonic,
         max_repeated_signature: int = 2,
+        prompt_policy: AgenticPromptPolicy | None = None,
     ) -> None:
         self._infer_model = infer_model
         self._stream_model = stream_model
@@ -90,7 +92,68 @@ class AgentController:
         self._shadow_observer = shadow_observer
         self._clock = clock
         self._max_repeated_signature = max(max_repeated_signature, 1)
+        self._prompt_policy = prompt_policy or AgenticPromptPolicy()
         self._pending_confirmations: dict[str, _PendingConfirmationRun] = {}
+
+    def available_tool_schemas(
+        self,
+        user_text: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return the same provider-neutral schemas used for agent inference."""
+
+        schemas = self._actions.tool_schemas()
+        if user_text is None:
+            return schemas
+        return self._prompt_policy.select_relevant_tools(schemas, user_text)
+
+    def prepare_model_request(
+        self,
+        request: ModelRequest,
+        *,
+        emergency: bool = False,
+    ) -> ModelRequest:
+        """Select schemas and compose policy before context budgeting/provider I/O."""
+
+        all_tools = self._merge_tool_schemas(
+            request.tools,
+            self.available_tool_schemas(),
+        )
+        user_text = next(
+            (
+                message.content
+                for message in reversed(request.messages)
+                if message.role == "user"
+            ),
+            request.prompt or "",
+        )
+        selected_tools = self._prompt_policy.select_relevant_tools(
+            all_tools,
+            user_text,
+        )
+        capabilities = tuple(
+            dict.fromkeys((*request.required_capabilities, "tool_calling"))
+        )
+        return request.model_copy(
+            update={
+                "required_capabilities": capabilities,
+                "messages": self._prompt_policy.compose(
+                    request.messages,
+                    selected_tools,
+                    all_tools=all_tools,
+                    emergency=emergency,
+                ),
+                "tools": selected_tools,
+                "tool_choice": request.tool_choice or "auto",
+                "metadata": {
+                    **request.metadata,
+                    "agent_prompt_prepared": True,
+                    "agent_prompt_profile": self._prompt_policy.resolved_profile.value,
+                    "agent_capability_schema_count": len(all_tools),
+                    "agent_selected_schema_count": len(selected_tools),
+                    "agent_prompt_emergency_compaction": emergency,
+                },
+            }
+        )
 
     def run(self, request: AgentRunRequest) -> AgentRunResult:
         started_at = self._clock()
@@ -158,36 +221,21 @@ class AgentController:
                     message.model_copy(deep=True) for message in messages
                 ]
                 if base_request is None:
-                    available_tools = self._actions.tool_schemas()
-                    model_request = ModelRequest(
+                    model_request = self.prepare_model_request(ModelRequest(
                         task_type="agent",
                         logical_model="general_assistant",
                         required_capabilities=("chat", "tool_calling"),
-                        messages=self._with_capability_awareness(message_snapshot, available_tools),
-                        tools=available_tools,
-                        tool_choice="auto",
+                        messages=message_snapshot,
                         correlation_id=correlation_id,
-                    )
+                    ))
                 else:
-                    available_tools = self._actions.tool_schemas()
-                    capabilities = tuple(
-                        dict.fromkeys(
-                            (*base_request.required_capabilities, "tool_calling")
-                        )
-                    )
-                    model_request = base_request.model_copy(
+                    model_request = self.prepare_model_request(base_request.model_copy(
                         update={
                             "task_type": "agent",
-                            "required_capabilities": capabilities,
-                            "messages": self._with_capability_awareness(message_snapshot, available_tools),
-                            "tools": self._merge_tool_schemas(
-                                base_request.tools,
-                                available_tools,
-                            ),
-                            "tool_choice": base_request.tool_choice or "auto",
+                            "messages": message_snapshot,
                             "correlation_id": correlation_id,
                         }
-                    )
+                    ))
                 agent_phase = (
                     "agent_final"
                     if observations
@@ -201,7 +249,8 @@ class AgentController:
                             **model_request.metadata,
                             "agent_phase": agent_phase,
                             "adaptive_output_budget": True,
-                            "auto_continue_text": agent_phase == "agent_final",
+                            "auto_continue_text": agent_phase
+                            != "structured_tool_call",
                         }
                     }
                 )
@@ -1025,60 +1074,6 @@ class AgentController:
         return AgentOutcomeCode.TOOL_EXECUTION_ERROR
 
     @staticmethod
-    def _with_capability_awareness(
-        messages: list[ModelMessage], tools: list[dict[str, Any]]
-    ) -> list[ModelMessage]:
-        """Describe exposed local capabilities from the same registry as tools."""
-        names = [
-            str(schema.get("function", {}).get("name"))
-            for schema in tools
-            if isinstance(schema, dict)
-            and isinstance(schema.get("function"), dict)
-            and schema["function"].get("name")
-        ]
-        if not names:
-            return messages
-        namespaces = sorted({name.split(".", 1)[0] for name in names})
-        terminal_names = [name for name in names if name.startswith("terminal.")]
-        instruction = (
-            "Capacidades JARVIS disponibles en esta solicitud, derivadas del "
-            f"registro real de tools: {', '.join(namespaces)}."
-        )
-        if terminal_names:
-            instruction += (
-                " TerminalRuntime está disponible mediante: "
-                f"{', '.join(terminal_names)}."
-            )
-        instruction += (
-            " Si el usuario solicita explícitamente ejecutar una acción y una "
-            "tool registrada puede hacerla, usa esa tool en lugar de indicarle "
-            "que la haga manualmente; las preguntas informativas no obligan a "
-            "usar tools. Después de recibir una observación de tool, responde "
-            "con una respuesta final concisa y basada en esa observación; nunca "
-            "termines el turno con contenido visible vacío. Toda acción sigue "
-            "pasando por SecurityGate."
-        )
-        instruction += (
-            " Para localizar un archivo o carpeta por nombre, comienza con "
-            "files.search y conserva el alcance real de la observación. Nunca "
-            "afirmes ni sugieras como resultado una ruta que no aparezca en una "
-            "observación; si el alcance fue insuficiente, usa otra capacidad "
-            "permitida o explica esa limitación."
-        )
-        updated = [message.model_copy(deep=True) for message in messages]
-        system_index = next(
-            (index for index, message in enumerate(updated) if message.role == "system"),
-            None,
-        )
-        if system_index is None:
-            updated.insert(0, ModelMessage(role="system", content=instruction))
-        elif instruction not in updated[system_index].content:
-            updated[system_index].content = (
-                f"{updated[system_index].content}\n{instruction}"
-            )
-        return updated
-
-    @staticmethod
     def _ground_file_paths(
         content: str,
         observations: list[ActionObservation],
@@ -1090,17 +1085,32 @@ class AgentController:
         ]
         if not file_observations:
             return content
-        observed = json.dumps(
-            [observation.data for observation in file_observations],
-            ensure_ascii=False,
-            default=str,
-        ).casefold()
         removed = False
+
+        def normalize_path(value: str) -> str:
+            return value.strip().casefold().replace("\\", "/")
+
+        def observed_strings(value: Any):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, dict):
+                for item in value.values():
+                    yield from observed_strings(item)
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    yield from observed_strings(item)
+
+        observed_values = [
+            normalize_path(value)
+            for observation in file_observations
+            for value in observed_strings(observation.data)
+        ]
 
         def replace_code_path(match: re.Match[str]) -> str:
             nonlocal removed
             candidate = match.group(1).strip()
-            if candidate.casefold() in observed:
+            normalized_candidate = normalize_path(candidate)
+            if any(normalized_candidate in value for value in observed_values):
                 return match.group(0)
             removed = True
             return "`[ruta no verificada omitida]`"

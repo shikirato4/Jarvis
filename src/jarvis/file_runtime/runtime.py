@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import tempfile
 import time
+import re
+import unicodedata
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -191,6 +193,91 @@ class FileNavigator:
         payload = self._result("search", root, items=matches, truncated=truncated, scanned=scanned, max_depth=depth_limit, max_results=result_limit)
         self._emit("file_search_completed", {"scope": str(root), "result_count": len(matches), "truncated": truncated})
         return payload
+
+    def search_content(
+        self,
+        query: str,
+        *,
+        scope: str | Path = "workspace",
+        path: str | Path | None = None,
+        max_results: int = 30,
+        max_bytes: int = 300_000,
+        timeout_seconds: float | None = None,
+        cancel_check: Callable[[], bool] | None = None,
+    ) -> dict[str, Any]:
+        """Search filenames and bounded text content with lexical-semantic ranking."""
+
+        root = self.resolve_path(path) if path is not None else self.resolve_path(scope)
+        if not root.exists():
+            raise FileOperationError(FileErrorCode.NOT_FOUND, "Search target was not found.", path=str(root))
+        deadline = time.monotonic() + min(timeout_seconds or self.search_timeout_seconds, self.search_timeout_seconds)
+        limit = min(max(1, max_results), self.max_search_results)
+        byte_limit = min(max(1, max_bytes), self.max_read_bytes)
+        query_terms = self._content_terms(query)
+        files = [root] if root.is_file() else self._iter_text_candidates(root)
+        matches: list[dict[str, Any]] = []
+        scanned = 0
+        for candidate in files:
+            if cancel_check and cancel_check():
+                raise FileOperationError(FileErrorCode.CANCELLED, "Search was cancelled.", path=str(root))
+            if time.monotonic() >= deadline:
+                break
+            scanned += 1
+            try:
+                with candidate.open("rb") as stream:
+                    raw = stream.read(byte_limit + 1)
+            except OSError:
+                continue
+            if b"\x00" in raw[:8192]:
+                continue
+            text = raw[:byte_limit].decode("utf-8", errors="replace")
+            folded_text = self._fold_search_text(text)
+            folded_name = self._fold_search_text(candidate.name)
+            term_hits = [term for term in query_terms if term in folded_text]
+            name_hits = [term for term in query_terms if term in folded_name]
+            phrase = self._fold_search_text(query)
+            exact = bool(phrase and phrase in folded_text)
+            if not (term_hits or name_hits or exact):
+                continue
+            score = (2.0 if exact else 0.0) + len(term_hits) / max(len(query_terms), 1) + 0.5 * len(name_hits)
+            first_positions = [folded_text.find(term) for term in term_hits if folded_text.find(term) >= 0]
+            position = min(first_positions) if first_positions else 0
+            start = max(0, position - 180)
+            end = min(len(text), position + 520)
+            matches.append(
+                {
+                    **self._metadata(candidate),
+                    "score": round(score, 4),
+                    "matched_terms": term_hits,
+                    "excerpt": " ".join(text[start:end].split()),
+                    "truncated_read": len(raw) > byte_limit,
+                }
+            )
+        matches.sort(key=lambda item: (-float(item["score"]), str(item["path"]).casefold()))
+        result = self._result("search_content", root, items=matches[:limit], truncated=len(matches) > limit or time.monotonic() >= deadline, scanned=scanned, max_results=limit)
+        self._emit("file_content_search_completed", {"scope": str(root), "result_count": len(matches[:limit]), "scanned": scanned})
+        return result
+
+    def _iter_text_candidates(self, root: Path) -> list[Path]:
+        allowed = {".txt", ".md", ".rst", ".py", ".json", ".yaml", ".yml", ".toml", ".csv", ".tsv", ".html", ".htm", ".xml", ".log", ".ini", ".cfg"}
+        result: list[Path] = []
+        base_depth = len(root.parts)
+        for current, directories, filenames in os.walk(root):
+            depth = len(Path(current).parts) - base_depth
+            if depth >= self.max_search_depth:
+                directories[:] = []
+            directories[:] = [name for name in directories if name not in {".git", ".venv", "node_modules", "runtime", "__pycache__"}]
+            result.extend(Path(current) / name for name in filenames if Path(name).suffix.casefold() in allowed)
+        return result
+
+    @staticmethod
+    def _fold_search_text(value: str) -> str:
+        return "".join(char for char in unicodedata.normalize("NFKD", value.casefold()) if not unicodedata.combining(char))
+
+    @classmethod
+    def _content_terms(cls, query: str) -> list[str]:
+        ignored = {"busca", "buscar", "donde", "mis", "archivos", "archivo", "documentos", "documento", "mencione", "mencioné", "hablamos", "sobre", "todo", "relacionado"}
+        return list(dict.fromkeys(term for term in re.findall(r"[a-z0-9_-]{3,}", cls._fold_search_text(query)) if term not in ignored))
 
     def stat(self, path: str | Path, *, sha256: bool = False) -> dict[str, Any]:
         target = self.resolve_path(path)

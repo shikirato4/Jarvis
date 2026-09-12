@@ -215,7 +215,7 @@ def test_qwen_local_encodes_dotted_action_names_for_llama_wire_protocol() -> Non
     )
 
 
-def test_qwen_local_compacts_large_tool_registry_for_4k_context() -> None:
+def test_qwen_local_preserves_agent_selected_large_tool_registry() -> None:
     provider = QwenLocalProvider(Settings(_env_file=None))
     tools = [
         {
@@ -245,11 +245,11 @@ def test_qwen_local_compacts_large_tool_registry_for_4k_context() -> None:
     )
     payload = provider._request_payload(request, temperature=0.0, stream=False)  # noqa: SLF001
     names = [tool["function"]["name"] for tool in payload["tools"]]
-    assert len(names) < len(tools)
+    assert len(names) == len(tools)
     assert "calculator__evaluate" in names
 
 
-def test_qwen_local_prioritizes_explicit_terminal_tools_during_compaction() -> None:
+def test_qwen_local_preserves_agent_selected_tool_order() -> None:
     provider = QwenLocalProvider(Settings(_env_file=None))
     tools = [
         {
@@ -290,7 +290,8 @@ def test_qwen_local_prioritizes_explicit_terminal_tools_during_compaction() -> N
 
     payload = provider._request_payload(request, temperature=0.0, stream=False)  # noqa: SLF001
     names = [tool["function"]["name"] for tool in payload["tools"]]
-    assert names[:2] == ["terminal__start_session", "terminal__run"]
+    assert names[:2] == ["generic__action_0", "generic__action_1"]
+    assert names[-2:] == ["terminal__start_session", "terminal__run"]
 
 
 def test_qwen_local_keeps_file_search_for_clear_file_intent() -> None:
@@ -344,10 +345,10 @@ def test_qwen_local_keeps_file_search_for_clear_file_intent() -> None:
     payload = provider._request_payload(request, temperature=0.0, stream=False)  # noqa: SLF001
     names = [tool["function"]["name"] for tool in payload["tools"]]
     assert "files__search" in names
-    assert "terminal__run" not in names
+    assert "terminal__run" in names
 
 
-def test_qwen_local_dns_action_keeps_terminal_but_how_to_question_does_not() -> None:
+def test_qwen_local_does_not_reclassify_action_versus_information_tools() -> None:
     provider = QwenLocalProvider(Settings(_env_file=None))
     tools = [
         {
@@ -398,10 +399,10 @@ def test_qwen_local_dns_action_keeps_terminal_but_how_to_question_does_not() -> 
     ]
 
     assert {"terminal__start_session", "terminal__run"} <= set(action_names)
-    assert not any(name.startswith("terminal__") for name in informational_names)
+    assert action_names == informational_names
 
 
-def test_qwen_file_search_expands_only_after_real_empty_observation() -> None:
+def test_qwen_provider_does_not_expand_schemas_after_observation() -> None:
     provider = QwenLocalProvider(Settings(_env_file=None))
     tools = [
         {
@@ -475,11 +476,11 @@ def test_qwen_file_search_expands_only_after_real_empty_observation() -> None:
     ]
 
     assert "files__search" in first_names
-    assert not any(name.startswith("terminal__") for name in first_names)
-    assert {"terminal__start_session", "terminal__run"} <= set(continued_names)
+    assert {"terminal__start_session", "terminal__run"} <= set(first_names)
+    assert first_names == continued_names
 
 
-def test_qwen_local_reserves_output_and_selects_only_relevant_file_subset() -> None:
+def test_qwen_local_reserves_output_and_preserves_selected_file_subset() -> None:
     provider = QwenLocalProvider(Settings(_env_file=None))
     requested_names = {
         "files.create_directory",
@@ -544,7 +545,7 @@ def test_qwen_local_reserves_output_and_selects_only_relevant_file_subset() -> N
     wire_names = [tool["function"]["name"] for tool in payload["tools"]]
 
     assert payload["max_tokens"] == 768
-    assert len(wire_names) <= 8
+    assert len(wire_names) == len(tools)
     assert {name.replace(".", "__") for name in requested_names} <= set(wire_names)
     assert [tool["function"]["name"] for tool in request.tools] == original_names
 

@@ -75,7 +75,7 @@ def test_fenced_code_has_language_copy_control_and_exact_clipboard_source() -> N
     ],
 )
 def test_fenced_code_languages_and_large_lines_remain_copyable(
-    language: str, source: str
+    language: str, source: str, monkeypatch
 ) -> None:
     app = _app()
     browser = RichMessageBrowser(f"```{language}\n{source}```")
@@ -85,9 +85,17 @@ def test_fenced_code_languages_and_large_lines_remain_copyable(
     assert block.language == (language or "Code")
     assert block.content == source
     control = browser.findChildren(CopyableCodeControl)[0]
+    captured = SimpleNamespace(value=None)
+    clipboard = SimpleNamespace(
+        setText=lambda value: setattr(captured, "value", value)
+    )
+    monkeypatch.setattr(
+        "jarvis.desktop_runtime.rich_text.QGuiApplication",
+        SimpleNamespace(clipboard=lambda: clipboard),
+    )
     control.copy_button.click()
     app.processEvents()
-    assert QApplication.clipboard().text() == source
+    assert captured.value == source
     browser.close()
 
 
