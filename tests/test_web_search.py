@@ -66,7 +66,7 @@ def test_should_use_web_search_by_mode_and_task() -> None:
 
 def test_brave_status_never_exposes_api_key(monkeypatch) -> None:
     monkeypatch.setenv("JARVIS_WEB_SEARCH_ENABLED", "true")
-    monkeypatch.setenv("JARVIS_BRAVE_SEARCH_API_KEY", "brave-secret-key")
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-secret-key")
 
     safe = BraveSearchProvider().status().model_dump(mode="json")
 

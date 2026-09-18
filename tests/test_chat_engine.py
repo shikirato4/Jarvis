@@ -923,6 +923,9 @@ def test_chat_engine_research_preserves_sources_when_nemotron_fails_after_tool(t
         assert str(response.raw_result.get("fallback_reason", "")).startswith(
             "synthesis_provider_failure:"
         )
+        assert str(response.raw_result.get("failure_reason", "")).startswith(
+            "synthesis_provider_error:"
+        )
     finally:
         app.stop()
 
@@ -971,6 +974,7 @@ def test_deep_research_repairs_unsupported_claims_with_typed_model_messages(tmp_
         assert all(hasattr(message, "role") for message in provider.requests[1].messages)
         assert "https://example.com/tech" in response.message.content
         assert response.raw_result["status"] == "completed_with_repairs"
+        assert response.raw_result["failure_reason"] is None
     finally:
         app.stop()
 
@@ -1170,9 +1174,119 @@ def test_deep_research_uses_short_error_after_three_invalid_syntheses(tmp_path) 
 
         assert provider.calls == 3
         assert response.raw_result["status"] == "partial_validation"
+        assert response.raw_result["failure_reason"] == "synthesis_empty"
         assert response.raw_result["synthesis"]["max_attempts"] == 3
         assert "no pudo completar una síntesis válida" in response.message.content
         assert "https://example.com/tech" not in response.message.content
+    finally:
+        app.stop()
+
+
+def test_deep_research_repairs_only_the_empty_section_after_validation(tmp_path) -> None:
+    class SectionRepairProvider(MutableDesktopModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.requests: list[ModelRequest] = []
+
+        def infer(self, request, *, model_name, temperature, timeout_seconds):  # noqa: ARG002
+            self.requests.append(request)
+            if request.metadata.get("synthesis_stage") == "section_repair":
+                content = (
+                    "## Condiciones\nLa noticia reciente de tecnología contiene evidencia, "
+                    "fecha y una fuente oficial [S1]."
+                )
+            else:
+                content = (
+                    "## Contexto\nLa evidencia recuperada respalda el contexto. [S1]\n\n"
+                    "## Condiciones\nUna afirmación usa una fuente inexistente. [S20]"
+                )
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content=content,
+                latency_ms=1.0,
+                metadata={"finish_reason": "stop"},
+            )
+
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    _install_web_research(app, FakeDesktopWebProvider())
+    provider = SectionRepairProvider()
+    _install_local_provider(app, provider)
+    app.start()
+    try:
+        response = DesktopRuntimeService(app).send_chat(
+            "/deepresearch investiga noticias recientes de tecnologia",
+            metadata={"search_mode": "deep"},
+        )
+
+        assert response.raw_result["status"] == "completed_with_repairs"
+        assert response.raw_result["sections_repaired"] == ["Condiciones"]
+        assert "fuente oficial" in response.message.content
+        assert "fuente inexistente" not in response.message.content
+        assert any(
+            request.metadata.get("synthesis_stage") == "section_repair"
+            for request in provider.requests
+        )
+    finally:
+        app.stop()
+
+
+def test_exhausted_section_repair_reports_too_many_claims_removed(tmp_path) -> None:
+    class UnrepairableSectionProvider(MutableDesktopModelProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def infer(self, request, *, model_name, temperature, timeout_seconds):  # noqa: ARG002
+            self.calls += 1
+            return ModelResponse(
+                provider_name=self.provider_name,
+                provider_kind=self.provider_kind,
+                logical_model=request.logical_model or model_name,
+                model_name=model_name,
+                content=(
+                    "## Condiciones\nEsta afirmación factual inventada no está respaldada por la evidencia [S1]."
+                ),
+                latency_ms=1.0,
+                metadata={"finish_reason": "stop"},
+            )
+
+    settings = Settings(
+        data_dir=tmp_path / "runtime",
+        workspace_root=tmp_path,
+        research_allowed_roots=(tmp_path,),
+        embeddings_enabled=False,
+        ui_backend_kind="in_memory",
+    )
+    app = build_application(settings)
+    _install_web_research(app, FakeDesktopWebProvider())
+    provider = UnrepairableSectionProvider()
+    _install_local_provider(app, provider)
+    app.start()
+    try:
+        response = DesktopRuntimeService(app).send_chat(
+            "/deepresearch investiga noticias recientes de tecnologia",
+            metadata={"search_mode": "deep"},
+        )
+
+        assert response.raw_result["status"] == "partial_validation"
+        assert response.raw_result["failure_reason"] in {
+            "too_many_claims_removed",
+            "claim_support_failed",
+        }
+        assert provider.calls <= (
+            settings.research_max_synthesis_attempts
+            + settings.research_max_section_repairs
+        )
     finally:
         app.stop()
 

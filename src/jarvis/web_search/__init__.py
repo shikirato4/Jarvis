@@ -3,6 +3,10 @@ from __future__ import annotations
 from .fetcher import RawPage, SourceFetcher, UnsafeUrlError, normalize_url, validate_public_url
 from .models import (
     CitationValidation,
+    ClaimEvidenceCheck,
+    ClaimLevelValidation,
+    ClaimRequirementStatus,
+    ClaimSupportStatus,
     CitationRecord,
     EvidenceChunk,
     FetchedSource,
@@ -33,6 +37,7 @@ from .providers import (
 )
 from .provider_router import WebProviderRouter, build_web_search_router
 from .intent import parse_research_intent, public_web_topic, resolve_auto_scope
+from .metadata import MetadataSanityValidator
 from .research import (
     SearchPlanner,
     WebResearchOrchestrator,
@@ -52,11 +57,16 @@ __all__ = [
     "WebProviderRouter",
     "DisabledWebSearchProvider",
     "CitationValidation",
+    "ClaimEvidenceCheck",
+    "ClaimLevelValidation",
+    "ClaimRequirementStatus",
+    "ClaimSupportStatus",
     "CitationRecord",
     "EvidenceChunk",
     "FetchedSource",
     "FreshnessRequirement",
     "FreshnessWindow",
+    "MetadataSanityValidator",
     "RawPage",
     "ResearchPlan",
     "ResearchDepth",

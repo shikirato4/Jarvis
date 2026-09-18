@@ -166,6 +166,8 @@ class FetchedSource(JarvisBaseModel):
     provider: str = "unknown"
     author: str | None = None
     organization: str | None = None
+    metadata_provenance: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    metadata_audit: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
 
 class EvidenceChunk(JarvisBaseModel):
@@ -203,6 +205,7 @@ class CitationRecord(JarvisBaseModel):
     provider: str = "unknown"
     author: str | None = None
     organization: str | None = None
+    metadata_provenance: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class ResearchMetrics(JarvisBaseModel):
@@ -269,3 +272,46 @@ class CitationValidation(JarvisBaseModel):
     invalid_urls: list[str] = Field(default_factory=list)
     unsupported_claims: list[str] = Field(default_factory=list)
     answer: str = ""
+
+
+class ClaimSupportStatus(StrEnum):
+    SUPPORTED = "SUPPORTED"
+    PARTIALLY_SUPPORTED = "PARTIALLY_SUPPORTED"
+    UNSUPPORTED = "UNSUPPORTED"
+    CONTRADICTED = "CONTRADICTED"
+
+
+class ClaimRequirementStatus(StrEnum):
+    DIRECTLY_RELEVANT = "DIRECTLY_RELEVANT"
+    SUPPORTING_CONTEXT = "SUPPORTING_CONTEXT"
+    OFF_REQUIREMENT = "OFF_REQUIREMENT"
+
+
+class ClaimEvidenceCheck(JarvisBaseModel):
+    claim_id: str
+    text: str
+    citation_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    suggested_citation_ids: list[str] = Field(default_factory=list)
+    preferred_citation_ids: list[str] = Field(default_factory=list)
+    replaced_citation_ids: list[str] = Field(default_factory=list)
+    requirement_id: str | None = None
+    section_heading: str | None = None
+    section_requirement_id: str | None = None
+    requirement_status: ClaimRequirementStatus = ClaimRequirementStatus.DIRECTLY_RELEVANT
+    requirement_reason: str = ""
+    status: ClaimSupportStatus
+    reason: str = ""
+    important: bool = True
+
+
+class ClaimLevelValidation(JarvisBaseModel):
+    valid: bool
+    claims: list[ClaimEvidenceCheck] = Field(default_factory=list)
+    supported: int = 0
+    partially_supported: int = 0
+    unsupported: int = 0
+    contradicted: int = 0
+    directly_relevant: int = 0
+    supporting_context: int = 0
+    off_requirement: int = 0

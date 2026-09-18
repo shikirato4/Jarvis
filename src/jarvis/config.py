@@ -506,6 +506,8 @@ class Settings(BaseSettings):
     research_deep_final_max_tokens: int = Field(default=1_800, ge=512, le=12_000)
     research_final_output_reserve_tokens: int = Field(default=1_800, ge=256, le=12_000)
     research_max_synthesis_attempts: int = Field(default=3, ge=1, le=3)
+    research_max_section_repairs: int = Field(default=2, ge=0, le=2)
+    research_max_gap_searches: int = Field(default=2, ge=0, le=2)
     research_max_output_continuations: int = Field(default=2, ge=0, le=2)
     unity_allowed_bridge_commands: tuple[str, ...] = ()
     unity_blocked_bridge_commands: tuple[str, ...] = ()

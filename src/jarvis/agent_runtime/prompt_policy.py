@@ -162,11 +162,19 @@ class AgenticPromptPolicy:
             name = str(function["name"])
             description = str(function.get("description") or "")
             properties = function.get("parameters", {}).get("properties", {})
-            haystack = f"{name} {description} {' '.join(map(str, properties))}".casefold()
-            name_parts = set(re.findall(r"[\w-]+", name.casefold().replace(".", " ")))
-            tool_tokens = set(re.findall(r"[\w.-]+", haystack))
+            dotted_name_parts = [part for part in name.casefold().split(".") if part]
+            operation_name_parts = set(
+                token
+                for part in dotted_name_parts[1:]
+                for token in re.findall(r"[\w-]+", part)
+            )
+            semantic_haystack = (
+                f"{' '.join(operation_name_parts)} {description} "
+                f"{' '.join(map(str, properties))}"
+            ).casefold()
+            tool_tokens = set(re.findall(r"[\w.-]+", semantic_haystack))
             overlap = query_tokens & tool_tokens
-            score = 4 * len(query_tokens & name_parts) + len(overlap)
+            score = 4 * len(query_tokens & operation_name_parts) + len(overlap)
             score += 2 * sum(
                 query_token[:5] == tool_token[:5]
                 for query_token in query_tokens
@@ -175,11 +183,28 @@ class AgenticPromptPolicy:
             )
             if name.casefold() in query:
                 score += 20
-            if any(part and part in query for part in name.casefold().split(".")):
+            if dotted_name_parts and dotted_name_parts[0] in query_tokens:
+                score += 1
+            if dotted_name_parts:
+                namespace = dotted_name_parts[0]
+                score += 2 * sum(
+                    query_token[:5] == namespace[:5]
+                    for query_token in query_tokens
+                    if len(query_token) >= 5 and len(namespace) >= 5
+                )
+            if any(part in query_tokens for part in dotted_name_parts[1:]):
                 score += 3
             ranked.append((score, -index, schema))
 
         relevant = [item for item in ranked if item[0] > 0]
+        if relevant:
+            max_score = max(item[0] for item in relevant)
+            if max_score >= 4:
+                # A family/namespace mention is useful for discovery, but once an
+                # operation has a strong semantic match it should not pull every
+                # sibling schema into a small local-model context.
+                cutoff = max(3, max_score - 2)
+                relevant = [item for item in relevant if item[0] >= cutoff]
         matched_request = bool(relevant)
         if not relevant:
             relevant = ranked[: self.fallback_tools]

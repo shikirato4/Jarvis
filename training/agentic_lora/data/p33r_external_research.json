@@ -1,0 +1,57 @@
+{
+  "brave_in_router": false,
+  "brave_requested": false,
+  "citation_valid": true,
+  "cloud_model_used": false,
+  "configured": {
+    "exa": true,
+    "you": true
+  },
+  "continuations": 1,
+  "duplicate_queries": null,
+  "invalid_ids": [],
+  "latency_seconds": 66.623,
+  "passed": true,
+  "phase": "P3.3R",
+  "providers_used": {
+    "exa": 4,
+    "you": 4
+  },
+  "search_rounds": 1,
+  "source_count": 12,
+  "source_domains": [
+    "developer.vonage.com",
+    "freecodecamp.org",
+    "reactivelinux.com",
+    "elblogdelprogramador.com",
+    "damiandeluca.com.ar",
+    "ciberaula.com",
+    "todopython.com",
+    "universopython.com",
+    "certidevs.com",
+    "certidevs.com",
+    "docs.python.org",
+    "docs.python.org"
+  ],
+  "source_ids": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10",
+    "S11",
+    "S12"
+  ],
+  "source_only_fallback": false,
+  "status": "completed_with_repairs",
+  "stop_reason": "evidence_sufficient",
+  "synthesis_attempts": 3,
+  "synthesis_status": "completed",
+  "training_started": false,
+  "visible_answer_present": true
+}

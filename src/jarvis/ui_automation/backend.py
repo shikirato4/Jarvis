@@ -8,6 +8,7 @@ from threading import RLock
 from typing import Callable, Protocol
 
 from jarvis.core.errors import UIAutomationError
+from jarvis.windows_runtime import WindowTarget, WindowsControlBackend, WindowsRuntimeError
 
 from .base import MouseButton, PointerPosition, WindowInfo
 
@@ -41,16 +42,22 @@ class DesktopAutomationBackend(Protocol):
 
 
 class WindowsDesktopAutomationBackend:
-    def __init__(self) -> None:
+    def __init__(self, window_control: WindowsControlBackend | None = None) -> None:
         self._lock = RLock()
+        self._window_control = window_control
 
     def get_active_window(self) -> WindowInfo | None:
+        if self._window_control is not None:
+            return self._legacy_window(self._window_control.foreground_window().target)
         handle = user32.GetForegroundWindow()
         if not handle:
             return None
         return self._window_info(handle)
 
     def list_windows(self) -> list[WindowInfo]:
+        if self._window_control is not None:
+            observed = self._window_control.list_windows(limit=100)
+            return [self._legacy_window(item) for item in observed.windows]
         windows: list[WindowInfo] = []
 
         @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
@@ -65,6 +72,18 @@ class WindowsDesktopAutomationBackend:
         return windows
 
     def focus_window(self, target: str, *, timeout_seconds: float) -> WindowInfo:
+        if self._window_control is not None:
+            try:
+                observed = self._window_control.focus_window(
+                    WindowTarget(query=target),
+                    timeout_seconds=timeout_seconds,
+                )
+            except WindowsRuntimeError as exc:
+                raise UIAutomationError(exc.safe_message) from exc
+            focused = self._legacy_window(observed.after)
+            if focused is None:
+                raise UIAutomationError(f"window '{target}' could not be focused")
+            return focused
         target_lower = target.casefold()
         candidate = None
         for window in self.list_windows():
@@ -213,6 +232,20 @@ class WindowsDesktopAutomationBackend:
                 "right": int(rect.right),
                 "bottom": int(rect.bottom),
             },
+        )
+
+    @staticmethod
+    def _legacy_window(window) -> WindowInfo | None:
+        if window is None:
+            return None
+        rect = window.bounds.model_dump() if window.bounds is not None else {}
+        return WindowInfo(
+            handle=window.handle,
+            title=window.title,
+            class_name=window.class_name,
+            process_id=window.pid,
+            process_name=window.process_name,
+            rect=rect,
         )
 
     @staticmethod

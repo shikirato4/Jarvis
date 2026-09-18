@@ -1,5 +1,12 @@
 # P3.3 runtime reliability hardening
 
+> **Closeout update (2026-09-12):** P3.3R restored and verified the pinned
+> production CUDA runtime. All mandatory local smokes and the configured
+> non-Brave external research smoke now pass, so the final P3.3 result is
+> **PASS** and Phase 4 is ready. See
+> `2026-09-12-local-runtime-live-smoke-closeout.md` for the evidence. The
+> original PARTIAL decision below is retained as the pre-closeout record.
+
 ## Result
 
 **P3.3: PARTIAL.** The deterministic implementation, regression suite, and

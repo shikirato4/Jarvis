@@ -139,6 +139,7 @@ from jarvis.modules.voice_module import VoiceModule
 from jarvis.modules.writing_module import WritingModule
 from jarvis.modules.writer_module import WriterModule
 from jarvis.modules.desktop_agent_module import DesktopAgentModule
+from jarvis.modules.windows_module import WindowsModule
 from jarvis.terminal_runtime import TerminalRuntime
 from jarvis.writing_runtime import (
     WritingAnalyzer,
@@ -223,6 +224,11 @@ from jarvis.ui_automation import (
     WindowsDesktopAutomationBackend,
 )
 from jarvis.ui_automation.base import CancellationRequest, WriteTextRequest
+from jarvis.windows_runtime import (
+    InMemoryWindowsControlBackend,
+    NativeWindowsControlBackend,
+    WindowsRuntimeService,
+)
 from jarvis.vision_runtime import (
     HeuristicVisionAnalyzer,
     InMemoryOCRProvider,
@@ -292,6 +298,7 @@ class JarvisApplication:
     embedding_router: EmbeddingRouter
     embedding_service: EmbeddingService
     ui_automation_service: UIAutomationService
+    windows_runtime_service: WindowsRuntimeService
     vision_runtime_service: VisionRuntimeService
     voice_runtime_service: VoiceRuntimeService
     system_runtime_service: SystemRuntimeService
@@ -969,9 +976,12 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     process_runner = SyncProcessRunner()
     application_registry = ApplicationCatalogRegistry()
     if settings.ui_backend_kind == "in_memory":
+        windows_backend = InMemoryWindowsControlBackend()
         ui_backend = InMemoryDesktopAutomationBackend()
     else:
-        ui_backend = WindowsDesktopAutomationBackend()
+        windows_backend = NativeWindowsControlBackend()
+        ui_backend = WindowsDesktopAutomationBackend(windows_backend)
+    windows_runtime_service = WindowsRuntimeService(windows_backend)
     if settings.system_backend_kind == "in_memory":
         application_registry.register(InMemoryApplicationCatalogProvider())
     else:
@@ -1350,6 +1360,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     module_registry.register(WriterModule())
     module_registry.register(WritingModule(writing_runtime_service))
     module_registry.register(DesktopAgentModule(lambda: desktop_agent_runtime_service))  # type: ignore[name-defined]
+    module_registry.register(WindowsModule(windows_runtime_service))
     module_registry.register(
         InterfaceModule(ui_automation_service, semantic_memory_service)
     )
@@ -1657,6 +1668,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         embedding_router=embedding_router,
         embedding_service=embedding_service,
         ui_automation_service=ui_automation_service,
+        windows_runtime_service=windows_runtime_service,
         vision_runtime_service=vision_runtime_service,
         voice_runtime_service=voice_runtime_service,
         system_runtime_service=system_runtime_service,

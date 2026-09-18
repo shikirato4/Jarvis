@@ -364,6 +364,16 @@ def test_numeric_citation_syntax_is_repaired_only_for_existing_sources(tmp_path)
     assert "[S1]" in repaired
     assert "[20]" in repaired
     assert "[S20]" not in repaired
+    session.citations.append(
+        session.citations[0].model_copy(
+            update={"citation_id": "S2", "source_id": "source-2"}
+        )
+    )
+    grouped = orchestrator.normalize_citation_syntax(
+        "Síntesis conjunta [S1, S2].",
+        session,
+    )
+    assert "[S1][S2]" in grouped
 
 
 def test_model_authored_reference_section_is_removed_before_validation() -> None:
@@ -378,9 +388,14 @@ def test_model_authored_reference_section_is_removed_before_validation() -> None
     assert "S20" not in stripped
     spanish = WebResearchOrchestrator.strip_generated_reference_section(
         "Informe respaldado. [S1]\n\n"
-        "**Fuentes citadas (formato APA simplificado)**\n[S1] Autor inventado."
+        "**Fuentes citadas (formato APA simplificado):**\n[S1] Autor inventado."
     )
     assert spanish == "Informe respaldado. [S1]"
+    consulted = WebResearchOrchestrator.strip_generated_reference_section(
+        "Informe respaldado. [S1]\n\n"
+        "**Fuentes Consultadas (Formato APA):**\n- Autor inventado. https://example.com"
+    )
+    assert consulted == "Informe respaldado. [S1]"
 
 
 def test_synthesis_prompt_labels_web_content_as_untrusted(tmp_path) -> None:

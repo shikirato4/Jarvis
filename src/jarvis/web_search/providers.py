@@ -146,7 +146,7 @@ class _JsonSearchProvider:
 class YouSearchProvider(_JsonSearchProvider):
     provider = "you"
     role = "general_primary"
-    API_URL = "https://api.you.com/v1/search"
+    API_URL = "https://ydc-index.io/v1/search"
 
     def __init__(self, *, api_key: str | None = None, settings: Settings | None = None, enabled: bool = True) -> None:
         config = settings or Settings()

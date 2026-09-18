@@ -55,6 +55,8 @@ def parse_research_intent(question: str, requested: SearchMode | str = SearchMod
         (r"\b(recurre|recurrencia|recaida|recaída)\b", "recurrence"),
         (r"\b(resistencia|tratamiento|terapia)\b", "treatment response and resistance"),
         (r"\b(compara|comparacion|comparación|versus| vs )\b", "comparison"),
+        (r"\b(derechos humanos|violaciones? de derechos|human rights)\b", "documented human-rights violations and legal context"),
+        (r"\b(maltrato|trato inhumano|condiciones de detencion|condiciones de detención|mistreatment|detention conditions)\b", "reported mistreatment and detention conditions"),
     )
     for pattern, description in rules:
         if re.search(pattern, folded):
