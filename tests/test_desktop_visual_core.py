@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from jarvis.desktop_runtime.window import create_qt_application, pyside_available
@@ -8,6 +10,10 @@ from jarvis.desktop_runtime.window import create_qt_application, pyside_availabl
 pytestmark = pytest.mark.skipif(not pyside_available(), reason="PySide6 not available")
 
 
+@pytest.mark.skipif(
+    os.environ.get("QT_QPA_PLATFORM") == "offscreen",
+    reason="asserts real-display panel visibility; offscreen CI collapses responsive panels",
+)
 def test_reactor_widget_and_window_boot(tmp_path) -> None:
     from jarvis.config import Settings
     from jarvis.desktop import build_desktop_runtime

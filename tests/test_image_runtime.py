@@ -5,6 +5,7 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from jarvis.cli import app as cli_app
@@ -61,6 +62,7 @@ class FakeImageBackend:
 
 
 def test_image_dependency_status_does_not_import_heavy_torch(monkeypatch) -> None:
+    pytest.importorskip("torch", reason="status asserts the local torch installation")
     real_import = builtins.__import__
     imported: list[str] = []
 
@@ -244,7 +246,7 @@ def test_agent_mode_has_image_skills() -> None:
 
 def test_cuda_component_normalization_keeps_vae_upcast_policy() -> None:
     """Compute modules share FP16; VAE dtype is left to Diffusers policy."""
-    import torch
+    torch = pytest.importorskip("torch")
 
     class Pipe:
         unet = torch.nn.Linear(2, 2).float()

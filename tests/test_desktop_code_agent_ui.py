@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -346,6 +347,10 @@ def test_desktop_selector_mode_is_sent_to_generate_patch(tmp_path) -> None:
 
 
 @pytest.mark.skipif(not pyside_available(), reason="PySide6 not available")
+@pytest.mark.skipif(
+    os.environ.get("QT_QPA_PLATFORM") == "offscreen",
+    reason="asserts real-display panel visibility; offscreen CI collapses responsive panels",
+)
 def test_desktop_stitch_layout_prioritizes_chat_with_context_rails(tmp_path) -> None:
     from jarvis.desktop_runtime.window import JarvisDesktopWindow
 

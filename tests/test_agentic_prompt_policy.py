@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from transformers import AutoTokenizer
+import pytest
 
 from jarvis.agent_runtime.prompt_policy import (
     CAPABILITY_UNIVERSE,
@@ -265,6 +265,7 @@ def test_full_charter_represents_exact_200_conceptual_capabilities() -> None:
 
 
 def test_prompt_profiles_fit_production_token_budgets() -> None:
+    AutoTokenizer = pytest.importorskip("transformers").AutoTokenizer
     metadata = Path("training/agentic_lora/base_metadata")
     tokenizer = AutoTokenizer.from_pretrained(metadata, local_files_only=True)
     counts = {
