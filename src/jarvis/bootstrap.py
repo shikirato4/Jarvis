@@ -678,6 +678,513 @@ class JarvisApplication:
         }
 
 
+def _build_vision_stack(
+    settings,
+    mode_manager,
+    ui_backend,
+    event_bus,
+    logger,
+    operation_registry,
+    resilience,
+    application_registry,
+) -> tuple[UIAutomationService, VisionRuntimeService]:
+    """Wire UI automation and the vision pipeline (capture, OCR, analyzers)."""
+    ui_automation_service = UIAutomationService(
+        settings,
+        mode_manager,
+        ui_backend,
+        event_bus,
+        logger=logger,
+        operation_registry=operation_registry,
+        application_registry=application_registry,
+    )
+    capture_registry = ScreenCaptureBackendRegistry()
+    capture_registry.register(InMemoryScreenCaptureBackend(ui_backend))
+    if settings.ui_backend_kind != "in_memory":
+        capture_registry.register(MssScreenCaptureBackend(ui_backend))
+        capture_registry.register(WindowsScreenCaptureBackend(ui_backend))
+    ocr_registry = OCRProviderRegistry()
+    ocr_registry.register(InMemoryOCRProvider())
+    ocr_registry.register(TesseractOCRProvider())
+    analyzer_registry = VisionAnalyzerRegistry()
+    analyzer_registry.register(HeuristicVisionAnalyzer())
+    analyzer_registry.register(WindowsUIAwarenessBackend(ui_backend))
+    vision_runtime_service = VisionRuntimeService(
+        settings,
+        mode_manager,
+        event_bus,
+        capture_registry,
+        ocr_registry,
+        analyzer_registry,
+        ui_metadata_adapter=ui_backend,
+        logger=logger,
+        resilience_controller=resilience,
+        operation_registry=operation_registry,
+    )
+    return ui_automation_service, vision_runtime_service
+
+
+def _build_voice_runtime(
+    settings,
+    mode_manager,
+    event_bus,
+    operation_registry,
+    resilience,
+    logger,
+    ui_automation_service,
+) -> VoiceRuntimeService:
+    """Wire the voice stack: audio I/O, STT, TTS, cloning and dictation."""
+    audio_input_registry = AudioInputRegistry()
+    audio_input_registry.register(WavFileAudioInputBackend())
+    audio_input_registry.register(InMemoryAudioInputBackend())
+    if (
+        settings.voice_audio_input_backend_default == "sounddevice"
+        or settings.voice_input_enabled
+    ):
+        audio_input_registry.register(SoundDeviceAudioInputBackend())
+    audio_output_registry = AudioOutputRegistry()
+    audio_output_registry.register(InMemoryAudioOutputBackend())
+    audio_output_registry.register(WinsoundAudioOutputBackend())
+    if (
+        settings.voice_audio_output_backend_default == "pyttsx3"
+        or settings.voice_tts_provider_default == "pyttsx3"
+        or "pyttsx3" in settings.voice_tts_provider_fallback_order
+    ):
+        audio_output_registry.register(Pyttsx3AudioOutputBackend())
+    stt_registry = STTProviderRegistry()
+    stt_registry.register(InMemorySTTProvider())
+    if (
+        settings.voice_stt_provider_default == "faster_whisper"
+        or "faster_whisper" in settings.voice_stt_provider_fallback_order
+        or settings.voice_input_provider_default == "faster_whisper"
+    ):
+        stt_registry.register(FasterWhisperSTTProvider())
+    tts_registry = TTSProviderRegistry()
+    tts_registry.register(InMemoryTTSProvider())
+    tts_registry.register(
+        CoquiXTTSProvider(
+            model_name=settings.voice_coqui_model_name,
+            language=settings.voice_default_language,
+            speaker_wav=settings.resolved_voice_clone_sample_path
+            or settings.resolved_voice_coqui_speaker_wav,
+            speaker=settings.voice_coqui_speaker_name,
+            device_preference=settings.voice_coqui_device_preference,
+            tos_agreed=settings.voice_coqui_tos_agreed,
+            logger=logger,
+        )
+    )
+    if settings.voice_clone_openvoice_enabled:
+        tts_registry.register(OpenVoiceProvider())
+    if settings.voice_clone_rvc_enabled:
+        tts_registry.register(RVCProvider())
+    if (
+        settings.voice_tts_provider_default == "pyttsx3"
+        or "pyttsx3" in settings.voice_tts_provider_fallback_order
+    ):
+        tts_registry.register(Pyttsx3TTSProvider())
+    stt_service = STTService(
+        settings,
+        mode_manager,
+        stt_registry,
+        event_bus,
+        logger=logger,
+        resilience_controller=resilience,
+    )
+    tts_service = TTSService(
+        settings,
+        mode_manager,
+        tts_registry,
+        event_bus,
+        logger=logger,
+        resilience_controller=resilience,
+    )
+    voice_clone_manager = VoiceCloneManager(settings, logger=logger)
+    voice_runtime_service = VoiceRuntimeService(
+        settings,
+        mode_manager,
+        event_bus,
+        audio_input_registry,
+        audio_output_registry,
+        stt_service,
+        tts_service,
+        logger=logger,
+        operation_registry=operation_registry,
+        voice_clone_manager=voice_clone_manager,
+        dictate_callback=lambda text, correlation_id, options: (
+            ui_automation_service.write_text(
+                WriteTextRequest.model_validate(
+                    {
+                        "text": text,
+                        "mode": options.get("ui_mode") or "copilot",
+                        "target_window": options.get("target_window"),
+                        "typing_interval_ms": 0,
+                        "pause_between_blocks_ms": 0,
+                        "approved": True,
+                    }
+                ),
+                correlation_id=correlation_id,
+            )
+        ),
+        cancel_callback=lambda correlation_id: ui_automation_service.cancel(
+            CancellationRequest(correlation_id=correlation_id)
+        ),
+    )
+    voice_runtime_service.set_voice_enabled(settings.voice_enabled)
+    voice_runtime_service.set_voice_muted(settings.voice_start_muted)
+    return voice_runtime_service
+
+
+def _build_system_runtime(
+    settings,
+    event_bus,
+    logger,
+    operation_registry,
+    application_registry,
+) -> SystemRuntimeService:
+    """Wire the Windows/system runtime: volume, resources, launch and targets."""
+    volume_registry = VolumeProviderRegistry()
+    association_registry = AssociationProviderRegistry()
+    launcher_registry = LauncherBackendRegistry()
+    if settings.system_backend_kind == "in_memory":
+        volume_registry.register(InMemoryVolumeProvider())
+        association_registry.register(InMemoryAssociationProvider())
+        launcher_registry.register(InMemoryLauncherBackend())
+        launcher_backend_name = "in_memory_launcher"
+    else:
+        volume_registry.register(
+            NativeVolumeProvider(
+                settings.resolved_workspace_root, settings.system_known_locations
+            )
+        )
+        association_registry.register(NativeAssociationProvider())
+        launcher_registry.register(NativeLauncherBackend())
+        launcher_backend_name = "native_launcher"
+    volume_topology = VolumeTopologyService(volume_registry, settings, logger=logger)
+    resource_search = ResourceSearchService(
+        settings, volume_topology, application_registry, logger=logger
+    )
+    application_resolver = ApplicationResolver(application_registry, logger=logger)
+    path_resolver = PathResolver()
+    association_resolver = AssociationResolver(association_registry, logger=logger)
+    system_launcher = SystemLauncher(
+        launcher_registry, backend_name=launcher_backend_name, logger=logger
+    )
+    system_target_resolver = SystemTargetResolver(
+        application_resolver,
+        path_resolver,
+        resource_search,
+        association_resolver,
+        logger=logger,
+    )
+    return SystemRuntimeService(
+        settings,
+        event_bus,
+        volume_topology,
+        resource_search,
+        system_target_resolver,
+        system_launcher,
+        logger=logger,
+        operation_registry=operation_registry,
+    )
+
+
+def _build_unity_runtime(
+    settings,
+    event_bus,
+    logger,
+    operation_registry,
+    resilience,
+    system_runtime_service,
+) -> UnityRuntimeService:
+    """Wire the Unity editor integration: discovery, projects, bridge, launch."""
+    unity_installation_registry = UnityInstallationRegistry()
+    unity_installation_registry.register(
+        NativeUnityInstallationProvider(
+            known_locations=settings.unity_known_locations,
+            fallback_paths=settings.unity_editor_fallback_paths,
+        )
+    )
+    unity_installation_discovery = UnityInstallationDiscoveryService(
+        unity_installation_registry, settings, logger=logger
+    )
+    unity_bridge_registry = UnityBridgeRegistry()
+    unity_bridge_registry.register(NoOpUnityBridgeBackend())
+    unity_bridge_registry.register(
+        HttpUnityBridgeBackend(
+            settings, logger=logger, resilience_controller=resilience
+        )
+    )
+    unity_session_registry = UnityEditorSessionRegistry()
+    unity_project_discovery = UnityProjectDiscoveryService(settings, logger=logger)
+    unity_project_service = UnityProjectService(logger=logger)
+    unity_project_resolver = UnityProjectResolver(
+        unity_project_discovery, unity_project_service, logger=logger
+    )
+    unity_asset_service = UnityAssetService(logger=logger)
+    unity_script_service = UnityScriptService(settings, logger=logger)
+    unity_editor_ops = UnityEditorOperationService(logger=logger)
+    unity_launch_service = UnityLaunchIntegrationService(
+        settings, system_runtime_service, logger=logger
+    )
+    unity_bridge_service = UnityBridgeService(
+        unity_bridge_registry,
+        backend_name=settings.unity_bridge_backend_default,
+        session_registry=unity_session_registry,
+        logger=logger,
+    )
+    return UnityRuntimeService(
+        settings,
+        event_bus,
+        unity_installation_discovery,
+        unity_project_discovery,
+        unity_project_resolver,
+        unity_project_service,
+        unity_asset_service,
+        unity_script_service,
+        unity_editor_ops,
+        unity_bridge_service,
+        unity_launch_service,
+        unity_session_registry,
+        logger=logger,
+        operation_registry=operation_registry,
+    )
+
+
+def _register_state_services(state_manager) -> None:
+    """Announce every long-lived service to the shared state registry."""
+    for service_name in (
+        "jarvis.app",
+        "memory",
+        "modules",
+        "providers",
+        "models",
+        "embedding_providers",
+        "semantic_embeddings",
+        "automation",
+        "task_router",
+        "runtime",
+        "ops_runtime",
+        "semantic_memory",
+        "indexing_runtime",
+        "hud_runtime",
+        "ui_automation",
+        "vision_runtime",
+        "voice_runtime",
+        "system_runtime",
+        "unity_runtime",
+        "autonomy",
+        "research_runtime",
+        "science_runtime",
+        "security_runtime",
+        "self_improvement_runtime",
+        "writing_runtime",
+        "image_runtime",
+        "desktop_agent_runtime",
+    ):
+        state_manager.register_service(service_name)
+
+
+def _build_multimodal_pipeline(
+    settings,
+    vision_runtime_service,
+    voice_runtime_service,
+    attachment_service,
+) -> MultimodalPipeline:
+    """Wire attachment processing (text, image, audio, video) into one pipeline."""
+    processor_registry = ProcessorRegistry()
+    local_media_adapters = LocalMediaAdapters(
+        vision_service=vision_runtime_service,
+        voice_service=voice_runtime_service,
+        temp_root=settings.resolved_data_dir / "multimodal_work",
+        timeout_seconds=settings.attachment_processing_timeout_seconds,
+        max_video_frames=settings.attachment_video_max_frames,
+    )
+    processor_registry.register(
+        TextDocumentProcessor(context_char_budget=settings.semantic_context_char_budget)
+    )
+    processor_registry.register(ImageProcessor(ocr=local_media_adapters.ocr))
+    processor_registry.register(
+        AudioProcessor(transcriber=local_media_adapters.transcribe)
+    )
+    processor_registry.register(
+        VideoProcessor(analyzer=local_media_adapters.analyze_video)
+    )
+    return MultimodalPipeline(attachment_service, processor_registry)
+
+
+def _build_autonomy_stack(
+    settings,
+    mode_manager,
+    event_bus,
+    logger,
+    operation_registry,
+    mission_repository,
+    model_service,
+    semantic_memory_service,
+    ui_automation_service,
+    voice_runtime_service,
+    vision_runtime_service,
+):
+    """Wire the autonomy loop: planner, executor, verifier, reflector, control."""
+    autonomy_state_manager = MissionStateManager()
+    mission_persistence = MissionPersistenceService(mission_repository, logger=logger)
+    autonomy_planner = MissionPlanner(model_service, settings, logger=logger)
+    autonomy_executor = MissionExecutor(
+        runtime_service=None,
+        semantic_memory=semantic_memory_service,
+        ui_automation=ui_automation_service,
+        voice_runtime=voice_runtime_service,
+        vision_runtime=vision_runtime_service,
+        model_service=model_service,
+        logger=logger,
+        operation_registry=operation_registry,
+    )
+    autonomy_verifier = MissionVerifier(
+        vision_runtime=vision_runtime_service,
+        ui_automation=ui_automation_service,
+        logger=logger,
+    )
+    autonomy_reflector = MissionReflector(logger=logger)
+    autonomy_control = MissionControlService(
+        mission_persistence, autonomy_state_manager, logger=logger
+    )
+    autonomy_service_runtime = AutonomyService(
+        settings,
+        mode_manager,
+        event_bus,
+        autonomy_planner,
+        autonomy_executor,
+        autonomy_verifier,
+        autonomy_reflector,
+        autonomy_state_manager,
+        autonomy_control,
+        mission_persistence,
+        logger=logger,
+        operation_registry=operation_registry,
+    )
+    return mission_persistence, autonomy_executor, autonomy_service_runtime
+
+
+def _build_knowledge_stack(
+    settings,
+    event_bus,
+    logger,
+    operation_registry,
+    model_service,
+    semantic_memory_service,
+    memory_service,
+    vision_runtime_service,
+    system_runtime_service,
+    ui_automation_service,
+    web_search_provider,
+    web_research_orchestrator,
+    research_repository,
+    writing_repository,
+    autonomy_service_runtime,
+):
+    """Wire research, science, security, self-improvement and writing runtimes."""
+    research_repository.create_schema()
+    research_model_adapter = ModelServiceResearchAdapter(model_service)
+    research_retriever = ResearchRetriever(
+        settings,
+        semantic_memory_service,
+        memory_service,
+        vision_runtime_service,
+        system_runtime_service,
+        web_provider=web_search_provider,
+        web_research=web_research_orchestrator,
+        logger=logger,
+    )
+    research_analyzer = ResearchAnalyzer(research_model_adapter)
+    research_synthesizer = ResearchSynthesizer(research_model_adapter)
+    research_pipeline = ResearchPipeline(
+        retriever=research_retriever,
+        analyzer=research_analyzer,
+        synthesizer=research_synthesizer,
+        semantic_memory=semantic_memory_service,
+        logger=logger,
+    )
+    research_runtime_service = ResearchRuntimeService(
+        settings,
+        event_bus,
+        research_repository,
+        research_pipeline,
+        autonomy_service=autonomy_service_runtime,
+        logger=logger,
+        operation_registry=operation_registry,
+    )
+    science_runtime_service = ScienceRuntimeService(settings, logger=logger)
+    security_runtime_service = SecurityRuntimeService(settings, logger=logger)
+    writing_repository.create_schema()
+    writing_model_adapter = WritingModelAdapter(model_service)
+    self_improvement_analyzer = SelfImprovementAnalyzer(
+        ops_runtime=None,
+        research_runtime=research_runtime_service,
+        log_file=settings.resolved_log_file,
+        logger=logger,
+    )
+    self_improvement_patch_generator = SelfImprovementPatchGenerator(
+        model_adapter=writing_model_adapter, logger=logger
+    )
+    self_improvement_sandbox = SelfImprovementSandbox(
+        data_dir=settings.resolved_data_dir, logger=logger
+    )
+    self_improvement_validator = SelfImprovementValidator(logger=logger)
+    self_improvement_executor = SelfImprovementExecutor(logger=logger)
+    self_improvement_runtime_service = SelfImprovementRuntimeService(
+        settings=settings,
+        analyzer=self_improvement_analyzer,
+        patch_generator=self_improvement_patch_generator,
+        sandbox=self_improvement_sandbox,
+        validator=self_improvement_validator,
+        executor=self_improvement_executor,
+        logger=logger,
+        operation_registry=operation_registry,
+    )
+    word_backend = (
+        None
+        if settings.ui_backend_kind == "in_memory"
+        else WordCOMBackend(logger=logger)
+    )
+    writing_context_resolver = WritingContextResolver(
+        semantic_memory_service,
+        vision_runtime_service,
+        ui_automation_service,
+        word_backend=word_backend,
+        logger=logger,
+    )
+    writing_style_analyzer = WritingStyleAnalyzer(writing_model_adapter)
+    writing_analyzer = WritingAnalyzer()
+    writing_generator = WritingGenerator(writing_model_adapter, settings)
+    writing_continuation = WritingContinuationEngine(writing_generator)
+    writing_editor = WritingEditor(
+        ui_automation_service, settings, word_backend=word_backend, logger=logger
+    )
+    writing_runtime_service = WritingRuntimeService(
+        settings,
+        event_bus,
+        writing_repository,
+        writing_context_resolver,
+        writing_style_analyzer,
+        writing_analyzer,
+        writing_continuation,
+        writing_editor,
+        semantic_memory_service,
+        ui_automation_service,
+        autonomy_service=autonomy_service_runtime,
+        logger=logger,
+        operation_registry=operation_registry,
+    )
+    return (
+        research_runtime_service,
+        science_runtime_service,
+        security_runtime_service,
+        self_improvement_analyzer,
+        self_improvement_runtime_service,
+        writing_runtime_service,
+    )
+
+
 def build_application(settings: Settings | None = None) -> JarvisApplication:
     settings = settings or Settings()
     # Web search belongs to the shared action layer, not to a local or remote
@@ -1006,360 +1513,78 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
                 settings.resolved_workspace_root, settings.system_known_locations
             )
         )
-    ui_automation_service = UIAutomationService(
+    ui_automation_service, vision_runtime_service = _build_vision_stack(
         settings,
         mode_manager,
         ui_backend,
         event_bus,
-        logger=logger,
-        operation_registry=operation_registry,
-        application_registry=application_registry,
+        logger,
+        operation_registry,
+        resilience,
+        application_registry,
     )
-    capture_registry = ScreenCaptureBackendRegistry()
-    capture_registry.register(InMemoryScreenCaptureBackend(ui_backend))
-    if settings.ui_backend_kind != "in_memory":
-        capture_registry.register(MssScreenCaptureBackend(ui_backend))
-        capture_registry.register(WindowsScreenCaptureBackend(ui_backend))
-    ocr_registry = OCRProviderRegistry()
-    ocr_registry.register(InMemoryOCRProvider())
-    ocr_registry.register(TesseractOCRProvider())
-    analyzer_registry = VisionAnalyzerRegistry()
-    analyzer_registry.register(HeuristicVisionAnalyzer())
-    analyzer_registry.register(WindowsUIAwarenessBackend(ui_backend))
-    vision_runtime_service = VisionRuntimeService(
+    voice_runtime_service = _build_voice_runtime(
         settings,
         mode_manager,
         event_bus,
-        capture_registry,
-        ocr_registry,
-        analyzer_registry,
-        ui_metadata_adapter=ui_backend,
-        logger=logger,
-        resilience_controller=resilience,
-        operation_registry=operation_registry,
+        operation_registry,
+        resilience,
+        logger,
+        ui_automation_service,
     )
-    audio_input_registry = AudioInputRegistry()
-    audio_input_registry.register(WavFileAudioInputBackend())
-    audio_input_registry.register(InMemoryAudioInputBackend())
-    if (
-        settings.voice_audio_input_backend_default == "sounddevice"
-        or settings.voice_input_enabled
-    ):
-        audio_input_registry.register(SoundDeviceAudioInputBackend())
-    audio_output_registry = AudioOutputRegistry()
-    audio_output_registry.register(InMemoryAudioOutputBackend())
-    audio_output_registry.register(WinsoundAudioOutputBackend())
-    if (
-        settings.voice_audio_output_backend_default == "pyttsx3"
-        or settings.voice_tts_provider_default == "pyttsx3"
-        or "pyttsx3" in settings.voice_tts_provider_fallback_order
-    ):
-        audio_output_registry.register(Pyttsx3AudioOutputBackend())
-    stt_registry = STTProviderRegistry()
-    stt_registry.register(InMemorySTTProvider())
-    if (
-        settings.voice_stt_provider_default == "faster_whisper"
-        or "faster_whisper" in settings.voice_stt_provider_fallback_order
-        or settings.voice_input_provider_default == "faster_whisper"
-    ):
-        stt_registry.register(FasterWhisperSTTProvider())
-    tts_registry = TTSProviderRegistry()
-    tts_registry.register(InMemoryTTSProvider())
-    tts_registry.register(
-        CoquiXTTSProvider(
-            model_name=settings.voice_coqui_model_name,
-            language=settings.voice_default_language,
-            speaker_wav=settings.resolved_voice_clone_sample_path
-            or settings.resolved_voice_coqui_speaker_wav,
-            speaker=settings.voice_coqui_speaker_name,
-            device_preference=settings.voice_coqui_device_preference,
-            tos_agreed=settings.voice_coqui_tos_agreed,
-            logger=logger,
-        )
-    )
-    if settings.voice_clone_openvoice_enabled:
-        tts_registry.register(OpenVoiceProvider())
-    if settings.voice_clone_rvc_enabled:
-        tts_registry.register(RVCProvider())
-    if (
-        settings.voice_tts_provider_default == "pyttsx3"
-        or "pyttsx3" in settings.voice_tts_provider_fallback_order
-    ):
-        tts_registry.register(Pyttsx3TTSProvider())
-    stt_service = STTService(
-        settings,
-        mode_manager,
-        stt_registry,
-        event_bus,
-        logger=logger,
-        resilience_controller=resilience,
-    )
-    tts_service = TTSService(
-        settings,
-        mode_manager,
-        tts_registry,
-        event_bus,
-        logger=logger,
-        resilience_controller=resilience,
-    )
-    voice_clone_manager = VoiceCloneManager(settings, logger=logger)
-    voice_runtime_service = VoiceRuntimeService(
-        settings,
-        mode_manager,
-        event_bus,
-        audio_input_registry,
-        audio_output_registry,
-        stt_service,
-        tts_service,
-        logger=logger,
-        operation_registry=operation_registry,
-        voice_clone_manager=voice_clone_manager,
-        dictate_callback=lambda text, correlation_id, options: (
-            ui_automation_service.write_text(
-                WriteTextRequest.model_validate(
-                    {
-                        "text": text,
-                        "mode": options.get("ui_mode") or "copilot",
-                        "target_window": options.get("target_window"),
-                        "typing_interval_ms": 0,
-                        "pause_between_blocks_ms": 0,
-                        "approved": True,
-                    }
-                ),
-                correlation_id=correlation_id,
-            )
-        ),
-        cancel_callback=lambda correlation_id: ui_automation_service.cancel(
-            CancellationRequest(correlation_id=correlation_id)
-        ),
-    )
-    voice_runtime_service.set_voice_enabled(settings.voice_enabled)
-    voice_runtime_service.set_voice_muted(settings.voice_start_muted)
-    volume_registry = VolumeProviderRegistry()
-    association_registry = AssociationProviderRegistry()
-    launcher_registry = LauncherBackendRegistry()
-    if settings.system_backend_kind == "in_memory":
-        volume_registry.register(InMemoryVolumeProvider())
-        association_registry.register(InMemoryAssociationProvider())
-        launcher_registry.register(InMemoryLauncherBackend())
-        launcher_backend_name = "in_memory_launcher"
-    else:
-        volume_registry.register(
-            NativeVolumeProvider(
-                settings.resolved_workspace_root, settings.system_known_locations
-            )
-        )
-        association_registry.register(NativeAssociationProvider())
-        launcher_registry.register(NativeLauncherBackend())
-        launcher_backend_name = "native_launcher"
-    volume_topology = VolumeTopologyService(volume_registry, settings, logger=logger)
-    resource_search = ResourceSearchService(
-        settings, volume_topology, application_registry, logger=logger
-    )
-    application_resolver = ApplicationResolver(application_registry, logger=logger)
-    path_resolver = PathResolver()
-    association_resolver = AssociationResolver(association_registry, logger=logger)
-    system_launcher = SystemLauncher(
-        launcher_registry, backend_name=launcher_backend_name, logger=logger
-    )
-    system_target_resolver = SystemTargetResolver(
-        application_resolver,
-        path_resolver,
-        resource_search,
-        association_resolver,
-        logger=logger,
-    )
-    system_runtime_service = SystemRuntimeService(
+    system_runtime_service = _build_system_runtime(
         settings,
         event_bus,
-        volume_topology,
-        resource_search,
-        system_target_resolver,
-        system_launcher,
-        logger=logger,
-        operation_registry=operation_registry,
+        logger,
+        operation_registry,
+        application_registry,
     )
     indexing_runtime_service._system_runtime = system_runtime_service  # noqa: SLF001
-    unity_installation_registry = UnityInstallationRegistry()
-    unity_installation_registry.register(
-        NativeUnityInstallationProvider(
-            known_locations=settings.unity_known_locations,
-            fallback_paths=settings.unity_editor_fallback_paths,
-        )
-    )
-    unity_installation_discovery = UnityInstallationDiscoveryService(
-        unity_installation_registry, settings, logger=logger
-    )
-    unity_bridge_registry = UnityBridgeRegistry()
-    unity_bridge_registry.register(NoOpUnityBridgeBackend())
-    unity_bridge_registry.register(
-        HttpUnityBridgeBackend(
-            settings, logger=logger, resilience_controller=resilience
-        )
-    )
-    unity_session_registry = UnityEditorSessionRegistry()
-    unity_project_discovery = UnityProjectDiscoveryService(settings, logger=logger)
-    unity_project_service = UnityProjectService(logger=logger)
-    unity_project_resolver = UnityProjectResolver(
-        unity_project_discovery, unity_project_service, logger=logger
-    )
-    unity_asset_service = UnityAssetService(logger=logger)
-    unity_script_service = UnityScriptService(settings, logger=logger)
-    unity_editor_ops = UnityEditorOperationService(logger=logger)
-    unity_launch_service = UnityLaunchIntegrationService(
-        settings, system_runtime_service, logger=logger
-    )
-    unity_bridge_service = UnityBridgeService(
-        unity_bridge_registry,
-        backend_name=settings.unity_bridge_backend_default,
-        session_registry=unity_session_registry,
-        logger=logger,
-    )
-    unity_runtime_service = UnityRuntimeService(
+    unity_runtime_service = _build_unity_runtime(
         settings,
         event_bus,
-        unity_installation_discovery,
-        unity_project_discovery,
-        unity_project_resolver,
-        unity_project_service,
-        unity_asset_service,
-        unity_script_service,
-        unity_editor_ops,
-        unity_bridge_service,
-        unity_launch_service,
-        unity_session_registry,
-        logger=logger,
-        operation_registry=operation_registry,
+        logger,
+        operation_registry,
+        resilience,
+        system_runtime_service,
     )
-    autonomy_state_manager = MissionStateManager()
-    mission_persistence = MissionPersistenceService(mission_repository, logger=logger)
-    autonomy_planner = MissionPlanner(model_service, settings, logger=logger)
-    autonomy_executor = MissionExecutor(
-        runtime_service=None,
-        semantic_memory=semantic_memory_service,
-        ui_automation=ui_automation_service,
-        voice_runtime=voice_runtime_service,
-        vision_runtime=vision_runtime_service,
-        model_service=model_service,
-        logger=logger,
-        operation_registry=operation_registry,
-    )
-    autonomy_verifier = MissionVerifier(
-        vision_runtime=vision_runtime_service,
-        ui_automation=ui_automation_service,
-        logger=logger,
-    )
-    autonomy_reflector = MissionReflector(logger=logger)
-    autonomy_control = MissionControlService(
-        mission_persistence, autonomy_state_manager, logger=logger
-    )
-    autonomy_service_runtime = AutonomyService(
+    mission_persistence, autonomy_executor, autonomy_service_runtime = _build_autonomy_stack(
         settings,
         mode_manager,
         event_bus,
-        autonomy_planner,
-        autonomy_executor,
-        autonomy_verifier,
-        autonomy_reflector,
-        autonomy_state_manager,
-        autonomy_control,
-        mission_persistence,
-        logger=logger,
-        operation_registry=operation_registry,
+        logger,
+        operation_registry,
+        mission_repository,
+        model_service,
+        semantic_memory_service,
+        ui_automation_service,
+        voice_runtime_service,
+        vision_runtime_service,
     )
-    research_repository.create_schema()
-    research_model_adapter = ModelServiceResearchAdapter(model_service)
-    research_retriever = ResearchRetriever(
+    (
+        research_runtime_service,
+        science_runtime_service,
+        security_runtime_service,
+        self_improvement_analyzer,
+        self_improvement_runtime_service,
+        writing_runtime_service,
+    ) = _build_knowledge_stack(
         settings,
+        event_bus,
+        logger,
+        operation_registry,
+        model_service,
         semantic_memory_service,
         memory_service,
         vision_runtime_service,
         system_runtime_service,
-        web_provider=web_search_provider,
-        web_research=web_research_orchestrator,
-        logger=logger,
-    )
-    research_analyzer = ResearchAnalyzer(research_model_adapter)
-    research_synthesizer = ResearchSynthesizer(research_model_adapter)
-    research_pipeline = ResearchPipeline(
-        retriever=research_retriever,
-        analyzer=research_analyzer,
-        synthesizer=research_synthesizer,
-        semantic_memory=semantic_memory_service,
-        logger=logger,
-    )
-    research_runtime_service = ResearchRuntimeService(
-        settings,
-        event_bus,
+        ui_automation_service,
+        web_search_provider,
+        web_research_orchestrator,
         research_repository,
-        research_pipeline,
-        autonomy_service=autonomy_service_runtime,
-        logger=logger,
-        operation_registry=operation_registry,
-    )
-    science_runtime_service = ScienceRuntimeService(settings, logger=logger)
-    security_runtime_service = SecurityRuntimeService(settings, logger=logger)
-    writing_repository.create_schema()
-    writing_model_adapter = WritingModelAdapter(model_service)
-    self_improvement_analyzer = SelfImprovementAnalyzer(
-        ops_runtime=None,
-        research_runtime=research_runtime_service,
-        log_file=settings.resolved_log_file,
-        logger=logger,
-    )
-    self_improvement_patch_generator = SelfImprovementPatchGenerator(
-        model_adapter=writing_model_adapter, logger=logger
-    )
-    self_improvement_sandbox = SelfImprovementSandbox(
-        data_dir=settings.resolved_data_dir, logger=logger
-    )
-    self_improvement_validator = SelfImprovementValidator(logger=logger)
-    self_improvement_executor = SelfImprovementExecutor(logger=logger)
-    self_improvement_runtime_service = SelfImprovementRuntimeService(
-        settings=settings,
-        analyzer=self_improvement_analyzer,
-        patch_generator=self_improvement_patch_generator,
-        sandbox=self_improvement_sandbox,
-        validator=self_improvement_validator,
-        executor=self_improvement_executor,
-        logger=logger,
-        operation_registry=operation_registry,
-    )
-    word_backend = (
-        None
-        if settings.ui_backend_kind == "in_memory"
-        else WordCOMBackend(logger=logger)
-    )
-    writing_context_resolver = WritingContextResolver(
-        semantic_memory_service,
-        vision_runtime_service,
-        ui_automation_service,
-        word_backend=word_backend,
-        logger=logger,
-    )
-    writing_style_analyzer = WritingStyleAnalyzer(writing_model_adapter)
-    writing_analyzer = WritingAnalyzer()
-    writing_generator = WritingGenerator(writing_model_adapter, settings)
-    writing_continuation = WritingContinuationEngine(writing_generator)
-    writing_editor = WritingEditor(
-        ui_automation_service, settings, word_backend=word_backend, logger=logger
-    )
-    writing_runtime_service = WritingRuntimeService(
-        settings,
-        event_bus,
         writing_repository,
-        writing_context_resolver,
-        writing_style_analyzer,
-        writing_analyzer,
-        writing_continuation,
-        writing_editor,
-        semantic_memory_service,
-        ui_automation_service,
-        autonomy_service=autonomy_service_runtime,
-        logger=logger,
-        operation_registry=operation_registry,
+        autonomy_service_runtime,
     )
-
     module_registry = ModuleRegistry()
     module_registry.register(MemoryModule(memory_service))
     module_registry.register(IndexingModule(indexing_runtime_service))
@@ -1609,52 +1834,13 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         ),
     )
     autonomy_executor._runtime = runtime_service  # noqa: SLF001
-    state_manager.register_service("jarvis.app")
-    state_manager.register_service("memory")
-    state_manager.register_service("modules")
-    state_manager.register_service("providers")
-    state_manager.register_service("models")
-    state_manager.register_service("embedding_providers")
-    state_manager.register_service("semantic_embeddings")
-    state_manager.register_service("automation")
-    state_manager.register_service("task_router")
-    state_manager.register_service("runtime")
-    state_manager.register_service("ops_runtime")
-    state_manager.register_service("semantic_memory")
-    state_manager.register_service("indexing_runtime")
-    state_manager.register_service("hud_runtime")
-    state_manager.register_service("ui_automation")
-    state_manager.register_service("vision_runtime")
-    state_manager.register_service("voice_runtime")
-    state_manager.register_service("system_runtime")
-    state_manager.register_service("unity_runtime")
-    state_manager.register_service("autonomy")
-    state_manager.register_service("research_runtime")
-    state_manager.register_service("science_runtime")
-    state_manager.register_service("security_runtime")
-    state_manager.register_service("self_improvement_runtime")
-    state_manager.register_service("writing_runtime")
-    state_manager.register_service("image_runtime")
-    state_manager.register_service("desktop_agent_runtime")
-    processor_registry = ProcessorRegistry()
-    local_media_adapters = LocalMediaAdapters(
-        vision_service=vision_runtime_service,
-        voice_service=voice_runtime_service,
-        temp_root=settings.resolved_data_dir / "multimodal_work",
-        timeout_seconds=settings.attachment_processing_timeout_seconds,
-        max_video_frames=settings.attachment_video_max_frames,
+    _register_state_services(state_manager)
+    multimodal_pipeline = _build_multimodal_pipeline(
+        settings,
+        vision_runtime_service,
+        voice_runtime_service,
+        attachment_service,
     )
-    processor_registry.register(
-        TextDocumentProcessor(context_char_budget=settings.semantic_context_char_budget)
-    )
-    processor_registry.register(ImageProcessor(ocr=local_media_adapters.ocr))
-    processor_registry.register(
-        AudioProcessor(transcriber=local_media_adapters.transcribe)
-    )
-    processor_registry.register(
-        VideoProcessor(analyzer=local_media_adapters.analyze_video)
-    )
-    multimodal_pipeline = MultimodalPipeline(attachment_service, processor_registry)
     return JarvisApplication(
         settings=settings,
         database=database,
