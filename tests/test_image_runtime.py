@@ -215,8 +215,13 @@ def test_image_model_path_finds_checkout_when_workspace_is_parent(tmp_path: Path
 def test_default_image_model_path_is_not_bound_to_arbitrary_cwd(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     settings = Settings(_env_file=None, embeddings_enabled=False, ui_backend_kind="in_memory", system_backend_kind="in_memory")
-    assert settings.resolved_image_model_path.exists()
-    assert settings.resolved_image_model_path.name == "juggernautXL_v8Rundiffusion.safetensors"
+    resolved = settings.resolved_image_model_path
+    # The default resolves inside the checkout's models tree, never the
+    # arbitrary cwd; the checkpoint file itself is a developer-local asset
+    # and is not asserted to exist.
+    assert resolved.name == "juggernautXL_v8Rundiffusion.safetensors"
+    assert "models" in resolved.parts and "checkpoints" in resolved.parts
+    assert tmp_path not in resolved.parents
 
 
 def test_image_cli_status(monkeypatch, tmp_path: Path) -> None:

@@ -320,6 +320,10 @@ def test_stdin_rejected_unless_declared(runtime, tmp_path):
     runtime.cancel(session.session_id, accepted.execution_id)
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / ".venv" / "Scripts" / "python.exe").exists(),
+    reason="checkout-local dev venv; CI installs into the runner interpreter instead",
+)
 def test_venv_python_is_exact(runtime):
     root = Path(__file__).resolve().parents[1]
     venv = root / ".venv"
