@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import re
 import json
+import logging
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+from collections.abc import Callable
 
 from jarvis.capability_manifest import build_capability_manifest
 from jarvis.models_runtime.base import ModelMessage
@@ -17,6 +19,7 @@ FULL_CHARTER_MARKER = "[FULL PRE-LORA IDENTITY CHARTER v2]"
 UNIVERSE_MARKER = "[JARVIS CAPABILITY UNIVERSE — CONCEPTUAL, NOT AVAILABILITY]"
 CAPABILITY_MARKER = "[CURRENT JARVIS CAPABILITY MANIFEST — EXECUTION AUTHORITY]"
 SCHEMA_MARKER = "[RELEVANT DETAILED TOOL SCHEMAS]"
+SKILLS_MARKER = "[RELEVANT SKILLS — DOMAIN PROCEDURES]"
 
 _RETRIEVAL_STOPWORDS = frozenset(
     ["a", "an", "and", "are", "can", "could", "do", "el", "en", "for", "from", "how", "i", "in", "is", "la", "las", "los", "mi", "my", "of", "on", "or", "cual", "de", "del", "es", "le", "lo", "operación", "operation", "para", "por", "que", "se", "su", "sus", "the", "this", "to", "un", "una", "what", "which", "with", "y", "you", "your", "como", "puedo", "me", "tengo"]
@@ -153,6 +156,8 @@ class AgenticPromptPolicy:
     max_relevant_tools: int = 24
     fallback_tools: int = 8
     max_schema_tokens: int = 2_400
+    # Optional provider of domain-skill context for the current user query.
+    skills_provider: Callable[[str], str] | None = None
 
     @property
     def static_prompt(self) -> str:
@@ -324,6 +329,9 @@ class AgenticPromptPolicy:
             layers.append(dynamic)
         if schemas:
             layers.append(schemas)
+        skills_layer = self._skills_layer_for(updated)
+        if skills_layer:
+            layers.append(skills_layer)
         addition = "\n\n".join(layers)
         if system_index is None:
             updated.insert(0, ModelMessage(role="system", content=addition))
@@ -332,6 +340,33 @@ class AgenticPromptPolicy:
         content = self._remove_managed_layers(updated[system_index].content).rstrip()
         updated[system_index].content = f"{content}\n\n{addition}" if content else addition
         return updated
+
+    def _skills_layer_for(self, messages: list[ModelMessage]) -> str:
+        """Render matching domain skills for the latest user message, if any."""
+        if self.skills_provider is None:
+            return ""
+        query = next(
+            (
+                message.content
+                for message in reversed(messages)
+                if message.role == "user"
+            ),
+            "",
+        )
+        if not query:
+            return ""
+        try:
+            context = self.skills_provider(query)
+        except Exception as exc:
+            # Skills are auxiliary guidance; a broken provider must never
+            # take down the agent loop.
+            logging.getLogger("jarvis.skills_runtime").warning(
+                "skills_provider_failed", extra={"error": str(exc)}
+            )
+            return ""
+        if not context:
+            return ""
+        return f"{SKILLS_MARKER}\n{context}"
 
     @staticmethod
     def capability_context(tools: list[dict[str, Any]]) -> str:
@@ -390,13 +425,14 @@ class AgenticPromptPolicy:
     @staticmethod
     def _remove_managed_layers(content: str) -> str:
         markers = (
-            CORE_MARKER,
-            SCAFFOLD_MARKER,
-            FULL_CHARTER_MARKER,
-            UNIVERSE_MARKER,
-            CAPABILITY_MARKER,
-            SCHEMA_MARKER,
-        )
+                CORE_MARKER,
+                SCAFFOLD_MARKER,
+                FULL_CHARTER_MARKER,
+                UNIVERSE_MARKER,
+                CAPABILITY_MARKER,
+                SCHEMA_MARKER,
+                SKILLS_MARKER,
+            )
         positions = [content.find(marker) for marker in markers if marker in content]
         if not positions:
             return content

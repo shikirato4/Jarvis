@@ -382,6 +382,8 @@ class Settings(BaseSettings):
     voice_coqui_speaker_wav: Path | None = None
     voice_coqui_speaker_name: str | None = None
     voice_coqui_tos_agreed: bool = False
+    skills_enabled: bool = True
+    skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True
     voice_clone_backend_default: str = ""
     voice_clone_profile_default: str = "jarvis_premium"
@@ -800,6 +802,13 @@ class Settings(BaseSettings):
             extra={"configured": str(configured), "candidates": [str(path) for path in candidates], "selected": str(selected)},
         )
         return selected
+
+    @property
+    def resolved_skills_dir(self) -> Path:
+        configured = self.skills_dir
+        if configured.is_absolute():
+            return configured
+        return self.resolved_workspace_root / configured
 
     @property
     def resolved_logs_dir(self) -> Path:

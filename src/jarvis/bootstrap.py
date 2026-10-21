@@ -268,6 +268,7 @@ from jarvis.voice_runtime.coqui_tts import CoquiXTTSProvider
 from jarvis.voice_runtime.stt import STTService
 from jarvis.voice_runtime.tts import TTSService
 from jarvis.voice_runtime.voice_clone_manager import VoiceCloneManager
+from jarvis.skills_runtime import SkillRegistry, SkillService
 
 
 @dataclass
@@ -279,6 +280,7 @@ class JarvisApplication:
     mode_manager: ModeManager
     state_manager: RuntimeStateManager
     capability_registry: CapabilityRegistry
+    skills_service: SkillService
     action_registry: ActionRegistry
     action_router: ActionRouter
     action_executor: ActionExecutor
@@ -980,6 +982,7 @@ def _register_state_services(state_manager) -> None:
         "writing_runtime",
         "image_runtime",
         "desktop_agent_runtime",
+        "skills",
     ):
         state_manager.register_service(service_name)
 
@@ -1010,6 +1013,22 @@ def _build_multimodal_pipeline(
         VideoProcessor(analyzer=local_media_adapters.analyze_video)
     )
     return MultimodalPipeline(attachment_service, processor_registry)
+
+
+def _build_skills_service(settings, logger) -> SkillService:
+    """Load domain skills from disk; an absent directory yields an empty catalog."""
+    catalog = SkillRegistry().load_directory(settings.resolved_skills_dir)
+    for warning in catalog.warnings:
+        logger.warning("skill_load_warning", extra={"warning": warning})
+    logger.info(
+        "skills_loaded",
+        extra={
+            "directory": str(settings.resolved_skills_dir),
+            "loaded": len(catalog.skills),
+            "warnings": len(catalog.warnings),
+        },
+    )
+    return SkillService(catalog)
 
 
 def _build_autonomy_stack(
@@ -1463,6 +1482,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
             dataset_factory=build_controlled_dataset,
             seed=42,
         )
+    skills_service = _build_skills_service(settings, logger)
     agent_controller = AgentController(
         infer_model=model_service.infer,
         stream_model=model_service.stream,
@@ -1478,6 +1498,9 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
             ),
             max_relevant_tools=settings.pre_lora_max_relevant_tools,
             max_schema_tokens=settings.pre_lora_max_schema_tokens,
+            skills_provider=skills_service.skills_context
+            if settings.skills_enabled
+            else None,
         ),
     )
     terminal_runtime = TerminalRuntime(event_sink=event_bus.publish)
@@ -1849,6 +1872,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         mode_manager=mode_manager,
         state_manager=state_manager,
         capability_registry=capability_registry,
+        skills_service=skills_service,
         action_registry=action_registry,
         action_router=router,
         action_executor=action_executor,
