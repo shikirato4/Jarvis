@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from jarvis.memory_semantic.documents import DocumentIngestionRequest
@@ -23,10 +23,10 @@ class ResearchPipeline:
         self._logger = logger
 
     def run(self, task: ResearchTask, request: ResearchRunRequest, *, correlation_id: str, operation_handle=None) -> ResearchTask:
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         model_calls = 0
         task.status = ResearchTaskStatus.RUNNING
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self._check_cancelled(operation_handle, task)
 
         self._record_step(task, ResearchStepKind.QUERY_PARSING, "Parse query", {"query": task.query}, {"normalized_query": task.query.strip()})
@@ -136,7 +136,7 @@ class ResearchPipeline:
             task.last_error = violation
         else:
             task.status = ResearchTaskStatus.COMPLETED
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         return task
 
     @staticmethod
@@ -181,7 +181,7 @@ class ResearchPipeline:
         *,
         status: ResearchStepStatus = ResearchStepStatus.COMPLETED,
     ) -> None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         task.steps.append(
             ResearchStep(
                 step_id=f"{kind.value}-{uuid4().hex[:8]}",

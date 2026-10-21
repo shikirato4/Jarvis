@@ -4,7 +4,7 @@ import hashlib
 import io
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from uuid import uuid4
 
@@ -88,7 +88,7 @@ class VisionRuntimeService:
 
     def extract_text(self, request: OCRRequest, *, correlation_id: str | None = None) -> VisionOperationReceipt:
         correlation_id = correlation_id or request.correlation_id or str(uuid4())
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         handle = self._begin_operation("vision.extract_text", correlation_id)
         try:
             validate_ocr_request(self._settings, request)
@@ -129,7 +129,7 @@ class VisionRuntimeService:
 
     def analyze_image(self, request: VisionAnalysisRequest, *, correlation_id: str | None = None) -> VisionOperationReceipt:
         correlation_id = correlation_id or request.correlation_id or str(uuid4())
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         try:
             capture_result = self._resolve_analysis_capture(request, correlation_id=correlation_id)
             ocr_result = None
@@ -179,7 +179,7 @@ class VisionRuntimeService:
 
     def locate_text(self, request: TextLocationRequest, *, correlation_id: str | None = None) -> VisionOperationReceipt:
         correlation_id = correlation_id or request.correlation_id or str(uuid4())
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         try:
             awareness_receipt = self.build_ui_awareness(
                 request.awareness or UIAwarenessRequest(capture=ScreenCaptureRequest(target_type=CaptureTargetType.ACTIVE_WINDOW), correlation_id=correlation_id),
@@ -213,7 +213,7 @@ class VisionRuntimeService:
 
     def locate_element(self, request: ElementLocationRequest, *, correlation_id: str | None = None) -> VisionOperationReceipt:
         correlation_id = correlation_id or request.correlation_id or str(uuid4())
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         try:
             awareness_receipt = self.build_ui_awareness(
                 request.awareness or UIAwarenessRequest(capture=ScreenCaptureRequest(target_type=CaptureTargetType.ACTIVE_WINDOW), correlation_id=correlation_id),
@@ -260,7 +260,7 @@ class VisionRuntimeService:
         operation_name: str = "vision.ui_awareness",
     ) -> VisionOperationReceipt:
         correlation_id = correlation_id or request.correlation_id or str(uuid4())
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         try:
             capture_result = self._resolve_awareness_capture(request, correlation_id=correlation_id)
             cache_key = self._awareness_cache_key(request, capture_result)
@@ -326,7 +326,7 @@ class VisionRuntimeService:
 
     def _capture(self, request: ScreenCaptureRequest, *, correlation_id: str | None, operation_name: str) -> VisionOperationReceipt:
         correlation_id = correlation_id or request.correlation_id or str(uuid4())
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         started_perf = time.perf_counter()
         try:
             result = self._resolve_capture(request, correlation_id=correlation_id)
@@ -479,7 +479,7 @@ class VisionRuntimeService:
             awareness_result=awareness_result,
             data=data,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish(
             "vision.executed",
@@ -498,7 +498,7 @@ class VisionRuntimeService:
         return receipt
 
     def _publish_failure(self, correlation_id: str, operation_name: str, started_at: datetime, *, error: Exception) -> None:
-        elapsed_ms = (datetime.now(timezone.utc) - started_at).total_seconds() * 1000
+        elapsed_ms = (datetime.now(UTC) - started_at).total_seconds() * 1000
         self._logger.exception("vision_operation_failed", extra={"operation_name": operation_name, "correlation_id": correlation_id})
         self._event_bus.publish(
             "vision.failed",
@@ -563,12 +563,12 @@ class VisionRuntimeService:
     @staticmethod
     def _image_hash(image_bytes: bytes | None, image_path: str | None) -> str | None:
         if image_bytes:
-            return hashlib.sha1(image_bytes).hexdigest()
+            return hashlib.sha1(image_bytes).hexdigest()  # noqa: S324  # content fingerprint, not crypto
         if image_path:
             path = Path(image_path)
             if path.exists():
                 stat = path.stat()
-                return hashlib.sha1(f"{path.resolve(strict=False)}:{stat.st_mtime_ns}:{stat.st_size}".encode("utf-8")).hexdigest()
+                return hashlib.sha1(f"{path.resolve(strict=False)}:{stat.st_mtime_ns}:{stat.st_size}".encode()).hexdigest()  # noqa: S324  # content fingerprint, not crypto
         return None
 
     @staticmethod

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 class AgentContextBuilder:
-    def __init__(self, executor: "CodeAgentExecutor", *, max_chars: int = 6000) -> None:
+    def __init__(self, executor: CodeAgentExecutor, *, max_chars: int = 6000) -> None:
         self._executor = executor
         self._max_chars = max_chars
 

@@ -27,7 +27,7 @@ class PatchFileChange:
         }
 
     @staticmethod
-    def from_dict(payload: dict[str, Any]) -> "PatchFileChange":
+    def from_dict(payload: dict[str, Any]) -> PatchFileChange:
         return PatchFileChange(
             path=str(payload.get("path", "")),
             operation=str(payload.get("operation", "")),
@@ -89,7 +89,7 @@ class ProposedPatch:
         }
 
     @staticmethod
-    def from_dict(payload: dict[str, Any]) -> "ProposedPatch":
+    def from_dict(payload: dict[str, Any]) -> ProposedPatch:
         return ProposedPatch(
             id=str(payload.get("id", "")),
             task=str(payload.get("task", "")),

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 from .models import SelfImprovementProposal, SelfImprovementSandboxRecord
@@ -51,7 +51,7 @@ class SelfImprovementSandbox:
             backup_file.write_text(source_file.read_text(encoding="utf-8"), encoding="utf-8")
         manifest = {
             "session_id": session_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "workspace_root": str(source_root),
             "proposal": {
                 "file_path": str(relative).replace("\\", "/"),
@@ -84,7 +84,7 @@ class SelfImprovementSandbox:
             if manifest_path.exists():
                 manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
                 manifest["applied"] = True
-                manifest["applied_at"] = datetime.now(timezone.utc).isoformat()
+                manifest["applied_at"] = datetime.now(UTC).isoformat()
                 manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
             return {"applied": 1, "session_id": session_id, "target": str(target)}
         except Exception:
@@ -112,7 +112,7 @@ class SelfImprovementSandbox:
             elif target.exists():
                 target.unlink()
                 restored += 1
-        manifest["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
+        manifest["rolled_back_at"] = datetime.now(UTC).isoformat()
         manifest["applied"] = False
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         return {"restored": restored, "session_id": session_id}

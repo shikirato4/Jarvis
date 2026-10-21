@@ -557,9 +557,7 @@ class CognitiveOrchestrator:
             )
         ):
             return True
-        if lowered.startswith(action_keywords):
-            return False
-        return True
+        return not lowered.startswith(action_keywords)
 
     @staticmethod
     def _looks_like_explicit_research(query: str) -> bool:

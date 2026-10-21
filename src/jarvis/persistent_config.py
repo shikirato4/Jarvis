@@ -162,9 +162,7 @@ def _sanitize_payload(data: dict[str, Any]) -> dict[str, Any]:
         key = str(raw_key)
         if _looks_sensitive(key) or _looks_sensitive(value):
             continue
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            safe[key] = value
-        elif isinstance(value, list) and all(
+        if isinstance(value, (str, int, float, bool)) or value is None or isinstance(value, list) and all(
             isinstance(item, (str, int, float, bool)) or item is None for item in value
         ):
             safe[key] = value

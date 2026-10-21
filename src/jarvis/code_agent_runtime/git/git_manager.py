@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 from jarvis.code_agent_runtime.base import AuthorizationContext, CommandRunResult
@@ -72,7 +72,7 @@ class GitManager:
 
     def create_checkpoint(self, authorization: AuthorizationContext, *, message: str | None = None) -> dict:
         self.ensure_repo()
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         checkpoint_message = self.sanitize_checkpoint_message(message or f"jarvis/checkpoint-{stamp}")
         command = f"git stash push -u -m {checkpoint_message}"
         result = self._run(command, authorization, argv=["git", "stash", "push", "-u", "-m", checkpoint_message])

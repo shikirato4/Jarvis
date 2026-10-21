@@ -5,10 +5,11 @@ import subprocess
 import threading
 import time
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -134,7 +135,7 @@ class LocalModelRuntimeManager:
             self._profile.model_aliases,
         )
         self._client = client or httpx.Client(
-            verify=False,
+            verify=False,  # noqa: S501  # local llama-server endpoint (localhost/self-signed), not public TLS
             trust_env=False,
             timeout=settings.local_llm_healthcheck_timeout_seconds,
         )
@@ -253,7 +254,7 @@ class LocalModelRuntimeManager:
         started_at = self._clock()
         try:
             ready = self._start_sequence(started_at)
-        except _StopRequested:
+        except _StopRequested as exc:
             with self._condition:
                 self._status = replace(
                     self._status,
@@ -264,7 +265,7 @@ class LocalModelRuntimeManager:
                     readiness=False,
                 )
                 self._condition.notify_all()
-            raise LocalModelRuntimeError("Inicio del runtime local cancelado.")
+            raise LocalModelRuntimeError("Inicio del runtime local cancelado.") from exc
         except LocalModelRuntimeError as exc:
             with self._condition:
                 self._status = replace(
@@ -567,7 +568,7 @@ class LocalModelRuntimeManager:
                 parallel=self._profile.parallel,
                 ownership=LocalRuntimeOwnership.JARVIS,
                 pid=process.pid,
-                start_time=datetime.now(timezone.utc).isoformat(),
+                start_time=datetime.now(UTC).isoformat(),
                 process_state="running_loading_model",
                 readiness=False,
                 fallback_reason=fallback_reason,

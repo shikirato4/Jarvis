@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
+from typing import Any, Literal
+from collections.abc import Callable
 from uuid import uuid4
 
 from pydantic import BaseModel, Field

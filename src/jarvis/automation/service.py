@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -99,7 +99,7 @@ class AutomationService:
         if entry is None or not entry.enabled:
             self._unschedule(automation_id)
             return
-        last_run_at = datetime.now(timezone.utc)
+        last_run_at = datetime.now(UTC)
         try:
             self._router.execute(
                 entry.action_name,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -58,7 +58,7 @@ class WebSearchResponse(JarvisBaseModel):
     http_status: int | None = None
     retry_after_seconds: int | None = None
     rate_limited_retried: bool = False
-    searched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    searched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     used_private_context: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -195,7 +195,7 @@ class FetchedSource(JarvisBaseModel):
     links: list[str] = Field(default_factory=list)
     published_at: str | None = None
     updated_at: str | None = None
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     page_references: list[int] = Field(default_factory=list)
     status: str = "ok"
     error: str | None = None
@@ -219,7 +219,7 @@ class EvidenceChunk(JarvisBaseModel):
     relevance_score: float = 0.0
     published_at: str | None = None
     updated_at: str | None = None
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     page: int | None = None
     evidence_type: str = "factual"
     untrusted: bool = True
@@ -238,7 +238,7 @@ class CitationRecord(JarvisBaseModel):
     url: str
     domain: str
     published_at: str | None = None
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source_type: str = "web"
     provider: str = "unknown"
     author: str | None = None
@@ -290,7 +290,7 @@ class WebResearchSession(JarvisBaseModel):
     citations: list[CitationRecord] = Field(default_factory=list)
     progress: list[ResearchProgress] = Field(default_factory=list)
     metrics: ResearchMetrics = Field(default_factory=ResearchMetrics)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     limit_reached: bool = False
     partial: bool = False

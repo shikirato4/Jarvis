@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -24,10 +25,10 @@ RollbackHandler = Callable[["ActionContext", ActionResult], None]
 
 @dataclass(slots=True)
 class ActionContext:
-    settings: "Settings"
-    memory: "MemoryService"
-    models: "ModelService"
-    event_bus: "EventBus"
+    settings: Settings
+    memory: MemoryService
+    models: ModelService
+    event_bus: EventBus
     logger: logging.Logger
     correlation_id: str = field(default_factory=lambda: str(uuid4()))
     dry_run: bool = False

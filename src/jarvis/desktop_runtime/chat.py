@@ -1416,17 +1416,17 @@ class DesktopChatEngine:
                         item.heading: item.target_words for item in outline.sections
                     }
                     def section_priority(heading: str) -> tuple[int, int, int]:
-                        if heading in claim_repair_headings:
+                        if heading in claim_repair_headings:  # noqa: B023  # closure consumed within the same loop iteration
                             tier = 0
-                        elif heading in thin_headings or heading in underdeveloped_headings:
+                        elif heading in thin_headings or heading in underdeveloped_headings:  # noqa: B023  # closure consumed within the same loop iteration
                             tier = 1
-                        elif heading in under_target_headings:
+                        elif heading in under_target_headings:  # noqa: B023  # closure consumed within the same loop iteration
                             tier = 2
                         else:
                             tier = 3
                         return (
                             tier,
-                            -target_by_heading.get(heading, 0),
+                            -target_by_heading.get(heading, 0),  # noqa: B023  # closure consumed within the same loop iteration
                             stalled_section_repairs.get(heading, 0),
                         )
                     section_targets.sort(
@@ -2112,9 +2112,7 @@ class DesktopChatEngine:
                 final_uncovered or final_sections
             ) and deterministically_removed_claims:
                 failure_reason = "too_many_claims_removed"
-            elif final_uncovered:
-                failure_reason = "coverage_failed"
-            elif final_sections:
+            elif final_uncovered or final_sections:
                 failure_reason = "coverage_failed"
             elif validation.unsupported_claims:
                 failure_reason = "citation_failed"

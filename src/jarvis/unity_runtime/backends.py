@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
@@ -227,7 +227,7 @@ class HttpUnityBridgeBackend:
         )
         response = self._transport.health(endpoint=session.endpoint, timeout_ms=self._settings.unity_bridge_timeout_ms)
         if response.get("success"):
-            return session.mark_connected(endpoint=session.endpoint, connected_at=datetime.now(timezone.utc))
+            return session.mark_connected(endpoint=session.endpoint, connected_at=datetime.now(UTC))
         return session.mark_degraded(reason=str(response.get("message", "unity bridge unavailable")))
 
     def disconnect(self, session: UnityEditorSession | None) -> UnityEditorSession | None:

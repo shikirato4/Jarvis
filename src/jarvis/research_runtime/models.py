@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -111,7 +111,7 @@ class ResearchEvidence(JarvisBaseModel):
     citation: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     score: float = 0.0
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ResearchFinding(JarvisBaseModel):
@@ -185,7 +185,7 @@ class ResearchReport(JarvisBaseModel):
     confidence: float = 0.0
     confidence_level: str = "low"
     structured_report: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -216,8 +216,8 @@ class ResearchTask(JarvisBaseModel):
     hypotheses: list[str] = Field(default_factory=list)
     expanded_queries: list[str] = Field(default_factory=list)
     report: ResearchReport | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_error: str | None = None
 
 

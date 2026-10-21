@@ -1090,7 +1090,7 @@ if QWidget is not object:
                 str(getattr(message, "message_id", "")),
                 str(getattr(message, "role", "")),
                 str(getattr(message, "content", "")),
-                getattr(message, "created_at").isoformat(),
+                message.created_at.isoformat(),
                 str(metadata.get("image_job_status") or ""),
                 str(metadata.get("image_preview_path") or ""),
                 str(bool(metadata.get("streaming"))),

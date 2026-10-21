@@ -57,7 +57,7 @@ class RepoRecord:
         return payload
 
     @staticmethod
-    def from_dict(payload: dict[str, Any]) -> "RepoRecord":
+    def from_dict(payload: dict[str, Any]) -> RepoRecord:
         return RepoRecord(
             id=str(payload.get("id", "")),
             name=str(payload.get("name", "")),

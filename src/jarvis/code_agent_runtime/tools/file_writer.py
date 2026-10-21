@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 from jarvis.code_agent_runtime.base import AuthorizationContext, CodeActionKind
@@ -59,7 +59,7 @@ class FileWriter:
             raise PermissionError("file write requires verified PIN authorization")
 
     def _backup_path(self, path: Path) -> Path:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_dir = self._root / "runtime" / "code_agent_backups"
         rel = path.relative_to(self._root)
         safe_name = "__".join(rel.parts)

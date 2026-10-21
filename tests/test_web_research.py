@@ -1003,7 +1003,8 @@ def test_depth_gate_reports_missing_conceptual_development_for_scientific_applic
         if item.evidence_id in linked_ids:
             item.domain = "nasa.gov"
             item.evidence_type = "official"
-    filler = lambda prefix, size: " ".join(f"{prefix}{index}" for index in range(size))
+    def filler(prefix, size):
+        return " ".join(f"{prefix}{index}" for index in range(size))
     answer = (
         f"## {outline.sections[0].heading}\n\nEl contexto define el alcance y explica el "
         f"mecanismo, aunque existen límites. [S1] {filler('ctx', 430)}\n\n"

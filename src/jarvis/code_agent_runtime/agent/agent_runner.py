@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class AgentRunner:
-    def __init__(self, executor: "CodeAgentExecutor") -> None:
+    def __init__(self, executor: CodeAgentExecutor) -> None:
         self._executor = executor
         self._planner = AgentPlanner()
         self._verifier = AgentVerifier()

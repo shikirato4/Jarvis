@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -127,5 +127,5 @@ class UIOperationReceipt(JarvisBaseModel):
     confirmation_required: bool = False
     security_decision: str = "allowed"
     data: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -4,8 +4,9 @@ import logging
 import threading
 from collections import defaultdict
 from collections import deque
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import datetime, UTC
+from typing import Any
+from collections.abc import Callable
 
 
 EventHandler = Callable[[dict[str, Any]], None]
@@ -30,7 +31,7 @@ class EventBus:
 
     def publish(self, event_name: str, payload: dict[str, Any]) -> None:
         with self._lock:
-            self._recent_events.appendleft({"event_name": event_name, "payload": payload, "published_at": datetime.now(timezone.utc)})
+            self._recent_events.appendleft({"event_name": event_name, "payload": payload, "published_at": datetime.now(UTC)})
             handlers = list(self._handlers.get(event_name, []))
             all_handlers = list(self._all_handlers)
         for handler in handlers:
@@ -52,7 +53,7 @@ class EventBus:
         with self._lock:
             before = len(self._recent_events)
             if max_age_seconds is not None:
-                cutoff = datetime.now(timezone.utc).timestamp() - max_age_seconds
+                cutoff = datetime.now(UTC).timestamp() - max_age_seconds
                 while self._recent_events and self._recent_events[-1]["published_at"].timestamp() < cutoff:
                     self._recent_events.pop()
             while len(self._recent_events) > keep:

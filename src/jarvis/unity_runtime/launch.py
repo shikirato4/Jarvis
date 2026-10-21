@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from pathlib import Path
 import subprocess
@@ -39,8 +39,8 @@ class UnityLaunchResult(JarvisBaseModel):
     editor_pid: int | None = None
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, object] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UnityLaunchClient(Protocol):
@@ -89,7 +89,7 @@ class UnityLaunchIntegrationService:
         }
 
     def launch(self, request: UnityLaunchRequest, *, dry_run: bool = False) -> UnityLaunchResult:
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         prepared = self.prepare(request)
         warnings: list[str] = []
         target_path = prepared.get("target_path")
@@ -107,7 +107,7 @@ class UnityLaunchIntegrationService:
                 warnings=warnings,
                 metadata=request.metadata | {"prepared": prepared},
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
         metadata = dict(request.metadata)
         metadata["unity_project_root"] = request.project.project_root
@@ -136,7 +136,7 @@ class UnityLaunchIntegrationService:
                         warnings=["unity hub path is not configured"],
                         metadata=request.metadata | {"prepared": prepared},
                         started_at=started_at,
-                        finished_at=datetime.now(timezone.utc),
+                        finished_at=datetime.now(UTC),
                     )
                 system_result = self._launch_client.open_path(str(Path(hub_path)), dry_run=dry_run, metadata=metadata).model_dump(mode="json")
             else:
@@ -154,5 +154,5 @@ class UnityLaunchIntegrationService:
             editor_pid=editor_pid,
             metadata=request.metadata | {"prepared": prepared},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -40,7 +40,7 @@ class ActionExecutionReceipt(JarvisBaseModel):
     message: str
     data: dict[str, Any] = Field(default_factory=dict)
     artifacts: list[str] = Field(default_factory=list)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     rollback_attempted: bool = False
     rollback_succeeded: bool = False

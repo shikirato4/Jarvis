@@ -19,9 +19,7 @@ CAPABILITY_MARKER = "[CURRENT JARVIS CAPABILITY MANIFEST — EXECUTION AUTHORITY
 SCHEMA_MARKER = "[RELEVANT DETAILED TOOL SCHEMAS]"
 
 _RETRIEVAL_STOPWORDS = frozenset(
-    "a an and are can could do el en for from how i in is la las los mi my of on or "
-    "cual de del es le lo operación operation para por que se su sus the this to un una "
-    "what which with y you your como puedo me tengo".split()
+    ["a", "an", "and", "are", "can", "could", "do", "el", "en", "for", "from", "how", "i", "in", "is", "la", "las", "los", "mi", "my", "of", "on", "or", "cual", "de", "del", "es", "le", "lo", "operación", "operation", "para", "por", "que", "se", "su", "sus", "the", "this", "to", "un", "una", "what", "which", "with", "y", "you", "your", "como", "puedo", "me", "tengo"]
 )
 _GENERIC_OPERATION_TOKENS = frozenset(
     {"check", "inspe", "read", "write", "open", "list", "revie", "locat", "repor"}
@@ -240,9 +238,7 @@ class AgenticPromptPolicy:
             score += min(description_overlap, 3)
             if description_overlap >= 2:
                 score += 2
-            if namespace & query_words:
-                score += 1
-            elif _semantic_tokens(family) & query_tokens:
+            if namespace & query_words or _semantic_tokens(family) & query_tokens:
                 score += 1
             if _word_tokens(name.replace(".", " ")) <= query_words:
                 score += 8

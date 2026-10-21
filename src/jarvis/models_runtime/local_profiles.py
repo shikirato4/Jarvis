@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
+from collections.abc import Iterable
 
 from jarvis.models_runtime.qwen_identity import (
     CANONICAL_QWEN_MODEL,

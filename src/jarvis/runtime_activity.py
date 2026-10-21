@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from threading import RLock
 from typing import Any
@@ -31,7 +31,7 @@ class RuntimeActivityNode(JarvisBaseModel):
     progress: float | None = None
     step: int | None = None
     total_steps: int | None = None
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class RuntimeActivityEdge(JarvisBaseModel):
@@ -39,7 +39,7 @@ class RuntimeActivityEdge(JarvisBaseModel):
     target: str
     run_id: str
     correlation_id: str | None = None
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class RuntimeActivityEvent(JarvisBaseModel):
@@ -54,7 +54,7 @@ class RuntimeActivityEvent(JarvisBaseModel):
     total_steps: int | None = None
     outcome_code: str | None = None
     error_type: str | None = None
-    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class RuntimeActivitySnapshot(JarvisBaseModel):
@@ -108,7 +108,7 @@ class RuntimeActivityStore:
             return
         run_id, correlation_id, component, state, edges = projection
         step, total_steps, progress = self._measured_progress(payload)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         with self._lock:
             self._nodes[(run_id, component)] = RuntimeActivityNode(
                 component=component,
@@ -325,7 +325,7 @@ class RuntimeActivityStore:
                     self._nodes[key] = self._nodes[key].model_copy(
                         update={
                             "state": provider_state,
-                            "updated_at": datetime.now(timezone.utc),
+                            "updated_at": datetime.now(UTC),
                         }
                     )
         return run_id, correlation_id, "agent_controller", state, edges

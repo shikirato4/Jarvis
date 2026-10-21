@@ -39,7 +39,7 @@ class GitHubRepoCandidate:
         }
 
     @staticmethod
-    def from_github_item(item: dict[str, Any]) -> "GitHubRepoCandidate":
+    def from_github_item(item: dict[str, Any]) -> GitHubRepoCandidate:
         full_name = str(item.get("full_name", ""))
         license_payload = item.get("license") if isinstance(item.get("license"), dict) else {}
         return GitHubRepoCandidate(
@@ -99,7 +99,7 @@ class LearningEntry:
         }
 
     @staticmethod
-    def from_dict(payload: dict[str, Any]) -> "LearningEntry":
+    def from_dict(payload: dict[str, Any]) -> LearningEntry:
         return LearningEntry(
             id=str(payload.get("id", "")),
             repo_id=str(payload.get("repo_id", "")),

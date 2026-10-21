@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import json
 import logging
 from time import perf_counter
@@ -1905,7 +1905,7 @@ if QApplication is not None:
             if not buffer.open(QIODevice.WriteOnly) or not image.save(buffer, "PNG"):
                 return False
             self._desktop.add_attachment_bytes(
-                f"clipboard-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.png",
+                f"clipboard-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.png",
                 bytes(buffer.data()),
                 "image/png",
             )
@@ -3618,7 +3618,7 @@ if QApplication is not None:
             if timestamp.tzinfo is None:
                 now = datetime.now()
             else:
-                now = datetime.now(timezone.utc).astimezone(timestamp.tzinfo)
+                now = datetime.now(UTC).astimezone(timestamp.tzinfo)
             return (now - timestamp).total_seconds() <= seconds
 else:
 

@@ -762,11 +762,11 @@ def test_reader_preserves_verified_html_metadata() -> None:
 
 
 def test_bbc_social_author_is_rejected_and_publisher_is_used(tmp_path) -> None:
-    body = """<html><head><title>BBC report</title>
+    body = b"""<html><head><title>BBC report</title>
         <meta property="article:author" content="https://www.facebook.com/bbcnews.">
         <meta property="og:site_name" content="BBC News Mundo">
         <meta property="article:published_time" content="2021-04-01">
-        </head><article>Verified evidence body.</article></html>""".encode()
+        </head><article>Verified evidence body.</article></html>"""
     fetcher = SourceFetcher(
         resolver=lambda *_args, **_kwargs: [(2, 1, 6, "", ("93.184.216.34", 443))],
         transport=lambda url, _timeout, _max_bytes: RawPage(

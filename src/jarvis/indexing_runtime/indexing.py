@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from .models import IndexJob, IndexJobStatus, IndexProgress, IndexSnapshot, IndexSnapshotStatus, IndexSource, IndexSourceState, IndexingRunReceipt
@@ -20,7 +20,7 @@ class IndexingPipeline:
         snapshots: list[IndexSnapshot] = []
         progress = IndexProgress()
         job.status = IndexJobStatus.RUNNING
-        job.started_at = datetime.now(timezone.utc)
+        job.started_at = datetime.now(UTC)
         self._repository.upsert_job(job)
         for source in sources:
             items = self._ingestion.discover(source)
@@ -82,7 +82,7 @@ class IndexingPipeline:
             snapshot.embedded_chunk_count = embedded
             snapshot.duplicate_count = duplicates
             snapshot.deleted_count = len(deleted_docs)
-            snapshot.finished_at = datetime.now(timezone.utc)
+            snapshot.finished_at = datetime.now(UTC)
             snapshot.activated_at = snapshot.finished_at
             snapshot.status = IndexSnapshotStatus.ACTIVE
             snapshot.stats = {
@@ -95,7 +95,7 @@ class IndexingPipeline:
             self._repository.upsert_snapshot(snapshot)
             source.last_scan_at = snapshot.finished_at
             source.last_snapshot_id = snapshot.snapshot_id
-            source.updated_at = datetime.now(timezone.utc)
+            source.updated_at = datetime.now(UTC)
             if failed:
                 source.state = IndexSourceState.DEGRADED
             else:
@@ -106,7 +106,7 @@ class IndexingPipeline:
         job.progress_total = progress.total
         job.progress_completed = progress.completed
         job.progress_failed = progress.failed
-        job.finished_at = datetime.now(timezone.utc)
+        job.finished_at = datetime.now(UTC)
         job.snapshot_ids_created = tuple(snapshot.snapshot_id for snapshot in snapshots)
         job.stats = {"skipped": progress.skipped, "sources": len(sources)}
         self._repository.upsert_job(job)

@@ -89,7 +89,7 @@ def _create_startup_indicator():
 def main() -> int:
     if not pyside_available():
         raise SystemExit("PySide6 is required to launch the JARVIS desktop app. Install it with `python -m pip install PySide6`.")
-        
+
     qt_app = create_qt_application()
     previous_sigint = _install_signal_handlers(qt_app)
     startup = _create_startup_indicator()

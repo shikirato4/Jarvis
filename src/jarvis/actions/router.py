@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from uuid import uuid4
 
@@ -56,7 +56,7 @@ class ActionRouter:
         if definition is None:
             raise ActionNotFoundError(f"action '{action_name}' is not registered")
 
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         correlation_id = correlation_id or str(uuid4())
         context = ActionContext(
             settings=self._settings,
@@ -99,7 +99,7 @@ class ActionRouter:
                 data={},
                 artifacts=[],
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
             self._record_execution(action_name, validated_payload.model_dump(mode="json"), failure_receipt)
             self._event_bus.publish("action.failed", self._safe_receipt_event(failure_receipt))
@@ -173,7 +173,7 @@ class ActionRouter:
             data=result.data,
             artifacts=result.artifacts,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
 
     def _record_execution(

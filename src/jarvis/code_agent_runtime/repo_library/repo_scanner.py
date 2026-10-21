@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 from jarvis.code_agent_runtime.paths import is_ignored_dir, is_inside_project, is_sensitive_path, looks_like_text_path, relative_to_root
@@ -104,7 +104,7 @@ class RepoLibraryScanner:
             readme_summary=readme_summary,
             structure=list(dict.fromkeys(structure))[:80],
             tags=tags,
-            indexed_at=datetime.now(timezone.utc).isoformat(),
+            indexed_at=datetime.now(UTC).isoformat(),
             snippets=snippets,
         )
 

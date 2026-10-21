@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 import pytest
@@ -20,7 +20,7 @@ def test_message_bubble_keeps_five_hundred_lines_without_clipping() -> None:
     bubble = ChatMessageWidget(
         "assistant",
         text,
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
     )
     bubble.set_content_width(720)
     bubble.show()
@@ -114,7 +114,7 @@ def test_completed_image_message_renders_real_preview_and_actions() -> None:
     bubble = ChatMessageWidget(
         "assistant",
         "Imagen generada",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
         metadata={"image_preview_path": str(preview)},
     )
     bubble.set_content_width(520)

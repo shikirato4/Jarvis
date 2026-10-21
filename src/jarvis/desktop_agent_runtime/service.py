@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from .checkpoints import build_checkpoint
@@ -205,7 +205,7 @@ class DesktopAgentRuntimeService:
         mission.status = DesktopAgentPhase.PAUSED
         mission.current_phase = DesktopAgentPhase.PAUSED
         mission.summary = f"Mision pausada en {mission.current_subtask_label or mission.world_state.current_step_id or 'estado actual'}."
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         self._append_timeline(mission, DesktopAgentPhase.PAUSED, "mission_paused", mission.summary)
         return self._save_mission(mission)
 
@@ -221,7 +221,7 @@ class DesktopAgentRuntimeService:
         mission.status = DesktopAgentPhase.PENDING
         mission.current_phase = DesktopAgentPhase.PENDING
         mission.resume_count += 1
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         self._append_timeline(mission, DesktopAgentPhase.PENDING, "mission_resumed", "La mision fue reanudada desde su ultimo checkpoint.")
         self._save_mission(mission)
         future = self._coordinator.future(mission_id)
@@ -256,7 +256,7 @@ class DesktopAgentRuntimeService:
         mission.world_state.phase = DesktopAgentPhase.PENDING
         mission.world_state.last_error = None
         mission.summary = "Confirmacion recibida. Jarvis continuara la mision desde el paso pendiente."
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         self._coordinator.request_resume(mission_id)
         self._coordinator.clear_abort(mission_id)
         self._append_timeline(mission, DesktopAgentPhase.PENDING, "confirmation_received", mission.summary, step_id=mission.world_state.current_step_id, subtask_id=mission.current_subtask)
@@ -277,7 +277,7 @@ class DesktopAgentRuntimeService:
         mission.world_state.phase = DesktopAgentPhase.ABORTED
         mission.world_state.last_error = mission.abort_reason
         mission.summary = f"Mision abortada. Motivo: {mission.abort_reason}."
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         if mission.world_state.current_step_id:
             mission.failed_step_id = mission.world_state.current_step_id
         if mission.failed_step_id and mission.failed_step_id not in mission.failed_steps:
@@ -800,11 +800,11 @@ class DesktopAgentRuntimeService:
                 return bool(metadata.get("strong_confirmed") or metadata.get("pin_verified"))
             return True
         confirmed_steps = metadata.get("confirmed_steps") or []
-        if isinstance(confirmed_steps, (list, tuple, set)) and step.step_id in {str(item) for item in confirmed_steps}:
-            return True
         # A plan payload is model-controlled data: an "approved" field inside
         # it must never count as the operator's confirmation.
-        return False
+        return isinstance(confirmed_steps, (list, tuple, set)) and step.step_id in {
+            str(item) for item in confirmed_steps
+        }
 
     def _build_confirmation_summary(self, step: DesktopAgentStep, policy_result) -> str:
         target = step.payload.get("path") or step.payload.get("destination_path") or step.payload.get("application") or step.payload.get("target_window") or step.payload.get("label")
@@ -828,7 +828,7 @@ class DesktopAgentRuntimeService:
             mission.current_phase = DesktopAgentPhase.PAUSED
             mission.summary = "Mision rehidratada desde almacenamiento persistente; lista para reanudarse desde el ultimo checkpoint."
             self._append_timeline(mission, DesktopAgentPhase.PAUSED, "rehydrated", mission.summary)
-            mission.updated_at = datetime.now(timezone.utc)
+            mission.updated_at = datetime.now(UTC)
             self._refresh_progress(mission)
             return self._store.save(mission)
         self._refresh_progress(mission)
@@ -837,7 +837,7 @@ class DesktopAgentRuntimeService:
     def _checkpoint_and_save(self, mission: DesktopAgentMissionReceipt, world: DesktopWorldState) -> DesktopAgentMissionReceipt:
         mission.world_state = world
         mission.current_phase = mission.status
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         self._refresh_progress(mission)
         mission.mission_snapshot = self._snapshot(
             world,
@@ -856,7 +856,7 @@ class DesktopAgentRuntimeService:
         return self._save_mission(mission)
 
     def _save_mission(self, mission: DesktopAgentMissionReceipt) -> DesktopAgentMissionReceipt:
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         mission.current_phase = mission.status
         self._refresh_progress(mission)
         self._state.save(mission)

@@ -122,10 +122,7 @@ class RepoLearningRouter:
     def _candidate(self, repo_id: str) -> dict[str, Any]:
         if repo_id in self._last_search:
             return self._last_search[repo_id]
-        if "/" in repo_id:
-            full_name = repo_id
-        else:
-            full_name = repo_id.replace("__", "/")
+        full_name = repo_id if "/" in repo_id else repo_id.replace("__", "/")
         return {
             "id": repo_id,
             "full_name": full_name,

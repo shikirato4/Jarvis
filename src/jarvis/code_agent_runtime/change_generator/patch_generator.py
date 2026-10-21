@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class ChangeGenerator:
-    def __init__(self, executor: "CodeAgentExecutor") -> None:
+    def __init__(self, executor: CodeAgentExecutor) -> None:
         self._executor = executor
         self._resolver = TargetResolver(executor)
         self._planner = ChangePlanner(executor)

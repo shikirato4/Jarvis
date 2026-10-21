@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Integer, String, Text, delete, desc, func, select
@@ -48,8 +48,8 @@ class IndexSourceRecordORM(Base):
     last_snapshot_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     state: Mapped[str] = mapped_column(String(32), default="ready", index=True)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
 
 class IndexJobRecordORM(Base):
@@ -90,7 +90,7 @@ class IndexSnapshotRecordORM(Base):
     duplicate_count: Mapped[int] = mapped_column(Integer, default=0)
     sensitive_skipped_count: Mapped[int] = mapped_column(Integer, default=0)
     deleted_count: Mapped[int] = mapped_column(Integer, default=0)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     stats_json: Mapped[str] = mapped_column(Text, default="{}")
@@ -121,9 +121,9 @@ class IndexedDocumentRecordORM(Base):
     provenance_json: Mapped[str] = mapped_column(Text, default="{}")
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_sensitive: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
-    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
+    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class IndexedChunkRecordORM(Base):
@@ -149,8 +149,8 @@ class IndexedChunkRecordORM(Base):
     lexical_terms_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     provenance_json: Mapped[str] = mapped_column(Text, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
 
 
 class IndexingRepository:
@@ -392,7 +392,7 @@ class IndexingRepository:
                     continue
                 row.is_deleted = True
                 row.snapshot_id = snapshot_id
-                row.updated_at = datetime.now(timezone.utc)
+                row.updated_at = datetime.now(UTC)
                 changed.append(self._to_document(row))
             session.flush()
         return changed

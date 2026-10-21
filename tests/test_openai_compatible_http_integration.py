@@ -40,25 +40,25 @@ class _OpenAICompatibleHandler(BaseHTTPRequestHandler):
                 and (payload.get("messages") or [{}])[-1].get("role") != "tool"
             ):
                 events = (
-                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"calc-http-1","type":"function","function":{"name":"calculator.evaluate","arguments":"{\\"expression\\":\\"781 *"}}]}}]}\n\n'
-                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" 94\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'
-                    "data: [DONE]\n\n"
-                ).encode("utf-8")
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"calc-http-1","type":"function","function":{"name":"calculator.evaluate","arguments":"{\\"expression\\":\\"781 *"}}]}}]}\n\n'
+                    b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":" 94\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                )
             elif (
                 "calculator.evaluate" in tool_names
                 and (payload.get("messages") or [{}])[-1].get("role") == "tool"
             ):
                 events = (
-                    'data: {"choices":[{"delta":{"content":"El resultado "}}]}\n\n'
-                    'data: {"choices":[{"delta":{"content":"es 73414."},"finish_reason":"stop"}]}\n\n'
-                    "data: [DONE]\n\n"
-                ).encode("utf-8")
+                    b'data: {"choices":[{"delta":{"content":"El resultado "}}]}\n\n'
+                    b'data: {"choices":[{"delta":{"content":"es 73414."},"finish_reason":"stop"}]}\n\n'
+                    b"data: [DONE]\n\n"
+                )
             else:
                 events = (
-                    'data: {"choices":[{"delta":{"content":"hola "}}]}\n\n'
-                    'data: {"choices":[{"delta":{"content":"local"}}]}\n\n'
-                    "data: [DONE]\n\n"
-                ).encode("utf-8")
+                    b'data: {"choices":[{"delta":{"content":"hola "}}]}\n\n'
+                    b'data: {"choices":[{"delta":{"content":"local"}}]}\n\n'
+                    b"data: [DONE]\n\n"
+                )
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(events)))

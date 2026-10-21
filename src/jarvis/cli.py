@@ -122,10 +122,10 @@ def _parse_json(raw: str | None) -> dict[str, Any]:
         normalized = normalized.replace(": True", ": true").replace(": False", ": false").replace(": None", ": null")
         try:
             return json.loads(normalized)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             parsed = ast.literal_eval(raw)
             if not isinstance(parsed, dict):
-                raise ValueError("payload must resolve to a dictionary")
+                raise ValueError("payload must resolve to a dictionary") from exc
             return parsed
 
 

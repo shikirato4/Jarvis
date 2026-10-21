@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import hashlib
 import logging
 import re
@@ -370,14 +370,14 @@ def _freshness_score(value: str | None, requirement: FreshnessRequirement) -> fl
     try:
         published = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
         if published.tzinfo is None:
-            published = published.replace(tzinfo=timezone.utc)
+            published = published.replace(tzinfo=UTC)
     except ValueError:
         relative = re.search(r"(\d+)\s*(?:day|days|dia|dias|día|días)", _fold(value))
         if relative is None:
             return 0.02
         age_days = int(relative.group(1))
     else:
-        age_days = max(0, (datetime.now(timezone.utc) - published).days)
+        age_days = max(0, (datetime.now(UTC) - published).days)
     cutoff = {
         FreshnessWindow.TODAY: 1,
         FreshnessWindow.WEEK: 7,
@@ -550,7 +550,7 @@ class WebResearchOrchestrator:
             enough = self._enough_evidence(resolved, session, missing)
             session.status = "completed" if enough else "partial" if session.evidence else "insufficient_evidence"
             session.stop_reason = "evidence_sufficient" if enough else "file_evidence_incomplete" if session.evidence else "no_file_evidence"
-            session.completed_at = datetime.now(timezone.utc)
+            session.completed_at = datetime.now(UTC)
             self._finalize_session(session, started)
             return session
         if resolved is SearchMode.NO_WEB:
@@ -651,7 +651,7 @@ class WebResearchOrchestrator:
             self._progress(session, progress, "synthesizing", "Preparing evidence-based answer")
         elif not session.stop_reason:
             session.stop_reason = "cancelled"
-        session.completed_at = datetime.now(timezone.utc)
+        session.completed_at = datetime.now(UTC)
         self._finalize_session(session, started)
         return session
 
@@ -1659,9 +1659,7 @@ class WebResearchOrchestrator:
             reason = "insufficient_evidence_for_requested_depth"
         elif not target_met:
             reason = "requested_target_not_met"
-        elif thin_sections:
-            reason = "sections_underdeveloped"
-        elif length and length.explicit_word_count and underdeveloped_sections:
+        elif thin_sections or length and length.explicit_word_count and underdeveloped_sections:
             reason = "sections_underdeveloped"
         elif overdeveloped_sections:
             reason = "sections_overdeveloped_for_target"

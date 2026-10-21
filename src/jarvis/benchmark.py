@@ -3,7 +3,8 @@ from __future__ import annotations
 import statistics
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from uuid import uuid4
 
 from jarvis.config import Settings

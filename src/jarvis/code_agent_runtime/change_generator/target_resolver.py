@@ -22,7 +22,7 @@ _QUOTED_RE = re.compile(r"[\"'`](?P<value>[^\"'`]+)[\"'`]")
 
 
 class TargetResolver:
-    def __init__(self, executor: "CodeAgentExecutor", *, max_targets: int = 3) -> None:
+    def __init__(self, executor: CodeAgentExecutor, *, max_targets: int = 3) -> None:
         self._executor = executor
         self._root = executor.project_root
         self._max_targets = max_targets

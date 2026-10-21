@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import socket
 from urllib.error import HTTPError, URLError
 
 from typer.testing import CliRunner
@@ -274,7 +273,7 @@ def test_brave_maps_http_failures_without_exposing_key(monkeypatch) -> None:
 def test_brave_distinguishes_timeout_network_and_invalid_response(monkeypatch) -> None:
     provider = BraveSearchProvider(api_key="private-key", enabled=True)
 
-    monkeypatch.setattr("jarvis.web_search.providers.urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(socket.timeout()))
+    monkeypatch.setattr("jarvis.web_search.providers.urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError()))
     assert provider.search("OpenAI").status == "timeout"
 
     monkeypatch.setattr("jarvis.web_search.providers.urlopen", lambda *_args, **_kwargs: (_ for _ in ()).throw(URLError("offline")))
@@ -318,7 +317,7 @@ def test_timeout_health_does_not_disable_future_searches(monkeypatch) -> None:
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise socket.timeout()
+            raise TimeoutError()
         return _FakeResponse({"web": {"results": []}})
 
     monkeypatch.setattr("jarvis.web_search.providers.urlopen", _urlopen)

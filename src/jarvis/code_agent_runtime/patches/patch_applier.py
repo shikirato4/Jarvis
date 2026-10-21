@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class PatchApplier:
-    def __init__(self, executor: "CodeAgentExecutor", store: PatchStore) -> None:
+    def __init__(self, executor: CodeAgentExecutor, store: PatchStore) -> None:
         self._executor = executor
         self._store = store
 

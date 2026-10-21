@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from .agent_mode import AgentAction, AgentMode, AgentPermissionMode, AgentRisk, AgentSafetyGate
 

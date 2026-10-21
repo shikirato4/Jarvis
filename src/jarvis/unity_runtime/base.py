@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -240,8 +240,8 @@ class UnityOperationReceipt(JarvisBaseModel):
     would_overwrite: bool = False
     data: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UnityProjectResolveReceipt(JarvisBaseModel):
@@ -252,8 +252,8 @@ class UnityProjectResolveReceipt(JarvisBaseModel):
     project: UnityProjectDescriptor
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UnityAssetSearchReceipt(JarvisBaseModel):
@@ -265,8 +265,8 @@ class UnityAssetSearchReceipt(JarvisBaseModel):
     assets: list[UnityAssetDescriptor] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UnityBridgeReceipt(JarvisBaseModel):
@@ -279,5 +279,5 @@ class UnityBridgeReceipt(JarvisBaseModel):
     warnings: list[str] = Field(default_factory=list)
     data: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

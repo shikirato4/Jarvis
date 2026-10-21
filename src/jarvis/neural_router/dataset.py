@@ -103,7 +103,7 @@ def stratified_split(
     train: list[RouterExample] = []
     validation: list[RouterExample] = []
     test: list[RouterExample] = []
-    randomizer = random.Random(seed)
+    randomizer = random.Random(seed)  # noqa: S311  # seeded shuffle for ML dataset splits, not crypto
     for label in sorted(grouped):
         items = list(grouped[label])
         if len(items) < 3:

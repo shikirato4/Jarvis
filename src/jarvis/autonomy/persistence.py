@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from .base import (
@@ -57,7 +57,7 @@ class MissionPersistenceService:
             "created_at": record.created_at.isoformat(),
         }
         mission.control_events.append(event)
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         self.save_mission(mission)
         return event
 
@@ -80,7 +80,7 @@ class MissionPersistenceService:
             metadata=self._repository.load_approval_metadata(record),
         )
         mission.approval_history.insert(0, stored)
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         self.save_mission(mission)
         return stored
 
@@ -146,7 +146,7 @@ class MissionPersistenceService:
                     "status": MissionStatus.PAUSED,
                     "paused": True,
                     "last_error": "mission rehydrated after restart; manual resume required",
-                    "updated_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(UTC),
                 }
             )
             self.append_event(
@@ -160,7 +160,7 @@ class MissionPersistenceService:
                 update={
                     "status": MissionStatus.PAUSED,
                     "paused": True,
-                    "updated_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(UTC),
                 }
             )
         return mission

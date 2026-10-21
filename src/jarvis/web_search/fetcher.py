@@ -8,7 +8,7 @@ import re
 import socket
 import time
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 

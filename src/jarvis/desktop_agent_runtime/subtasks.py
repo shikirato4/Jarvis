@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from .models import DesktopAgentPlan, DesktopAgentStep, DesktopAgentSubtask, DesktopMissionStepStatus
 
@@ -24,7 +24,7 @@ def build_subtasks(plan: DesktopAgentPlan) -> list[DesktopAgentSubtask]:
 
 def mark_subtask_started(subtasks: list[DesktopAgentSubtask], step_id: str) -> tuple[list[DesktopAgentSubtask], DesktopAgentSubtask | None]:
     current: DesktopAgentSubtask | None = None
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for subtask in subtasks:
         if step_id in subtask.steps:
             if subtask.status == DesktopMissionStepStatus.PENDING:
@@ -35,7 +35,7 @@ def mark_subtask_started(subtasks: list[DesktopAgentSubtask], step_id: str) -> t
 
 
 def mark_subtask_terminal(subtasks: list[DesktopAgentSubtask], step_id: str, status: DesktopMissionStepStatus, note: str | None = None) -> list[DesktopAgentSubtask]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for subtask in subtasks:
         if step_id in subtask.steps:
             subtask.status = status

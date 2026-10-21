@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from collections.abc import Iterable
 
 from jarvis.code_agent_runtime.change_generator.models import ResolvedTarget
 from jarvis.code_agent_runtime.llm.base import LLMProvider

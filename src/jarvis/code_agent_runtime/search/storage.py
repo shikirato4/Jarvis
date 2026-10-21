@@ -4,7 +4,7 @@ import json
 import gc
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from shutil import copy2
 from typing import Any
@@ -155,7 +155,7 @@ class SearchStorage:
         payload = {
             "schema_version": 1,
             "backend": "text_fallback",
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "documents": [document.to_dict() for document in documents],
             "warnings": [FALLBACK_WARNING],
         }
@@ -222,4 +222,4 @@ class SearchStorage:
 
     @staticmethod
     def _stamp() -> str:
-        return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")

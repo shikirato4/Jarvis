@@ -7,9 +7,10 @@ reasoning are never written to the runtime evidence files.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
+from collections.abc import Iterable
 
 
 def _json_safe(value: Any) -> Any:
@@ -68,7 +69,7 @@ class ResumableABStore:
 
     def append(self, result: dict[str, Any]) -> None:
         safe = _json_safe(dict(result))
-        safe.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
+        safe.setdefault("recorded_at", datetime.now(UTC).isoformat())
         with self.results_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(safe, ensure_ascii=False, separators=(",", ":")) + "\n")
             handle.flush()
@@ -81,7 +82,7 @@ class ResumableABStore:
             status = str(record.get("status", "unknown"))
             counts[status] = counts.get(status, 0) + 1
         summary = {
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "case_count": len(latest),
             "status_counts": counts,
             "completed_case_ids": sorted(

@@ -101,7 +101,7 @@ class ModelService:
             temperature=temperature,
         ))
 
-    def for_task(self, task_type: str) -> "TaskModelClient":
+    def for_task(self, task_type: str) -> TaskModelClient:
         return TaskModelClient(self, task_type)
 
     def _use_role_router(self, request: ModelRequest) -> bool:

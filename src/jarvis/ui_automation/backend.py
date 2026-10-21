@@ -5,7 +5,8 @@ import importlib
 import time
 from ctypes import wintypes
 from threading import RLock
-from typing import Callable, Protocol
+from typing import Protocol
+from collections.abc import Callable
 
 from jarvis.core.errors import UIAutomationError
 from jarvis.windows_runtime import WindowTarget, WindowsControlBackend, WindowsRuntimeError

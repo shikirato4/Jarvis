@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import datetime, UTC
+from collections.abc import Callable
 
 from pydantic import Field
 
@@ -110,7 +110,7 @@ class RuntimeLifecycleSupervisor:
         policy = self._auto_recovery.get(service_name)
         if policy is None or not policy.enabled:
             return None
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last_attempt = self._last_auto_recovery_at.get(service_name)
         if last_attempt is not None and (now - last_attempt).total_seconds() < policy.cooldown_seconds:
             return None

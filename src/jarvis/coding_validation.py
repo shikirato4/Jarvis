@@ -50,9 +50,7 @@ def inspect_safety(code: str) -> tuple[bool, str | None]:
             root = (node.module or "").split(".")[0]
             if root in FORBIDDEN_MODULES or root not in ALLOWED_IMPORTS:
                 return False, "UNSAFE_GENERATED_CODE"
-        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
-            return False, "UNSAFE_GENERATED_CODE"
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"system", "popen", "run", "Popen"}:
+        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES or isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"system", "popen", "run", "Popen"}:
             return False, "UNSAFE_GENERATED_CODE"
     return True, None
 

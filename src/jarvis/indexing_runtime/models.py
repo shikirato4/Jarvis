@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from pydantic import Field
 
@@ -8,7 +8,7 @@ from jarvis.models.base import JarvisBaseModel
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class IndexSourceKind(StrEnum):

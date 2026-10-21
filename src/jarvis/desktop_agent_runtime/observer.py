@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from types import SimpleNamespace
 from time import perf_counter
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 
 from jarvis.core.errors import JarvisError
 
@@ -42,7 +42,7 @@ class DesktopAgentObserver:
             world.detected_targets = cached.detected_targets
             world.last_observation_summary = cached.summary
             world.observe_count += 1
-            world.updated_at = datetime.now(timezone.utc)
+            world.updated_at = datetime.now(UTC)
             return self._memory.append_observation(world, cached)
         cached = self._awareness_cache if self._awareness_cache and self._awareness_cache[0] == cache_key else None
         if cached is not None:
@@ -104,7 +104,7 @@ class DesktopAgentObserver:
             summary=summary,
             metadata={
                 "known_window_count": len(known_windows),
-                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "observed_at": datetime.now(UTC).isoformat(),
                 "awareness_mode": awareness_mode,
                 "awareness_errors": awareness_errors,
                 "awareness_summary": awareness.data.get("summary") or (awareness.awareness_result.summary if awareness.awareness_result else ""),
@@ -124,7 +124,7 @@ class DesktopAgentObserver:
         world.detected_targets = detected_targets
         world.last_observation_summary = summary
         world.observe_count += 1
-        world.updated_at = datetime.now(timezone.utc)
+        world.updated_at = datetime.now(UTC)
         self._observation_cache = (cache_key, perf_counter(), observation)
         return self._memory.append_observation(world, observation)
 

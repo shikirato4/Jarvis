@@ -440,10 +440,10 @@ class NativeLauncherBackend:
             os.startfile(path)  # type: ignore[attr-defined]
             return
         if sys.platform == "darwin":
-            subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S607  # open is PATH-resolved by design on darwin
             return
         if sys.platform.startswith("linux"):
-            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S607  # xdg-open is PATH-resolved by design on linux
             return
         raise SystemLaunchError(f"native path open is not supported on platform '{sys.platform}'")
 

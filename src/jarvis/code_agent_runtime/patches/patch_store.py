@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from shutil import copy2
 from typing import Any
@@ -76,7 +76,7 @@ class PatchStore:
 
     @staticmethod
     def _stamp() -> str:
-        return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     def _backup_corrupt(self, path: Path) -> Path:
         backup = path.with_name(f"{path.name}.corrupt-{self._stamp()}.bak")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import importlib.util
 import inspect
 import logging
@@ -106,7 +106,7 @@ class DiffusersImageBackend:
         if cancel_event.is_set():
             return ImageGenerationResult(success=False, message="Generacion cancelada.", error="cancelled")
         paths: list[Path] = []
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         for index, image in enumerate(getattr(result, "images", []) or [], start=1):
             path = output_dir / f"jarvis-image-{timestamp}-{index}.png"
             image.save(path)
@@ -324,7 +324,7 @@ class ImageGenerationService:
             job = self._jobs[target]
             if job.status == ImageJobStatus.PENDING:
                 job.status = ImageJobStatus.CANCELLED
-                job.completed_at = datetime.now(timezone.utc)
+                job.completed_at = datetime.now(UTC)
                 job.message = "Generacion cancelada."
                 job.progress = None
                 self._publish_job(job, "cancelled")
@@ -393,7 +393,7 @@ class ImageGenerationService:
             job.progress = None
             self._model._cleanup_cuda()  # noqa: SLF001
         finally:
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(UTC)
             if self._model.keep_loaded and self._model.status != ImageModelStatus.ERROR:
                 self._model.mark_ready_after_generation()
             elif not self._model.keep_loaded:
@@ -405,7 +405,7 @@ class ImageGenerationService:
         job.status = ImageJobStatus.CANCELLED
         job.message = "Generacion cancelada."
         job.progress = None
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         self._publish_job(job, "cancelled")
         return job
 

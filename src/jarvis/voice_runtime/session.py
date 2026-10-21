@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import RLock
 
 from .base import AudioEvent, VoiceSession, VoiceSessionMode, VoiceSessionState
@@ -39,11 +39,11 @@ class VoiceSessionManager:
             if session is None:
                 return None
             session.state = state
-            session.updated_at = datetime.now(timezone.utc)
+            session.updated_at = datetime.now(UTC)
             if error:
                 session.last_error = error
             if state in {VoiceSessionState.STOPPED, VoiceSessionState.FAILED, VoiceSessionState.INTERRUPTED}:
-                session.ended_at = datetime.now(timezone.utc)
+                session.ended_at = datetime.now(UTC)
                 if self._active_session_id == session_id:
                     self._active_session_id = None
             return session
@@ -54,7 +54,7 @@ class VoiceSessionManager:
             if session is None:
                 return None
             session.transcripts.append(text)
-            session.updated_at = datetime.now(timezone.utc)
+            session.updated_at = datetime.now(UTC)
             return session
 
     def add_event(self, session_id: str, event: AudioEvent) -> VoiceSession | None:
@@ -63,7 +63,7 @@ class VoiceSessionManager:
             if session is None:
                 return None
             session.events.append(event)
-            session.updated_at = datetime.now(timezone.utc)
+            session.updated_at = datetime.now(UTC)
             return session
 
     def stop(self, session_id: str) -> VoiceSession | None:

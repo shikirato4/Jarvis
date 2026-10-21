@@ -12,7 +12,7 @@ import time
 import re
 import unicodedata
 from collections.abc import Callable, Iterable
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -39,7 +39,7 @@ class _GUID(ctypes.Structure):
     ]
 
     @classmethod
-    def from_string(cls, value: str) -> "_GUID":
+    def from_string(cls, value: str) -> _GUID:
         import uuid
 
         raw = uuid.UUID(value).bytes_le
@@ -501,8 +501,8 @@ class FileNavigator:
             "size": stat.st_size if not is_dir else None,
             "extension": path.suffix.casefold(),
             "mime_type": mime,
-            "created_at": datetime.fromtimestamp(stat.st_ctime, timezone.utc).isoformat(),
-            "modified_at": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            "created_at": datetime.fromtimestamp(stat.st_ctime, UTC).isoformat(),
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, UTC).isoformat(),
             "readonly": not os.access(path, os.W_OK),
             "hidden": bool(attributes & 0x2) or path.name.startswith("."),
             "system": bool(attributes & 0x4),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from .base import AutonomousMission, ExecutionBudget, MissionState, RiskLevel, StopReason
 
@@ -23,7 +23,7 @@ def register_risk(state: MissionState, risk: RiskLevel) -> MissionState:
     payload = {
         "accumulated_risk": state.accumulated_risk + RISK_WEIGHTS[risk],
         "high_risk_steps": state.high_risk_steps + (1 if risk in {RiskLevel.HIGH, RiskLevel.CRITICAL} else 0),
-        "updated_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(UTC),
     }
     return state.model_copy(update=payload)
 
@@ -31,7 +31,7 @@ def register_risk(state: MissionState, risk: RiskLevel) -> MissionState:
 def evaluate_budget_stop(mission: AutonomousMission) -> StopReason | None:
     state = mission.state
     budget = mission.budget
-    elapsed_seconds = (datetime.now(timezone.utc) - mission.created_at).total_seconds()
+    elapsed_seconds = (datetime.now(UTC) - mission.created_at).total_seconds()
     if state.executed_steps >= budget.max_steps:
         return StopReason.BUDGET_EXHAUSTED
     if elapsed_seconds >= budget.max_duration_seconds:

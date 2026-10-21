@@ -11,7 +11,8 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, TextIO
+from typing import Any, TextIO
+from collections.abc import Callable
 from uuid import uuid4
 
 from .models import (

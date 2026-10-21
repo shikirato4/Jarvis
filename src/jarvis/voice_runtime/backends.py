@@ -260,7 +260,7 @@ class WinsoundAudioOutputBackend:
             raise UIAutomationError("winsound backend requires wav audio bytes")
         if result.audio_format not in {None, "", "wav"}:
             raise UIAutomationError(f"winsound backend only supports wav audio, got {result.audio_format}")
-        temp_file = tempfile.NamedTemporaryFile(prefix="jarvis-voice-", suffix=".wav", delete=False)
+        temp_file = tempfile.NamedTemporaryFile(prefix="jarvis-voice-", suffix=".wav", delete=False)  # noqa: SIM115  # handle must outlive this block: winsound plays async
         temp_file.write(wav_bytes)
         temp_file.flush()
         temp_file.close()
@@ -583,7 +583,7 @@ class _WindowsSpeechEngineManager:
                     raise UIAutomationError(
                         "Windows SAPI initialization failed after pyttsx3 recovery"
                     ) from sapi_error
-                setattr(engine, "pyttsx3_fallback_reason", type(pyttsx3_error).__name__)
+                engine.pyttsx3_fallback_reason = type(pyttsx3_error).__name__
         else:
             import pyttsx3  # type: ignore
 

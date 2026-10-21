@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from .models import DependencyHealthProbe, HealthStatus, OperationalHealthStatus, ServiceHealthProbe, ServiceLifecycleRecord, ServiceLifecycleState
 from .telemetry import TelemetryRecorder
@@ -48,7 +48,7 @@ class HealthcheckAggregator:
             liveness=service_status.status not in {HealthStatus.STOPPED, HealthStatus.FAILED},
             readiness=service_status.status in {HealthStatus.READY, HealthStatus.DEGRADED},
             status=status,
-            checked_at=datetime.now(timezone.utc),
+            checked_at=datetime.now(UTC),
             failures_recent=self._telemetry.failures_recent(service_status.name),
             warnings=list(service_status.details.get("warnings", [])) if isinstance(service_status.details, dict) else [],
             dependencies=dependencies,
