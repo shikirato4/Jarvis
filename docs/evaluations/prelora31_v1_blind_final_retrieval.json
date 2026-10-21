@@ -1,0 +1,587 @@
+{
+  "summary": {
+    "benchmark": "prelora31-v1",
+    "partition": "blind_final",
+    "sha256": "4a6bb75de65099d98f0f55caa603ad504cab0a6ff0bb7f06e20abe5d738f39ba",
+    "cases": 36,
+    "actionable_cases": 30,
+    "required_tool_recall": 0.5833333333333334,
+    "retrieval_precision": 0.7,
+    "exact_tool_set": 0.36666666666666664,
+    "family_recall": 0.7333333333333333,
+    "direct_hit_rate": 0.43333333333333335,
+    "mean_selected_count": 1.1333333333333333
+  },
+  "cases": [
+    {
+      "id": "files_search_4",
+      "intent": "action",
+      "selected": [],
+      "required": [
+        "files.search"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 1.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_search_5",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "files_search_6",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "files_read_4",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.read_text"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_read_5",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.read_text"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_read_6",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.read_text"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_size_4",
+      "intent": "action",
+      "selected": [
+        "files.stat"
+      ],
+      "required": [
+        "files.search",
+        "files.stat"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_size_5",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.stat"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_size_6",
+      "intent": "action",
+      "selected": [
+        "vision.locate_element",
+        "vision.locate_text"
+      ],
+      "required": [
+        "files.search",
+        "files.stat"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 0.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_copy_4",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.copy"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_copy_5",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.copy"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_copy_6",
+      "intent": "action",
+      "selected": [
+        "files.copy",
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.copy"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "files_move_4",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.move"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_move_5",
+      "intent": "action",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "files.search",
+        "files.move"
+      ],
+      "exact": false,
+      "recall": 0.5,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 0.5,
+      "discovery_needed": true
+    },
+    {
+      "id": "files_move_6",
+      "intent": "action",
+      "selected": [
+        "voice_runtime.transcribe_file"
+      ],
+      "required": [
+        "files.search",
+        "files.move"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 0.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "windows_environment_4",
+      "intent": "state",
+      "selected": [
+        "windows.environment.inspect"
+      ],
+      "required": [
+        "windows.environment.inspect"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "windows_environment_5",
+      "intent": "state",
+      "selected": [
+        "windows.environment.inspect"
+      ],
+      "required": [
+        "windows.environment.inspect"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "windows_environment_6",
+      "intent": "state",
+      "selected": [
+        "windows.environment.inspect"
+      ],
+      "required": [
+        "windows.environment.inspect"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "windows_launch_4",
+      "intent": "action",
+      "selected": [
+        "unity.editor_command",
+        "unity.editor_operation"
+      ],
+      "required": [
+        "windows.application.launch"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 0.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "windows_launch_5",
+      "intent": "action",
+      "selected": [
+        "autonomy.start_mission",
+        "terminal.start_session"
+      ],
+      "required": [
+        "windows.application.launch"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 0.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "windows_launch_6",
+      "intent": "action",
+      "selected": [
+        "windows.application.launch"
+      ],
+      "required": [
+        "windows.application.launch"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "web_research_4",
+      "intent": "state",
+      "selected": [
+        "web.search"
+      ],
+      "required": [
+        "web.search"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "web_research_5",
+      "intent": "state",
+      "selected": [
+        "web.search"
+      ],
+      "required": [
+        "web.search"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "web_research_6",
+      "intent": "state",
+      "selected": [
+        "files.search"
+      ],
+      "required": [
+        "web.search"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 0.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "python_version_4",
+      "intent": "state",
+      "selected": [
+        "interface.active_window",
+        "interface.cancel",
+        "interface.click_mouse"
+      ],
+      "required": [
+        "terminal.run"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 0.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "python_version_5",
+      "intent": "state",
+      "selected": [
+        "terminal.run"
+      ],
+      "required": [
+        "terminal.run"
+      ],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "python_version_6",
+      "intent": "state",
+      "selected": [
+        "windows.environment.inspect"
+      ],
+      "required": [
+        "terminal.run"
+      ],
+      "exact": false,
+      "recall": 0.0,
+      "precision": 0.0,
+      "family_recall": 0.0,
+      "operation_recall": 0.0,
+      "discovery_needed": true
+    },
+    {
+      "id": "windows_howto_4",
+      "intent": "information",
+      "selected": [
+        "windows.environment.inspect"
+      ],
+      "required": [],
+      "exact": false,
+      "recall": 1.0,
+      "precision": 0.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "windows_howto_5",
+      "intent": "information",
+      "selected": [
+        "windows.environment.inspect"
+      ],
+      "required": [],
+      "exact": false,
+      "recall": 1.0,
+      "precision": 0.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "windows_howto_6",
+      "intent": "information",
+      "selected": [
+        "windows.environment.inspect"
+      ],
+      "required": [],
+      "exact": false,
+      "recall": 1.0,
+      "precision": 0.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "files_howto_4",
+      "intent": "information",
+      "selected": [],
+      "required": [],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "files_howto_5",
+      "intent": "information",
+      "selected": [
+        "files.move"
+      ],
+      "required": [],
+      "exact": false,
+      "recall": 1.0,
+      "precision": 0.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "files_howto_6",
+      "intent": "information",
+      "selected": [
+        "files.read_text"
+      ],
+      "required": [],
+      "exact": false,
+      "recall": 1.0,
+      "precision": 0.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "absent_email_4",
+      "intent": "action",
+      "selected": [],
+      "required": [],
+      "exact": true,
+      "recall": 1.0,
+      "precision": 1.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "absent_email_5",
+      "intent": "action",
+      "selected": [
+        "research.report"
+      ],
+      "required": [],
+      "exact": false,
+      "recall": 1.0,
+      "precision": 0.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    },
+    {
+      "id": "absent_email_6",
+      "intent": "action",
+      "selected": [
+        "unity.bridge_command"
+      ],
+      "required": [],
+      "exact": false,
+      "recall": 1.0,
+      "precision": 0.0,
+      "family_recall": 1.0,
+      "operation_recall": 1.0,
+      "discovery_needed": false
+    }
+  ]
+}

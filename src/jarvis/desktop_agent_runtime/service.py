@@ -151,7 +151,7 @@ class DesktopAgentRuntimeService:
 
     def set_permission_mode(self, mode: str) -> dict[str, object]:
         selected = str(mode or "").strip().casefold()
-        if selected not in {"lockdown", "safe", "normal", "pro"}:
+        if selected not in {"lockdown", "safe", "normal", "pro", "full_user"}:
             raise ValueError("invalid Agent Mode permission mode")
         self._permission_mode = selected
         self._logger.info("desktop_agent_permission_mode_changed", extra={"permission_mode": selected})
@@ -802,7 +802,9 @@ class DesktopAgentRuntimeService:
         confirmed_steps = metadata.get("confirmed_steps") or []
         if isinstance(confirmed_steps, (list, tuple, set)) and step.step_id in {str(item) for item in confirmed_steps}:
             return True
-        return bool(step.payload.get("approved"))
+        # A plan payload is model-controlled data: an "approved" field inside
+        # it must never count as the operator's confirmation.
+        return False
 
     def _build_confirmation_summary(self, step: DesktopAgentStep, policy_result) -> str:
         target = step.payload.get("path") or step.payload.get("destination_path") or step.payload.get("application") or step.payload.get("target_window") or step.payload.get("label")

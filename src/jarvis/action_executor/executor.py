@@ -90,15 +90,16 @@ class ActionExecutor:
         started_at = self._clock()
         self._publish("started", request, None)
         try:
+            execution_metadata = {
+                **request.metadata,
+                "agent_run_id": request.run_id,
+                "tool_call_id": request.call_id,
+            }
             receipt = self._router.execute(
                 request.action,
                 normalized_request.arguments,
                 correlation_id=request.correlation_id or request.run_id,
-                metadata={
-                    **request.metadata,
-                    "agent_run_id": request.run_id,
-                    "tool_call_id": request.call_id,
-                },
+                metadata=execution_metadata,
             )
         except ActionExecutionError:
             observation = self._failure(
@@ -145,6 +146,21 @@ class ActionExecutor:
             }
             for definition in self._router.registry.list_actions()
         ]
+
+    def tool_semantics(self) -> dict[str, dict[str, Any]]:
+        """Return registry-owned retrieval metadata without changing wire schemas."""
+        return {
+            definition.name: {
+                "family": definition.name.split(".", 1)[0],
+                "operation": definition.name.rsplit(".", 1)[-1],
+                "aliases": definition.semantic_aliases,
+                "companions": definition.companion_names,
+                "risk": definition.risk.value,
+                "backend": definition.adapter,
+                "available": True,
+            }
+            for definition in self._router.registry.list_actions()
+        }
 
     def _failure(
         self,

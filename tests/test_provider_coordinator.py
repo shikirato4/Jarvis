@@ -321,8 +321,9 @@ def test_both_unavailable_provides_combined_diagnostic() -> None:
         coordinator.infer(ModelRequest(task_type="assistant", prompt="hola"))
 
     message = str(captured.value)
-    assert "nvidia_nim" in message
-    assert "nemotron_omni_local" in message
+    assert message.startswith("Ambas rutas de modelo fallaron:")
+    assert "nvidia_nim" not in message
+    assert "nemotron_omni_local" not in message
     assert (
         coordinator.selection_snapshot().provider_status.state
         is ProviderOperationalState.BOTH_UNAVAILABLE
@@ -524,8 +525,7 @@ def test_stream_reports_combined_error_when_local_becomes_unavailable() -> None:
 
     assert chunks[-1].done is True
     assert chunks[-1].error is not None
-    assert "nvidia_nim" in chunks[-1].error
-    assert "nemotron_omni_local" in chunks[-1].error
+    assert "Ambas rutas de modelo fallaron" in chunks[-1].error
     assert chunks[-1].metadata["incomplete"] is True
 
 

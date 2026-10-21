@@ -240,20 +240,12 @@ def _normalize_reasoning(value: object) -> str:
 
 
 def _safe_local_model(value: str) -> str:
-    from jarvis.models_runtime.qwen_identity import (
-        InvalidQwenIdentityError,
-        QwenIdentity,
-    )
+    from jarvis.models_runtime.model_identity import ConfiguredModelIdentity
 
-    for family in ("qwen3.5", "qwen3.8"):
-        try:
-            return QwenIdentity(
-                configured_model=value,
-                expected_model_family=family,
-            ).configured_model
-        except InvalidQwenIdentityError:
-            continue
-    return LOCAL_MODEL
+    try:
+        return ConfiguredModelIdentity(value).configured_model
+    except ValueError:
+        return LOCAL_MODEL
 
 
 def _normalize_mode(value: str) -> str:

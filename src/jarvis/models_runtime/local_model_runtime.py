@@ -16,7 +16,7 @@ import httpx
 from jarvis.config import Settings
 
 from .local_profiles import LocalModelProfile, resolve_local_model_profile
-from .qwen_identity import QwenIdentity
+from .model_identity import ConfiguredModelIdentity
 
 
 class LocalRuntimeState(str, Enum):
@@ -110,7 +110,7 @@ class _Probe:
 
 
 class LocalModelRuntimeManager:
-    """Own the lifecycle of the configured llama.cpp Qwen server.
+    """Own the lifecycle of the configured llama.cpp local model server.
 
     Provider selection remains outside this class. Callers use ``ensure_ready``
     only after the existing coordinator has selected LOCAL.
@@ -129,10 +129,9 @@ class LocalModelRuntimeManager:
     ) -> None:
         self._settings = settings
         self._profile = profile or resolve_local_model_profile(settings)
-        self._identity = QwenIdentity(
+        self._identity = ConfiguredModelIdentity(
             self._profile.model_alias,
             self._profile.model_aliases,
-            self._profile.expected_model_family,
         )
         self._client = client or httpx.Client(
             verify=False,
@@ -676,7 +675,7 @@ class LocalModelRuntimeManager:
                 True,
                 False,
                 detail=(
-                    "model identity mismatch; expected "
+                    "model identity mismatch; expected configured model "
                     f"{self._profile.model_alias}, advertised {models or 'none'}"
                 ),
             )
@@ -709,6 +708,13 @@ class LocalModelRuntimeManager:
             "--flash-attn",
             "off",
         ]
+        if self._profile.mmproj_path is not None:
+            mmproj_path = self._resolved_path(self._profile.mmproj_path)
+            if not mmproj_path.is_file():
+                raise LocalRuntimeConfigurationError(
+                    f"Proyector multimodal configurado no existe: {mmproj_path}."
+                )
+            command.extend(("--mmproj", str(mmproj_path)))
         for flag, value in self._profile.llama_cpp_args:
             command.append(flag)
             if value is not None:

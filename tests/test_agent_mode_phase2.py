@@ -66,6 +66,16 @@ def test_agent_permission_modes_gate_actions() -> None:
         mode=AgentMode.GUIDED_CONTROL,
         permission_mode=AgentPermissionMode.NORMAL,
     )
+    full_user_write = gate.authorize(
+        AgentAction(action_type="create_folder", title="Crear carpeta"),
+        mode=AgentMode.GUIDED_CONTROL,
+        permission_mode=AgentPermissionMode.FULL_USER,
+    )
+    full_user_protected = gate.authorize(
+        AgentAction(action_type="modify_setting", title="Cambiar system32"),
+        mode=AgentMode.GUIDED_CONTROL,
+        permission_mode=AgentPermissionMode.FULL_USER,
+    )
     pro_high = gate.authorize(
         AgentAction(action_type="run_script", title="instalar dependencia"),
         mode=AgentMode.GUIDED_CONTROL,
@@ -84,6 +94,8 @@ def test_agent_permission_modes_gate_actions() -> None:
     assert observe.decision == AgentSafetyDecision.BLOCK
     assert safe_write.decision == AgentSafetyDecision.BLOCK
     assert normal_write.decision == AgentSafetyDecision.REQUIRE_CONFIRMATION
+    assert full_user_write.decision == AgentSafetyDecision.ALLOW
+    assert full_user_protected.decision == AgentSafetyDecision.REQUIRE_STRONG_CONFIRMATION
     assert pro_high.decision == AgentSafetyDecision.ALLOW
     assert blocked.decision == AgentSafetyDecision.BLOCK
 

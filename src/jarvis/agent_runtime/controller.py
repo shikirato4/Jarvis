@@ -23,6 +23,7 @@ from jarvis.models_runtime.base import (
     ProviderKind,
     StreamChunk,
 )
+from jarvis.actions.discovery import DISCOVERY_ACTION
 
 from .models import AgentOutcomeCode, AgentRunRequest, AgentRunResult, AgentRunStatus
 from .prompt_policy import AgenticPromptPolicy
@@ -104,13 +105,16 @@ class AgentController:
         schemas = self._actions.tool_schemas()
         if user_text is None:
             return schemas
-        return self._prompt_policy.select_relevant_tools(schemas, user_text)
+        return self._prompt_policy.select_relevant_tools(
+            schemas, user_text, semantic_metadata=self._actions.tool_semantics()
+        )
 
     def prepare_model_request(
         self,
         request: ModelRequest,
         *,
         emergency: bool = False,
+        discovered_names: set[str] | None = None,
     ) -> ModelRequest:
         """Select schemas and compose policy before context budgeting/provider I/O."""
 
@@ -129,7 +133,54 @@ class AgentController:
         selected_tools = self._prompt_policy.select_relevant_tools(
             all_tools,
             user_text,
+            semantic_metadata=self._actions.tool_semantics(),
         )
+        effective_discovered = discovered_names if discovered_names is not None else set(
+            request.metadata.get("agent_discovered_names", ())
+        )
+        by_name = {tool["function"]["name"]: tool for tool in all_tools}
+        current_names = {
+            tool["function"]["name"] for tool in self.available_tool_schemas()
+        }
+        selected_names = {tool["function"]["name"] for tool in selected_tools}
+        required_names = (DISCOVERY_ACTION, *sorted(effective_discovered))
+        for name in required_names:
+            schema = by_name.get(name)
+            if schema is None or name not in current_names or name in selected_names:
+                continue
+            cost = (len(json.dumps(schema, ensure_ascii=False).encode("utf-8")) + 3) // 4
+            if cost > self._prompt_policy.schema_budget_tokens:
+                continue
+            while selected_tools:
+                selected_cost = sum(
+                    (len(json.dumps(item, ensure_ascii=False).encode("utf-8")) + 3) // 4
+                    for item in selected_tools
+                )
+                if (
+                    len(selected_tools) < self._prompt_policy.max_relevant_tools
+                    and selected_cost + cost <= self._prompt_policy.schema_budget_tokens
+                ):
+                    break
+                removable = next(
+                    (index for index in range(len(selected_tools) - 1, -1, -1)
+                     if selected_tools[index]["function"]["name"] not in required_names),
+                    None,
+                )
+                if removable is None:
+                    break
+                removed = selected_tools.pop(removable)
+                selected_names.discard(removed["function"]["name"])
+            selected_cost = sum(
+                (len(json.dumps(item, ensure_ascii=False).encode("utf-8")) + 3) // 4
+                for item in selected_tools
+            )
+            if (
+                len(selected_tools) >= self._prompt_policy.max_relevant_tools
+                or selected_cost + cost > self._prompt_policy.schema_budget_tokens
+            ):
+                continue
+            selected_tools.append(schema)
+            selected_names.add(name)
         capabilities = tuple(
             dict.fromkeys((*request.required_capabilities, "tool_calling"))
         )
@@ -150,7 +201,13 @@ class AgentController:
                     "agent_prompt_profile": self._prompt_policy.resolved_profile.value,
                     "agent_capability_schema_count": len(all_tools),
                     "agent_selected_schema_count": len(selected_tools),
+                    "agent_selected_schema_estimated_tokens": sum(
+                        (len(json.dumps(schema, ensure_ascii=False).encode("utf-8")) + 3) // 4
+                        for schema in selected_tools
+                    ),
+                    "agent_schema_budget_tokens": self._prompt_policy.schema_budget_tokens,
                     "agent_prompt_emergency_compaction": emergency,
+                    "agent_discovered_names": tuple(sorted(effective_discovered)),
                 },
             }
         )
@@ -173,6 +230,14 @@ class AgentController:
             observation.model_copy(deep=True)
             for observation in request.prior_observations
         ]
+        discovered_names: set[str] = set()
+        for prior in observations:
+            if prior.action == DISCOVERY_ACTION and prior.status is ActionStatus.SUCCESS:
+                discovered_names.update(
+                    candidate["name"]
+                    for candidate in prior.data.get("candidates", [])
+                    if isinstance(candidate, dict) and isinstance(candidate.get("name"), str)
+                )
         model_calls = request.prior_model_call_count
         step_count = request.prior_step_count
         last_response: ModelResponse | None = None
@@ -227,7 +292,7 @@ class AgentController:
                         required_capabilities=("chat", "tool_calling"),
                         messages=message_snapshot,
                         correlation_id=correlation_id,
-                    ))
+                    ), discovered_names=discovered_names)
                 else:
                     model_request = self.prepare_model_request(base_request.model_copy(
                         update={
@@ -235,7 +300,7 @@ class AgentController:
                             "messages": message_snapshot,
                             "correlation_id": correlation_id,
                         }
-                    ))
+                    ), discovered_names=discovered_names)
                 agent_phase = (
                     "agent_final"
                     if observations
@@ -449,8 +514,11 @@ class AgentController:
                             content=(
                                 "This is an operational request and requires an "
                                 "observable tool action. Call one appropriate "
-                                "available tool now; do not replace the action "
-                                "with instructions or claim it was performed."
+                                "available tool now; if no exact tool is shown, "
+                                "use capability discovery or the closest safe "
+                                "primitive. Do not cite a missing skill as a "
+                                "reason to refuse, replace the action with "
+                                "instructions, or claim it was performed."
                             ),
                         )
                     )
@@ -623,6 +691,12 @@ class AgentController:
                 )
                 observation = self._actions.execute(action_request)
                 observations.append(observation)
+                if call.name == DISCOVERY_ACTION and observation.status is ActionStatus.SUCCESS:
+                    discovered_names.update(
+                        candidate["name"]
+                        for candidate in observation.data.get("candidates", [])
+                        if isinstance(candidate, dict) and isinstance(candidate.get("name"), str)
+                    )
                 step_count += 1
                 self._publish(
                     "tool_observed",

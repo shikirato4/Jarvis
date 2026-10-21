@@ -51,6 +51,12 @@ class WindowsModule:
         self._runtime = runtime
 
     def register_actions(self, registry: ActionRegistry) -> None:
+        semantics = {
+            "windows.environment.inspect": (("windows version", "operating system version", "version de windows", "versión de windows", "sistema operativo", "edición de windows"), ()),
+            "windows.application.launch": (("open", "launch app", "start app", "abrir aplicación", "abre", "iniciar programa", "inicia aplicación", "inicia"), ("windows.window.list",)),
+            "windows.window.list": (("list windows", "show open windows", "listar ventanas", "ventanas abiertas"), ("windows.window.focus",)),
+            "windows.window.focus": (("focus window", "activate window", "enfocar ventana", "activar ventana"), ("windows.window.list",)),
+        }
         definitions = (
             ("windows.environment.inspect", "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials.", WindowsEnvironmentPayload, self._environment, ActionRisk.SAFE, True),
             ("windows.process.list", "List a bounded set of Windows processes (procesos) with interactive-application relevance; returns no command-line arguments.", WindowsProcessListPayload, self._processes, ActionRisk.SAFE, True),
@@ -63,6 +69,7 @@ class WindowsModule:
             ("windows.application.launch", "Launch/open (abrir) one application from a fixed safe Windows catalog and verify a new application window; arbitrary paths and shell commands are rejected.", WindowsApplicationLaunchPayload, self._launch, ActionRisk.SENSITIVE, False),
         )
         for name, description, payload, handler, risk, idempotent in definitions:
+            aliases, companions = semantics.get(name, ((), ()))
             registry.register(
                 ActionDefinition(
                     name=name,
@@ -74,6 +81,8 @@ class WindowsModule:
                     idempotent=idempotent,
                     supports_cancellation=True,
                     adapter="windows_native",
+                    semantic_aliases=aliases,
+                    companion_names=companions,
                 )
             )
 

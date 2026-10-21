@@ -39,6 +39,13 @@ def block_unmarked_external_network(
     ):
         monkeypatch.setenv(name, "")
 
+    # Nor must it stretch the request budgets that streaming tests pin down.
+    for name in (
+        "JARVIS_LOCAL_LLM_TIMEOUT_SECONDS",
+        "LOCAL_LLM_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
     original_getaddrinfo = socket.getaddrinfo
     original_connect = socket.socket.connect
 

@@ -976,7 +976,7 @@ if QApplication is not None:
             elif surface_id == "settings":
                 cards = QHBoxLayout()
                 self._settings_primary_card = MetricCard("Primary Engine", "AUTO")
-                self._settings_fallback_card = MetricCard("Local Engine", "Qwen local")
+                self._settings_fallback_card = MetricCard("Local Engine", "Modelo local")
                 cards.addWidget(self._settings_primary_card)
                 cards.addWidget(self._settings_fallback_card)
                 layout.addLayout(cards)
@@ -1078,13 +1078,13 @@ if QApplication is not None:
             status_layout.addWidget(
                 self._section_header(
                     "Live System",
-                    "Qwen local + Nemotron online; memoria, herramientas y políticas permanecen locales",
+                    "Modelo local/remoto; memoria, herramientas y políticas permanecen locales",
                 )
             )
             status_grid = QGridLayout()
             status_grid.setHorizontalSpacing(10)
             status_grid.setVerticalSpacing(10)
-            self._local_model_card = MetricCard("Active Model", "Qwen pending")
+            self._local_model_card = MetricCard("Active Model", "Model pending")
             self._web_search_card = MetricCard("Web Search", "Brave")
             self._voice_card = MetricCard("Voice", "ready")
             self._context_card = MetricCard("Context", "active")
@@ -1113,7 +1113,7 @@ if QApplication is not None:
             settings_layout.setSpacing(10)
             settings_layout.addWidget(
                 self._section_header(
-                    "NVIDIA online y Qwen local",
+                    "NVIDIA online y modelo local",
                     "La clave se guarda en el almacén seguro del sistema; nunca en la interfaz ni en el historial",
                 )
             )
@@ -1160,13 +1160,13 @@ if QApplication is not None:
             self._provider_capabilities.setObjectName("SectionMeta")
             self._provider_capabilities.setWordWrap(True)
             settings_layout.addWidget(self._provider_capabilities)
-            self._local_runtime_button = QPushButton("Diagnosticar Qwen local")
+            self._local_runtime_button = QPushButton("Diagnosticar modelo local")
             self._local_runtime_button.clicked.connect(
                 self._refresh_local_runtime_diagnostic
             )
             settings_layout.addWidget(self._local_runtime_button)
             self._local_runtime_diagnostic = QLabel(
-                "Diagnóstico Qwen local cuantizado: comprueba endpoint, GPU, VRAM, RAM, CUDA y backend."
+                "Diagnóstico del modelo local Qwen cuantizado: comprueba endpoint, GPU, VRAM, RAM, CUDA y backend."
             )
             self._local_runtime_diagnostic.setObjectName("SectionMeta")
             self._local_runtime_diagnostic.setWordWrap(True)
@@ -2843,7 +2843,7 @@ if QApplication is not None:
             )
             active_model = getattr(state, "llm_model", None)
             self._local_model_card.set_value(
-                model if model != "n/a" else (active_model or "Qwen pending")
+                model if model != "n/a" else (active_model or "Model pending")
             )
             self._web_search_card.set_value(
                 "Brave"
@@ -2991,7 +2991,7 @@ if QApplication is not None:
                     f"Enabled: {str(bool(web.get('enabled'))).lower()}",
                     f"Available: {str(bool(web.get('available'))).lower()}",
                     f"Brave key configured: {str(bool(web.get('configured'))).lower()}",
-                    "Brave solo busca; el proveedor Nemotron asignado redacta.",
+                    "Brave solo busca; el modelo configurado redacta.",
                     "No se envia contexto privado, archivos de entorno, tokens, PIN ni archivos del proyecto a internet.",
                     "",
                     "Politica:",
@@ -2999,7 +2999,7 @@ if QApplication is not None:
                     f"Gemini: {policy.get('gemini', 'blocked')}",
                     f"NVIDIA NIM: {policy.get('nvidia_nim', 'enabled_by_selected_mode')}",
                     f"Local LLM: {policy.get('local_llm', 'configured local model profile')}",
-                    f"Online search: {policy.get('online_search', 'Brave + assigned Nemotron provider')}",
+                    f"Online search: {policy.get('online_search', 'Brave + configured model')}",
                     "",
                     "Code Agent:",
                     "Patches revisables; nada se aplica automaticamente.",
@@ -3276,7 +3276,7 @@ if QApplication is not None:
             llm_model = str(
                 llm_status.get("active_model")
                 or getattr(state, "llm_model", "")
-                or "Nemotron 3 Nano Omni"
+                or "JARVIS model"
             )
             self._llm_badge.setText(f"LLM {provider_state.upper()}")
             self._llm_badge.set_tone("active" if provider_healthy else "warning")
@@ -3291,7 +3291,7 @@ if QApplication is not None:
                 if llm_mode_value.casefold() == "local":
                     runtime_label = {
                         "starting": "Starting local model...",
-                        "loading_model": "Loading Qwen...",
+                        "loading_model": "Loading model...",
                         "ready": "Local Connected",
                         "failed": "Local runtime failed",
                     }.get(local_runtime_state, "Local runtime stopped")

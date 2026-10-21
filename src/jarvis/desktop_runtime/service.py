@@ -166,6 +166,7 @@ class DesktopRuntimeService:
             (
                 "agent_controller.",
                 "action_executor.",
+                "terminal.",
                 "model.auto_continuation_",
             )
         ):
@@ -922,7 +923,7 @@ class DesktopRuntimeService:
             role="assistant",
             # Provider selection is activity/status metadata, never assistant
             # conversation content.  In LOCAL this stale placeholder used to
-            # expose the ONLINE Nemotron label before the first model delta.
+            # Do not expose provider identity before the first model delta.
             content="",
             metadata={
                 "source": source,
@@ -1480,7 +1481,7 @@ class DesktopRuntimeService:
                 )
             if raw_result.get("status") == "interrupted":
                 interruption = (
-                    "La generación local de Qwen se interrumpió antes de finalizar."
+                    "La generación local se interrumpió antes de finalizar."
                     if self.llm_status()["selected_mode"] == "local"
                     else "La generación se interrumpió antes de finalizar."
                 )
@@ -2358,7 +2359,7 @@ class DesktopRuntimeService:
                 "gemini": "blocked",
                 "nvidia_nim": "enabled_by_selected_mode",
                 "local_llm": local_model_policy_description(),
-                "online_search": "Brave + assigned Nemotron provider",
+                "online_search": "Brave + configured model",
             },
             "last_result": dict(self._last_dev_result),
         }
@@ -2464,7 +2465,7 @@ class DesktopRuntimeService:
                     "gemini": "blocked",
                     "nvidia_nim": "enabled_by_selected_mode",
                     "local_llm": local_model_policy_description(),
-                    "online_search": "Brave + assigned Nemotron provider",
+                "online_search": "Brave + configured model",
                 },
                 "warnings": env.warnings,
             }

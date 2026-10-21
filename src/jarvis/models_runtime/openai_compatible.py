@@ -348,6 +348,74 @@ class OpenAICompatibleProvider:
             },
         )
 
+    def list_models(self) -> list[str]:
+        """Return model identifiers advertised by this explicitly configured endpoint."""
+        return [item["identifier"] for item in self.discover_models()]
+
+    def discover_models(self) -> list[dict[str, Any]]:
+        """Return safe identity metadata from the configured endpoint's /models API."""
+        try:
+            response = self._http_client().get(
+                "models",
+                headers=self._request_headers(),
+                timeout=self._healthcheck_timeout_seconds,
+            )
+            self._raise_for_status(response)
+            payload = response.json()
+            if not isinstance(payload, dict):
+                raise TypeError("models response must be an object")
+            data = payload.get("data", [])
+            if not isinstance(data, list):
+                raise TypeError("models.data must be a list")
+            discovered: dict[str, dict[str, Any]] = {}
+            for item in data:
+                if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+                    continue
+                identifier = item["id"].strip()
+                if not identifier:
+                    continue
+                version = identifier.rsplit(":", 1)[1] if ":" in identifier else None
+                discovered[identifier] = {
+                    "provider": self.provider_name,
+                    "model": identifier,
+                    "identifier": identifier,
+                    "version": version,
+                    "owned_by": item.get("owned_by") if isinstance(item.get("owned_by"), str) else None,
+                }
+            return [discovered[key] for key in sorted(discovered)]
+        except OpenAICompatibleError:
+            raise
+        except (httpx.TimeoutException, httpx.RequestError) as exc:
+            raise self._unavailable_error(exc) from exc
+        except (ValueError, TypeError, KeyError) as exc:
+            raise self._protocol_error(exc) from exc
+
+    def get_model_info(self) -> dict[str, Any]:
+        """Expose configured identity and conservative, operator-verified capabilities."""
+        return {
+            "provider": self.provider_name,
+            "model": self._configured_model,
+            "identifier": self._configured_model,
+            "version": self._configured_model.rsplit(":", 1)[1] if ":" in self._configured_model else None,
+            "capabilities": self.capabilities.model_dump(mode="json"),
+        }
+
+    def supports(self, capability: str) -> bool:
+        normalized = capability.strip().casefold().replace("-", "_")
+        field = {
+            "chat": "text",
+            "vision": "images",
+            "tool_calling": "tool_calling",
+            "structured_output": "structured_output",
+            "reasoning": "reasoning",
+            "streaming": "streaming",
+            "long_context": "max_context_tokens",
+        }.get(normalized, normalized)
+        value = getattr(self.capabilities, field, False)
+        if field == "max_context_tokens":
+            return value is not None
+        return bool(value)
+
     def _http_client(self) -> httpx.Client:
         client = self._client
         if client is None:

@@ -127,12 +127,10 @@ def control_advice_for_target(
     sensitivity, tags = classify_target_sensitivity(target, policy=policy, mode=mode, volume=volume)
     requires_confirmation = False
     reason: str | None = None
-    trusted_application = _is_trusted_application(target)
-
     path = Path(target.path).expanduser() if target.path else None
-    if target.kind == SystemTargetKind.APPLICATION and policy.require_confirmation_for_launch and not trusted_application:
-        requires_confirmation = True
-        reason = "application launch requires confirmation"
+    # Launching a resolved user application is a normal full-user operation.
+    # Sensitive roots, blocked extensions, network/removable volumes and URI
+    # schemes below still force confirmation or blocking as appropriate.
     if path is not None and path.suffix.casefold() in set(policy.blocked_extensions):
         requires_confirmation = True
         reason = "target uses a blocked executable or script extension"

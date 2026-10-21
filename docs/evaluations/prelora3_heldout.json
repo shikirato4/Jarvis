@@ -1,0 +1,120 @@
+[
+  {
+    "case": "es_document",
+    "prompt": "Halla el informe mensual y muéstrame lo que dice.",
+    "expected": [
+      "files.search",
+      "files.read_text"
+    ],
+    "selected": [
+      "files.read_text",
+      "files.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_document",
+    "prompt": "Track down the monthly report and show me what it says.",
+    "expected": [
+      "files.search",
+      "files.read_text"
+    ],
+    "selected": [
+      "files.read_text",
+      "files.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "es_metadata",
+    "prompt": "Ubica presupuesto.xlsx y averigua su peso en bytes.",
+    "expected": [
+      "files.search",
+      "files.stat"
+    ],
+    "selected": [
+      "files.stat",
+      "files.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_metadata",
+    "prompt": "Find budget.xlsx and check how many bytes it occupies.",
+    "expected": [
+      "files.search",
+      "files.stat"
+    ],
+    "selected": [
+      "files.stat",
+      "files.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "es_system",
+    "prompt": "Averigua la compilación de Windows de este ordenador.",
+    "expected": [
+      "windows.environment.inspect"
+    ],
+    "selected": [
+      "windows.environment.inspect"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_system",
+    "prompt": "Tell me the OS build running on this computer.",
+    "expected": [
+      "windows.environment.inspect"
+    ],
+    "selected": [
+      "windows.environment.inspect"
+    ],
+    "passed": true
+  },
+  {
+    "case": "es_application",
+    "prompt": "Inicia la calculadora del sistema.",
+    "expected": [
+      "windows.application.launch"
+    ],
+    "selected": [
+      "windows.application.launch"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_application",
+    "prompt": "Start the system calculator app.",
+    "expected": [
+      "windows.application.launch"
+    ],
+    "selected": [
+      "windows.application.launch"
+    ],
+    "passed": true
+  },
+  {
+    "case": "es_research",
+    "prompt": "Consulta en la web el lanzamiento más reciente de ExampleDB.",
+    "expected": [
+      "web.search"
+    ],
+    "selected": [
+      "web.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_research",
+    "prompt": "Look up the most recent ExampleDB release online.",
+    "expected": [
+      "web.search"
+    ],
+    "selected": [
+      "web.search"
+    ],
+    "passed": true
+  }
+]

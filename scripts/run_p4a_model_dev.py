@@ -49,7 +49,7 @@ def _request(prompt: str) -> AgentRunRequest:
     )
 
 
-def run(output: Path) -> dict[str, Any]:
+def run(output: Path, *, profile: str = "full") -> dict[str, Any]:
     manager_settings = Settings(
         workspace_root=Path.cwd(),
         llm_mode="local",
@@ -91,7 +91,7 @@ def run(output: Path) -> dict[str, Any]:
                     local_runtime_parallel=1,
                     local_runtime_autostart=False,
                     local_runtime_stop_on_shutdown=False,
-                    pre_lora_agentic_profile="full",
+                    pre_lora_agentic_profile=profile,
                 )
             )
             app.start()
@@ -134,6 +134,8 @@ def run(output: Path) -> dict[str, Any]:
                             "schema_order": [item["name"] for item in schemas],
                             "actions": actions,
                             "status": result.status.value,
+                            "error_type": result.error_type,
+                            "outcome_code": result.outcome_code.value if result.outcome_code else None,
                             "final_answer": result.final_answer,
                             "passed": bool(
                                 result.status.value == "completed"
@@ -177,8 +179,9 @@ def main() -> int:
         type=Path,
         default=Path("runtime_p4a_smoke/p4a_model_dev.json"),
     )
+    parser.add_argument("--profile", choices=("full", "compact"), default="full")
     args = parser.parse_args()
-    report = run(args.output)
+    report = run(args.output, profile=args.profile)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["passed"] else 1
 

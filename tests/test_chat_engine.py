@@ -28,7 +28,11 @@ class MutableDesktopModelProvider:
     provider_name = "nemotron_omni_local"
     provider_kind = ProviderKind.LOCAL
     configured_model = "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4"
-    capabilities = ProviderCapabilities(text=True, streaming=False, reasoning=True)
+    # The fake returns tool proposals in several flows, so advertise the same
+    # capability a real provider must declare before Jarvis routes tool schemas.
+    capabilities = ProviderCapabilities(
+        text=True, streaming=False, reasoning=True, tool_calling=True
+    )
 
     def __init__(self, *, fail: bool = False, content: str = "Un agujero negro es una region del espacio-tiempo con gravedad extrema.") -> None:
         self.fail = fail
@@ -1331,13 +1335,13 @@ def test_shared_registry_exposes_file_and_web_tools_provider_independently(tmp_p
     file_names = {
         item["function"]["name"]
         for item in controller.available_tool_schemas(
-            "Busca en mis archivos dónde mencioné Brave"
+            "Usa files.search_content para buscar dónde mencioné Brave"
         )
     }
     web_names = {
         item["function"]["name"]
         for item in controller.available_tool_schemas(
-            "Busca en internet las últimas novedades de NVIDIA"
+            "Busca en internet las ultimas novedades de NVIDIA"
         )
     }
     before_mode_switch = len(all_names)
@@ -1346,7 +1350,7 @@ def test_shared_registry_exposes_file_and_web_tools_provider_independently(tmp_p
     app.model_service.set_llm_mode(LLMMode.NVIDIA_API)
     online_count = len(controller.available_tool_schemas())
 
-    assert "files.search" in file_names
+    assert "files.search_content" in file_names
     assert "files.read_text" in all_names
     assert "web.search" in web_names
     assert local_count == online_count == before_mode_switch

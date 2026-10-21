@@ -44,6 +44,7 @@ class AgentPermissionMode(StrEnum):
     SAFE = "safe"
     NORMAL = "normal"
     PRO = "pro"
+    FULL_USER = "full_user"
 
 
 class AgentSafetyDecision(StrEnum):
@@ -265,7 +266,7 @@ class AgentSafetyGate:
                 "Accion de alto riesgo: requiere confirmacion fuerte y PIN si esta configurado.",
                 requires_pin=True,
             )
-        if risk == AgentRisk.MEDIUM and not confirmed:
+        if risk == AgentRisk.MEDIUM and not confirmed and permission_mode != AgentPermissionMode.FULL_USER:
             return AgentSafetyResult(AgentSafetyDecision.REQUIRE_CONFIRMATION, risk, "Accion sensible: requiere Confirm Action.")
         return AgentSafetyResult(AgentSafetyDecision.ALLOW, risk, "Accion permitida por Agent Mode.")
 

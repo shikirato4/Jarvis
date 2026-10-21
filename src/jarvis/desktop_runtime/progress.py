@@ -54,6 +54,15 @@ def project_runtime_progress(snapshot: RuntimeActivitySnapshot) -> ThinkingProje
             "agent_controller.cancelled",
         }:
             status = "cancelled"
+        elif event.event_name == "terminal.command_completed":
+            status = "completed"
+        elif event.event_name in {
+            "terminal.command_failed",
+            "terminal.command_timed_out",
+        }:
+            status = "failed"
+        elif event.event_name == "terminal.command_cancelled":
+            status = "cancelled"
         elif event.event_name in {
             "agent_controller.waiting_confirmation",
             "action_executor.waiting_confirmation",
@@ -91,6 +100,20 @@ def _present_event(
         return "SecurityGate bloqueó la acción.", "SecurityGate bloqueó la acción solicitada."
     if name == "action_executor.waiting_confirmation":
         return "La acción requiere confirmación.", "La acción quedó pendiente de confirmación explícita."
+    if name == "terminal.command_started":
+        return "Ejecutando Terminal…", "La ejecución de Terminal comenzó."
+    if name == "terminal.command_completed":
+        return "Terminal finalizó correctamente.", "La ejecución de Terminal terminó correctamente."
+    if name == "terminal.command_failed":
+        return "Terminal falló.", "La ejecución de Terminal terminó con un fallo."
+    if name == "terminal.command_timed_out":
+        return "Terminal agotó el tiempo.", "La ejecución de Terminal agotó el tiempo disponible."
+    if name == "terminal.command_cancelled":
+        return "Terminal fue cancelada.", "La ejecución de Terminal fue cancelada."
+    if name == "terminal.output":
+        # Output chunks update the activity node but must not create noisy or
+        # sensitive textual progress lines.
+        return None, None
     if name == "agent_controller.tool_observed":
         return "Observación recibida.", None
     if name == "agent_controller.continuation_started":

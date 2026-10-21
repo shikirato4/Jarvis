@@ -1,0 +1,320 @@
+[
+  {
+    "id": "files_search_4",
+    "intent": "action",
+    "family": "files_search",
+    "prompt": "Rastrea la hoja de gastos en la carpeta.",
+    "required": [
+      "files.search"
+    ]
+  },
+  {
+    "id": "files_search_5",
+    "intent": "action",
+    "family": "files_search",
+    "prompt": "Track down the expense sheet on disk.",
+    "required": [
+      "files.search"
+    ]
+  },
+  {
+    "id": "files_search_6",
+    "intent": "action",
+    "family": "files_search",
+    "prompt": "Locate the budget document in Downloads.",
+    "required": [
+      "files.search"
+    ]
+  },
+  {
+    "id": "files_read_4",
+    "intent": "action",
+    "family": "files_read",
+    "prompt": "Ubica el resumen y enséñame qué dice.",
+    "required": [
+      "files.search",
+      "files.read_text"
+    ]
+  },
+  {
+    "id": "files_read_5",
+    "intent": "action",
+    "family": "files_read",
+    "prompt": "Track down the memo and display its contents.",
+    "required": [
+      "files.search",
+      "files.read_text"
+    ]
+  },
+  {
+    "id": "files_read_6",
+    "intent": "action",
+    "family": "files_read",
+    "prompt": "Find the log and tell me what it says.",
+    "required": [
+      "files.search",
+      "files.read_text"
+    ]
+  },
+  {
+    "id": "files_size_4",
+    "intent": "action",
+    "family": "files_size",
+    "prompt": "Encuentra el informe y averigua cuántos bytes ocupa.",
+    "required": [
+      "files.search",
+      "files.stat"
+    ]
+  },
+  {
+    "id": "files_size_5",
+    "intent": "action",
+    "family": "files_size",
+    "prompt": "Track down the report and check its byte count.",
+    "required": [
+      "files.search",
+      "files.stat"
+    ]
+  },
+  {
+    "id": "files_size_6",
+    "intent": "action",
+    "family": "files_size",
+    "prompt": "Locate the image and tell me how large it is on disk.",
+    "required": [
+      "files.search",
+      "files.stat"
+    ]
+  },
+  {
+    "id": "files_copy_4",
+    "intent": "action",
+    "family": "files_copy",
+    "prompt": "Halla el documento y crea una copia en otra carpeta.",
+    "required": [
+      "files.search",
+      "files.copy"
+    ]
+  },
+  {
+    "id": "files_copy_5",
+    "intent": "action",
+    "family": "files_copy",
+    "prompt": "Track down the memo and duplicate it in the target folder.",
+    "required": [
+      "files.search",
+      "files.copy"
+    ]
+  },
+  {
+    "id": "files_copy_6",
+    "intent": "action",
+    "family": "files_copy",
+    "prompt": "Locate the file, then make a copy at the new path.",
+    "required": [
+      "files.search",
+      "files.copy"
+    ]
+  },
+  {
+    "id": "files_move_4",
+    "intent": "action",
+    "family": "files_move",
+    "prompt": "Halla el documento y reubícalo en el archivo final.",
+    "required": [
+      "files.search",
+      "files.move"
+    ]
+  },
+  {
+    "id": "files_move_5",
+    "intent": "action",
+    "family": "files_move",
+    "prompt": "Track down the memo and relocate it.",
+    "required": [
+      "files.search",
+      "files.move"
+    ]
+  },
+  {
+    "id": "files_move_6",
+    "intent": "action",
+    "family": "files_move",
+    "prompt": "Locate the report and transfer it into the target folder.",
+    "required": [
+      "files.search",
+      "files.move"
+    ]
+  },
+  {
+    "id": "windows_environment_4",
+    "intent": "state",
+    "family": "windows_environment",
+    "prompt": "Averigua qué edición de Windows corre aquí.",
+    "required": [
+      "windows.environment.inspect"
+    ]
+  },
+  {
+    "id": "windows_environment_5",
+    "intent": "state",
+    "family": "windows_environment",
+    "prompt": "Inspect the operating system build on this machine.",
+    "required": [
+      "windows.environment.inspect"
+    ]
+  },
+  {
+    "id": "windows_environment_6",
+    "intent": "state",
+    "family": "windows_environment",
+    "prompt": "Tell me the OS release actually installed on this PC.",
+    "required": [
+      "windows.environment.inspect"
+    ]
+  },
+  {
+    "id": "windows_launch_4",
+    "intent": "action",
+    "family": "windows_launch",
+    "prompt": "Arranca el editor de texto del sistema.",
+    "required": [
+      "windows.application.launch"
+    ]
+  },
+  {
+    "id": "windows_launch_5",
+    "intent": "action",
+    "family": "windows_launch",
+    "prompt": "Start the Calculator application now.",
+    "required": [
+      "windows.application.launch"
+    ]
+  },
+  {
+    "id": "windows_launch_6",
+    "intent": "action",
+    "family": "windows_launch",
+    "prompt": "Open Paint on this desktop.",
+    "required": [
+      "windows.application.launch"
+    ]
+  },
+  {
+    "id": "web_research_4",
+    "intent": "state",
+    "family": "web_research",
+    "prompt": "Consulta noticias recientes del proyecto ExampleDB en la web.",
+    "required": [
+      "web.search"
+    ]
+  },
+  {
+    "id": "web_research_5",
+    "intent": "state",
+    "family": "web_research",
+    "prompt": "Look up current ExampleDB announcements online.",
+    "required": [
+      "web.search"
+    ]
+  },
+  {
+    "id": "web_research_6",
+    "intent": "state",
+    "family": "web_research",
+    "prompt": "Find external sources for the newest ExampleDB version.",
+    "required": [
+      "web.search"
+    ]
+  },
+  {
+    "id": "python_version_4",
+    "intent": "state",
+    "family": "python_version",
+    "prompt": "Averigua qué intérprete Python corre en este equipo.",
+    "required": [
+      "terminal.run"
+    ]
+  },
+  {
+    "id": "python_version_5",
+    "intent": "state",
+    "family": "python_version",
+    "prompt": "Run a terminal command to inspect the Python interpreter version.",
+    "required": [
+      "terminal.run"
+    ]
+  },
+  {
+    "id": "python_version_6",
+    "intent": "state",
+    "family": "python_version",
+    "prompt": "Tell me which Python build this machine actually has.",
+    "required": [
+      "terminal.run"
+    ]
+  },
+  {
+    "id": "windows_howto_4",
+    "intent": "information",
+    "family": "windows_howto",
+    "prompt": "Enséñame los pasos para mirar la edición de Windows.",
+    "required": []
+  },
+  {
+    "id": "windows_howto_5",
+    "intent": "information",
+    "family": "windows_howto",
+    "prompt": "What steps would I take to learn this PC's OS release?",
+    "required": []
+  },
+  {
+    "id": "windows_howto_6",
+    "intent": "information",
+    "family": "windows_howto",
+    "prompt": "How can a person check their Windows build number?",
+    "required": []
+  },
+  {
+    "id": "files_howto_4",
+    "intent": "information",
+    "family": "files_howto",
+    "prompt": "Dame instrucciones para localizar un PDF.",
+    "required": []
+  },
+  {
+    "id": "files_howto_5",
+    "intent": "information",
+    "family": "files_howto",
+    "prompt": "What is the procedure to move a file?",
+    "required": []
+  },
+  {
+    "id": "files_howto_6",
+    "intent": "information",
+    "family": "files_howto",
+    "prompt": "Teach me how to read a text document.",
+    "required": []
+  },
+  {
+    "id": "absent_email_4",
+    "intent": "action",
+    "family": "absent_email",
+    "prompt": "Despacha un mensaje de email ahora.",
+    "required": []
+  },
+  {
+    "id": "absent_email_5",
+    "intent": "action",
+    "family": "absent_email",
+    "prompt": "Email the report to the team using the available tools.",
+    "required": []
+  },
+  {
+    "id": "absent_email_6",
+    "intent": "action",
+    "family": "absent_email",
+    "prompt": "Send a message through my mailbox immediately.",
+    "required": []
+  }
+]

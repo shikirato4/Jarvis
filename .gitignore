@@ -17,6 +17,8 @@ models/**/*.ckpt
 models/**/*.bin
 models/**/*.pt
 models/**/*.pth
+models/**/*.gguf
+*.gguf
 .cache/
 *.log
 *.tmp

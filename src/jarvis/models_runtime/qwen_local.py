@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import re
-import unicodedata
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -16,7 +14,7 @@ from .openai_compatible import (
     OpenAICompatibleError,
     OpenAICompatibleProvider,
 )
-from .qwen_identity import QwenIdentity
+from .model_identity import ConfiguredModelIdentity
 
 if TYPE_CHECKING:
     from .local_model_runtime import LocalModelRuntimeManager, LocalRuntimeStatus
@@ -43,10 +41,9 @@ class QwenLocalProvider(OpenAICompatibleProvider):
         runtime_manager: LocalModelRuntimeManager | None = None,
     ) -> None:
         self.profile = profile or resolve_local_model_profile(settings)
-        self.identity = QwenIdentity(
+        self.identity = ConfiguredModelIdentity(
             self.profile.model_alias,
             self.profile.model_aliases,
-            self.profile.expected_model_family,
         )
         super().__init__(
             provider_name=self.provider_name,
@@ -68,7 +65,7 @@ class QwenLocalProvider(OpenAICompatibleProvider):
                 input_formats=self._profile_input_formats(),
                 native_transport_modalities=self.profile.native_transport_modalities,
                 verification_source=(
-                    f"configured {self.profile.expected_model_family} profile health required"
+                    "configured model identity health required"
                 ),
             ),
             client=client,
@@ -137,8 +134,7 @@ class QwenLocalProvider(OpenAICompatibleProvider):
                 )
         # The controller normally supplies an already-selected subset. Keep a
         # defensive provider boundary for direct callers: remove duplicate
-        # schemas and do not expose terminal execution for an informational
-        # "how/which command" question.
+        # schemas while leaving semantic selection to AgenticPromptPolicy.
         tools_by_name: dict[str, dict[str, Any]] = {}
         for tool in payload.get("tools", []):
             function = tool.get("function") if isinstance(tool, dict) else None
@@ -146,26 +142,6 @@ class QwenLocalProvider(OpenAICompatibleProvider):
             if isinstance(name, str) and name:
                 tools_by_name.setdefault(name, tool)
         payload["tools"] = list(tools_by_name.values())
-        user_text = " ".join(
-            str(message.get("content") or "")
-            for message in payload.get("messages", [])
-            if isinstance(message, dict) and message.get("role") == "user"
-        )
-        folded = "".join(
-            character
-            for character in unicodedata.normalize("NFKD", user_text.casefold())
-            if not unicodedata.combining(character)
-        ).lstrip("¿¡ ")
-        informational_terminal = bool(
-            re.match(r"(?:como|que|how|what)\b", folded)
-            and re.search(r"\b(?:comando|command|terminal|python|version)\b", folded)
-        )
-        if informational_terminal:
-            payload["tools"] = [
-                tool
-                for tool in payload["tools"]
-                if not str(tool.get("function", {}).get("name", "")).startswith("terminal.")
-            ]
         # Jarvis keeps dotted action ids internally, while llama.cpp validates
         # function names against the OpenAI wire grammar. Encode only the wire
         # payload and restore canonical ids at the provider boundary.
@@ -200,7 +176,7 @@ class QwenLocalProvider(OpenAICompatibleProvider):
                     function.get("name"), function.get("name")
                 )
         # Tool relevance is owned by AgenticPromptPolicy. The provider only
-        # applies the defensive direct-call rules above and wire-renames ids.
+        # deduplicates schemas and wire-renames ids.
         # llama.cpp/Qwen exposes a verified binary switch for thinking. LOW is
         # served by that non-thinking mode so a modest completion budget cannot
         # be consumed entirely by hidden reasoning; MEDIUM/XHIGH keep thinking
@@ -276,7 +252,7 @@ class QwenLocalProvider(OpenAICompatibleProvider):
             yield chunk
 
     def _healthy_message(self) -> str:
-        return f"Qwen local disponible en {self.base_url}."
+        return f"Modelo local disponible en {self.base_url}."
 
     def _validate_health_payload(self, payload: Any) -> None:
         super()._validate_health_payload(payload)
@@ -291,7 +267,7 @@ class QwenLocalProvider(OpenAICompatibleProvider):
         matched = self.identity.select_advertised(model_ids)
         if matched is None:
             raise QwenLocalModelMismatchError(
-                f"El endpoint local no anuncia Qwen compatible con {self.identity.canonical_model}.",
+                f"El endpoint local no anuncia el modelo configurado {self.identity.canonical_model} ni sus alias.",
                 provider_name=self.provider_name,
             )
         self._configured_model = matched
@@ -326,7 +302,7 @@ class QwenLocalProvider(OpenAICompatibleProvider):
         return ProviderOperationalState.LOCAL_UNAVAILABLE
 
     def _start_diagnostic(self, reason: str) -> str:
-        return f"El endpoint local Qwen {self.base_url} no está disponible ({reason}). Configura un servidor que anuncie {self.profile.expected_model_family} o un alias permitido."
+        return f"El endpoint del modelo local {self.base_url} no está disponible ({reason}). Comprueba el servidor y el ID configurado ({self.profile.model_alias}) o sus alias."
 
     def _profile_metadata(self) -> dict[str, Any]:
         return {

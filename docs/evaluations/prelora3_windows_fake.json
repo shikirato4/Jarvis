@@ -1,0 +1,140 @@
+{
+  "runtime": {
+    "backend": "cuda",
+    "context_size": 8192,
+    "parallel": 1,
+    "readiness": true
+  },
+  "cases": [
+    {
+      "kind": "action",
+      "prompt": "Revisa qué versión de Windows tengo.",
+      "schemas": [
+        {
+          "name": "windows.environment.inspect",
+          "description": "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials."
+        }
+      ],
+      "schema_order": [
+        "windows.environment.inspect"
+      ],
+      "actions": [
+        "windows.environment.inspect"
+      ],
+      "status": "completed",
+      "final_answer": "Tienes **Windows 11 Pro** con la versión **24H2** (build 26100).\n\nDetalles adicionales:\n- **Arquitectura:** AMD64 (64 bits)\n- **Sesión:** Interactiva activa\n\n¿Necesitas ayuda con algo específico relacionado con tu sistema operativo?",
+      "passed": true
+    },
+    {
+      "kind": "action",
+      "prompt": "Dime qué build de Windows está corriendo esta PC.",
+      "schemas": [
+        {
+          "name": "windows.environment.inspect",
+          "description": "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials."
+        }
+      ],
+      "schema_order": [
+        "windows.environment.inspect"
+      ],
+      "actions": [
+        "windows.environment.inspect"
+      ],
+      "status": "completed",
+      "final_answer": "Esta PC está ejecutando **Windows 11 Pro** con la versión **24H2** y el build **26100**. La arquitectura del sistema es **AMD64** (64 bits).",
+      "passed": true
+    },
+    {
+      "kind": "action",
+      "prompt": "Comprueba la arquitectura y versión del sistema operativo.",
+      "schemas": [
+        {
+          "name": "windows.environment.inspect",
+          "description": "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials."
+        }
+      ],
+      "schema_order": [
+        "windows.environment.inspect"
+      ],
+      "actions": [
+        "windows.environment.inspect"
+      ],
+      "status": "completed",
+      "final_answer": "He verificado los detalles del sistema operativo. Aquí están los resultados:\n\n**Sistema Operativo:**\n- **Edición:** Windows 11 Pro\n- **Versión:** 24H2\n- **Build/Compilación:** 26100\n- **Arquitectura:** AMD64 (64 bits)\n- **Estado de sesión:** Interactiva (Sesión 1)\n\n¿Necesitas alguna información adicional sobre el sistema?",
+      "passed": true
+    },
+    {
+      "kind": "action",
+      "prompt": "¿Qué sistema operativo está usando esta máquina? Revísalo ahora.",
+      "schemas": [
+        {
+          "name": "windows.environment.inspect",
+          "description": "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials."
+        }
+      ],
+      "schema_order": [
+        "windows.environment.inspect"
+      ],
+      "actions": [
+        "windows.environment.inspect"
+      ],
+      "status": "completed",
+      "final_answer": "Esta máquina está ejecutando **Windows 11 Pro** con la siguiente configuración:\n\n| Detalle | Valor |\n|---------|-------|\n| **Edición** | Windows 11 Pro |\n| **Versión** | 24H2 |\n| **Build/Compilación** | 26100 |\n| **Arquitectura** | AMD64 (64-bit) |\n| **Sesión** | Interactiva (ID: 1) |\n\nEsta información ha sido verificada directamente desde el sistema operativo. ¿Necesitas algún detalle adicional sobre el entorno?",
+      "passed": true
+    },
+    {
+      "kind": "action",
+      "prompt": "Revisa los datos básicos de mi Windows.",
+      "schemas": [
+        {
+          "name": "windows.environment.inspect",
+          "description": "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials."
+        }
+      ],
+      "schema_order": [
+        "windows.environment.inspect"
+      ],
+      "actions": [
+        "windows.environment.inspect"
+      ],
+      "status": "completed",
+      "final_answer": "Aquí están los datos básicos de tu sistema Windows:\n\n| Detalle | Valor |\n|---------|-------|\n| **Edición** | Windows 11 Pro |\n| **Versión** | 24H2 |\n| **Build/Compilación** | 26100 |\n| **Arquitectura** | AMD64 (64 bits) |\n| **Sesión interactiva** | Activa |\n| **ID de sesión** | 1 |\n\n**Resumen:** Estás ejecutando Windows 11 Pro en la versión 24H2 (la versión más reciente de Windows 11), con arquitectura de 64 bits. El sistema está en una sesión interactiva activa.\n\n¿Hay algo específico que te gustaría verificar o ajustar sobre tu sistema?",
+      "passed": true
+    },
+    {
+      "kind": "information",
+      "prompt": "¿Cómo puedo ver qué versión de Windows tengo?",
+      "schemas": [
+        {
+          "name": "windows.environment.inspect",
+          "description": "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials."
+        }
+      ],
+      "schema_order": [
+        "windows.environment.inspect"
+      ],
+      "actions": [],
+      "status": "completed",
+      "final_answer": "Para ver qué versión de Windows tienes, puedes usar cualquiera de estos métodos:\n\n**Métodos manuales:**\n1. **Configuración:** Ve a *Configuración > Sistema > Acerca de*\n2. **Ejecutar:** Presiona `Win + R`, escribe `winver` y pulsa Enter\n3. **Símbolo del sistema:** Abre CMD o PowerShell y escribe `systeminfo`\n\n**O yo puedo hacerlo por ti:**\n\nTengo acceso a herramientas que pueden inspeccionar tu sistema directamente. ¿Te gustaría que verifique la versión de Windows ahora mismo? Solo dime si quieres que lo haga y te daré los detalles exactos (edición, versión, compilación, arquitectura, etc.).\n\n¿Prefieres que lo verifique yo o te gustaría saber más sobre cómo hacerlo manualmente?",
+      "passed": true
+    },
+    {
+      "kind": "information",
+      "prompt": "Explícame cómo consultar el build y la arquitectura de Windows.",
+      "schemas": [
+        {
+          "name": "windows.environment.inspect",
+          "description": "Read the current machine's real operating-system facts (sistema operativo): Windows edition, release/version (versión), build/compilación, architecture/arquitectura, basic system details (datos básicos), and session state. Use when the user asks JARVIS to check, inspect, review, verify, or report this PC's actual OS details now; never infer current-device facts from general knowledge. Do not execute for a how-to or explanation of ways the user can check those details unless they also request inspection now. Returns a bounded verified observation without environment variables or credentials."
+        }
+      ],
+      "schema_order": [
+        "windows.environment.inspect"
+      ],
+      "actions": [],
+      "status": "completed",
+      "final_answer": "# Cómo consultar el Build y la Arquitectura de Windows\n\nTienes varias opciones para obtener esta información:\n\n## 1. **Desde el Explorador de Archivos (Windows)**\n- Presiona `Win + R`\n- Escribe `winver` y presiona Enter\n- Se abrirá una ventana con:\n  - **Edición de Windows**\n  - **Versión** (ej: 22H2)\n  - **Compilación/Build** (ej: 19045)\n\n## 2. **Desde el Símbolo del Sistema (CMD)**\n```cmd\nsysteminfo | findstr /B /C:\"OS Name\" /C:\"OS Version\" /C:\"System Type\"\n```\nO más simple:\n```cmd\nwmic os get build,version,osarchitecture\n```\n\n## 3. **Desde PowerShell**\n```powershell\nGet-ComputerInfo | Select-Object BuildNumber, OSArchitecture\n```\nO:\n```powershell\n[System.Environment]::OSVersion\n```\n\n## 4. **Desde el Panel de Control**\n- Ve a **Sistema** (sistema → información del sistema)\n- Verás:\n  - **Edición del sistema operativo**\n  - **Versión**\n  - **Tipo de sistema** (32 o 64 bits)\n\n---\n\n## ¿Quieres que lo consulte por ti ahora?\n\nTengo acceso a una herramienta que puede inspeccionar directamente tu sistema operativo y darte los datos exactos de tu máquina. Si prefieres, puedo ejecutar esa inspección ahora y mostrarte:\n- Edición de Windows\n- Versión/Release\n- Build/Compilación\n- Arquitectura (x64, x86, ARM, etc.)\n- Detalles básicos del sistema\n\n¿Te gustaría que lo haga ahora?",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

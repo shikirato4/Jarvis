@@ -37,6 +37,35 @@ def test_create_powershell_session(runtime, tmp_path):
     assert session.owned_by_jarvis and session.pid
 
 
+def test_terminal_events_propagate_agent_context(tmp_path):
+    events: list[tuple[str, dict]] = []
+    runtime = TerminalRuntime(event_sink=lambda name, payload: events.append((name, payload)))
+    try:
+        session = runtime.start_session(
+            "powershell",
+            cwd=tmp_path,
+            run_id="agent-run",
+            correlation_id="agent-correlation",
+        )
+        result = runtime.run(
+            session.session_id,
+            "Write-Output terminal-context",
+            run_id="agent-run",
+            correlation_id="agent-correlation",
+        )
+        started = next(payload for name, payload in events if name == "terminal.command_started")
+        completed = next(payload for name, payload in events if name == "terminal.command_completed")
+        output = next(payload for name, payload in events if name == "terminal.output")
+        assert result.status is ExecutionState.SUCCEEDED
+        for payload in (started, completed, output):
+            assert payload["run_id"] == "agent-run"
+            assert payload["correlation_id"] == "agent-correlation"
+        assert "text" not in output
+        assert "command" not in completed
+    finally:
+        runtime.shutdown()
+
+
 def test_create_cmd_session(runtime, tmp_path):
     session = runtime.start_session("cmd", cwd=tmp_path)
     assert session.shell == "cmd"
@@ -342,11 +371,35 @@ def test_security_gate_allows_safe_terminal_command_and_blocks_dangerous(runtime
     assert definition is not None and definition.risk is ActionRisk.SENSITIVE
     gate = TypedActionSecurityGate()
     safe = gate.evaluate(definition, ActionRequest(run_id="r", call_id="safe", action="terminal.run", arguments={"session_id": "s", "command": "python --version"}))
+    gpu = gate.evaluate(definition, ActionRequest(run_id="r", call_id="gpu", action="terminal.run", arguments={"session_id": "s", "command": "nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits"}))
     blocked = gate.evaluate(definition, ActionRequest(run_id="r", call_id="bad", action="terminal.run", arguments={"session_id": "s", "command": "shutdown /s"}))
     sensitive = gate.evaluate(definition, ActionRequest(run_id="r", call_id="ask", action="terminal.run", arguments={"session_id": "s", "command": "pip install package"}))
     assert safe.status is SecurityDecisionStatus.ALLOWED
+    assert gpu.status is SecurityDecisionStatus.ALLOWED
     assert blocked.status is SecurityDecisionStatus.BLOCKED
     assert sensitive.status is SecurityDecisionStatus.CONFIRMATION_REQUIRED
+
+
+def test_security_gate_confirms_interpreter_code_execution(runtime):
+    """python -c / -m and interpreter paths must ask for confirmation (audit P1.1)."""
+    module = TerminalModule(runtime)
+    actions = ActionRegistry()
+    module.register_actions(actions)
+    definition = actions.get("terminal.run")
+    assert definition is not None
+    gate = TypedActionSecurityGate()
+
+    code_exec = gate.evaluate(definition, ActionRequest(run_id="r", call_id="c1", action="terminal.run", arguments={"session_id": "s", "command": "python -c \"__import__('os').system('calc')\""}))
+    module_server = gate.evaluate(definition, ActionRequest(run_id="r", call_id="c2", action="terminal.run", arguments={"session_id": "s", "command": "python -m http.server"}))
+    absolute_interpreter = gate.evaluate(definition, ActionRequest(run_id="r", call_id="c3", action="terminal.run", arguments={"session_id": "s", "command": "C:\\Tools\\python.exe -c \"import os\""}))
+    version_check = gate.evaluate(definition, ActionRequest(run_id="r", call_id="c4", action="terminal.run", arguments={"session_id": "s", "command": "python --version"}))
+    allowlisted_module = gate.evaluate(definition, ActionRequest(run_id="r", call_id="c5", action="terminal.run", arguments={"session_id": "s", "command": "python -m pytest -q"}))
+
+    assert code_exec.status is SecurityDecisionStatus.CONFIRMATION_REQUIRED
+    assert module_server.status is SecurityDecisionStatus.CONFIRMATION_REQUIRED
+    assert absolute_interpreter.status is SecurityDecisionStatus.CONFIRMATION_REQUIRED
+    assert version_check.status is SecurityDecisionStatus.ALLOWED
+    assert allowlisted_module.status is SecurityDecisionStatus.ALLOWED
 
 
 def test_tool_payload_contracts_are_compact():

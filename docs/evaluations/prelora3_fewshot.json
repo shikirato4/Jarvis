@@ -1,0 +1,193 @@
+[
+  {
+    "arm": "compact",
+    "case_id": "files_read",
+    "category": "multi_tool",
+    "expected_sequence": [
+      "files.search",
+      "files.read_text"
+    ],
+    "actual_sequence": [
+      "files.search",
+      "files.read_text"
+    ],
+    "tool_selection": true,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": true,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 3581,
+    "completion_tokens_total": 255,
+    "total_latency_ms": 6460.66,
+    "ttft_ms": null,
+    "variant": "plain"
+  },
+  {
+    "arm": "compact",
+    "case_id": "files_how",
+    "category": "action_vs_information",
+    "expected_sequence": [],
+    "actual_sequence": [],
+    "tool_selection": true,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": true,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 977,
+    "completion_tokens_total": 368,
+    "total_latency_ms": 8470.86,
+    "ttft_ms": null,
+    "variant": "plain"
+  },
+  {
+    "arm": "compact",
+    "case_id": "terminal_version",
+    "category": "terminal",
+    "expected_sequence": [
+      "terminal.run"
+    ],
+    "actual_sequence": [
+      "terminal.run"
+    ],
+    "tool_selection": true,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": true,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 2059,
+    "completion_tokens_total": 132,
+    "total_latency_ms": 3869.4,
+    "ttft_ms": null,
+    "variant": "plain"
+  },
+  {
+    "arm": "compact",
+    "case_id": "research_sources",
+    "category": "research",
+    "expected_sequence": [
+      "web.search",
+      "web.search"
+    ],
+    "actual_sequence": [
+      "web.search"
+    ],
+    "tool_selection": false,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": false,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 2070,
+    "completion_tokens_total": 334,
+    "total_latency_ms": 6520.66,
+    "ttft_ms": null,
+    "variant": "plain"
+  },
+  {
+    "arm": "compact",
+    "case_id": "files_read",
+    "category": "multi_tool",
+    "expected_sequence": [
+      "files.search",
+      "files.read_text"
+    ],
+    "actual_sequence": [
+      "files.search",
+      "files.read_text"
+    ],
+    "tool_selection": true,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": true,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 3949,
+    "completion_tokens_total": 321,
+    "total_latency_ms": 5661.02,
+    "ttft_ms": null,
+    "variant": "fewshot"
+  },
+  {
+    "arm": "compact",
+    "case_id": "files_how",
+    "category": "action_vs_information",
+    "expected_sequence": [],
+    "actual_sequence": [],
+    "tool_selection": true,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": true,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 1078,
+    "completion_tokens_total": 435,
+    "total_latency_ms": 7149.76,
+    "ttft_ms": null,
+    "variant": "fewshot"
+  },
+  {
+    "arm": "compact",
+    "case_id": "terminal_version",
+    "category": "terminal",
+    "expected_sequence": [
+      "terminal.run"
+    ],
+    "actual_sequence": [
+      "terminal.run"
+    ],
+    "tool_selection": true,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": true,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 2278,
+    "completion_tokens_total": 154,
+    "total_latency_ms": 3072.91,
+    "ttft_ms": null,
+    "variant": "fewshot"
+  },
+  {
+    "arm": "compact",
+    "case_id": "research_sources",
+    "category": "research",
+    "expected_sequence": [
+      "web.search",
+      "web.search"
+    ],
+    "actual_sequence": [
+      "web.search",
+      "web.search"
+    ],
+    "tool_selection": true,
+    "first_tool_correct": true,
+    "argument_valid": true,
+    "unnecessary_tool": false,
+    "multi_tool_continuation": true,
+    "failure_recovery": true,
+    "false_execution": false,
+    "final_nonempty": true,
+    "prompt_tokens_total": 3601,
+    "completion_tokens_total": 366,
+    "total_latency_ms": 6280.82,
+    "ttft_ms": null,
+    "variant": "fewshot"
+  }
+]

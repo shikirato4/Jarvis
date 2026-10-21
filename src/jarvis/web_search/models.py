@@ -77,6 +77,23 @@ class ResearchDepth(StrEnum):
     DEEP = "deep"
 
 
+class ResponseDepth(StrEnum):
+    BRIEF = "brief"
+    STANDARD = "standard"
+    DETAILED = "detailed"
+    EXTENSIVE = "extensive"
+    EXHAUSTIVE = "exhaustive"
+
+
+class ResponseLengthRequest(JarvisBaseModel):
+    depth: ResponseDepth = ResponseDepth.STANDARD
+    target_words: int | None = None
+    minimum_words: int = 0
+    maximum_words: int | None = None
+    explicit_word_count: bool = False
+    matched_instruction: str | None = None
+
+
 class SourceScope(StrEnum):
     AUTO = "auto"
     FILES = "files"
@@ -104,7 +121,28 @@ class ResearchIntent(JarvisBaseModel):
     depth: ResearchDepth
     source_scope: SourceScope
     requested_format: str = "answer"
+    requested_length: ResponseLengthRequest = Field(
+        default_factory=ResponseLengthRequest
+    )
     requirements: list[ResearchRequirement] = Field(default_factory=list)
+
+
+class AnswerOutlineSection(JarvisBaseModel):
+    section_id: str
+    heading: str
+    question: str
+    aspects: list[str] = Field(default_factory=list)
+    requirement_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    citation_ids: list[str] = Field(default_factory=list)
+    target_words: int = 0
+    depth: ResponseDepth = ResponseDepth.STANDARD
+
+
+class AnswerOutline(JarvisBaseModel):
+    requested_words: int | None = None
+    target_words: int = 0
+    sections: list[AnswerOutlineSection] = Field(default_factory=list)
 
 
 class FreshnessWindow(StrEnum):
@@ -270,6 +308,7 @@ class CitationValidation(JarvisBaseModel):
     cited_ids: list[str] = Field(default_factory=list)
     invalid_ids: list[str] = Field(default_factory=list)
     invalid_urls: list[str] = Field(default_factory=list)
+    malformed_citations: list[str] = Field(default_factory=list)
     unsupported_claims: list[str] = Field(default_factory=list)
     answer: str = ""
 

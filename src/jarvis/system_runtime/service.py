@@ -146,7 +146,11 @@ class SystemRuntimeService(RuntimeServiceContract):
         target.sensitivity = advice.sensitivity
         target.warnings.extend(item for item in advice.warnings if item not in target.warnings)
         validate_allowed_target(target, policy=self._safety_policy, open_policy=self._open_policy)
-        if advice.requires_confirmation and not payload.metadata.get("approved", False):
+        protected_tags = {"sensitive_root", "blocked_extension", "external_volume", "blocked_scheme"}
+        protected_target = bool(protected_tags.intersection(advice.policy_tags))
+        if advice.requires_confirmation and (
+            not payload.metadata.get("approved", False) or protected_target
+        ):
             receipt = SystemOperationReceipt(
                 correlation_id=correlation_id or str(uuid4()),
                 operation_name="system.open",

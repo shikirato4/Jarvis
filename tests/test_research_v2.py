@@ -616,6 +616,34 @@ def test_final_claim_prune_removes_only_unverified_sentences(tmp_path) -> None:
     assert orchestrator.validate_claim_support(repaired, session).valid is True
 
 
+def test_final_claim_prune_matches_claim_that_includes_inline_subheading(tmp_path) -> None:
+    orchestrator = WebResearchOrchestrator(_Provider(), _settings(tmp_path))
+    session = orchestrator.run("/deepresearch investiga persistencia del cancer", mode="deep")
+    session.evidence = [
+        EvidenceChunk(
+            evidence_id="risk",
+            source_id="risk",
+            citation_id="S1",
+            url="https://cancer.gov/risk",
+            title="Risk",
+            domain="cancer.gov",
+            text="Inherited mutations can increase the risk of developing cancer.",
+        )
+    ]
+    answer = (
+        "## Persistencia\n"
+        "**Mecanismo de persistencia**\n"
+        "La predisposición hereditaria hace persistir un cáncer tratado [S1]."
+    )
+    validation = orchestrator.validate_claim_support(answer, session)
+
+    repaired, removed = orchestrator.remove_unverified_claims(answer, validation)
+
+    assert validation.unsupported == 1
+    assert removed == ["C1"]
+    assert "predisposición" not in repaired
+
+
 def test_unsupported_required_claim_triggers_one_targeted_gap_search(tmp_path) -> None:
     provider = _Provider()
     orchestrator = WebResearchOrchestrator(provider, _settings(tmp_path))

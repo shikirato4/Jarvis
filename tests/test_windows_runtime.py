@@ -295,22 +295,11 @@ def test_security_gate_executor_receipt_and_activity_graph_cover_window_action()
     assert any(event.action == "windows.window.focus" for event in snapshot.events)
 
 
-def test_launch_requires_confirmation_and_executes_exactly_once_after_approval() -> None:
+def test_launch_executes_without_repeated_confirmation() -> None:
     backend, _, _, _, _, _, executor = _runtime_stack()
     request = {"application": "Notepad"}
 
-    waiting = _execute(executor, "windows.application.launch", request, call_id="launch-1")
-    assert waiting.status is ActionStatus.CONFIRMATION_REQUIRED
-    assert backend.launched == []
-    assert executor.approve_confirmation(waiting.confirmation_id)
-
-    executed = _execute(
-        executor,
-        "windows.application.launch",
-        request,
-        call_id="launch-2",
-        token=waiting.confirmation_id,
-    )
+    executed = _execute(executor, "windows.application.launch", request, call_id="launch-1")
     assert executed.status is ActionStatus.SUCCESS
     assert backend.launched == ["notepad.exe"]
 

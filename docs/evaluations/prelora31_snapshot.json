@@ -1,0 +1,40 @@
+{
+  "phase": "PRE-LORA-3.1",
+  "snapshot_utc": "2026-09-29T06:19:43.3136581Z",
+  "production_profile": "full",
+  "old_blind_exact": "5/10",
+  "files": [
+    {
+      "path": "src/jarvis/agent_runtime/prompt_policy.py",
+      "sha256": "28B77B7EADDE8A429B14CEA08521148705C5D3AF3AF10DFA3DE58C108D81A1CA"
+    },
+    {
+      "path": "src/jarvis/agent_runtime/controller.py",
+      "sha256": "FFDE2E83FB1FC76B2AAE90AA5EE3A0D842265A8F5D6EE81AFCD6DA8029D17FAF"
+    },
+    {
+      "path": "src/jarvis/action_executor/executor.py",
+      "sha256": "9DF4B16DD1CC59B7BBB5CBB1B6D0F1A4C4C1346208347C8853CDF5C8D91B5183"
+    },
+    {
+      "path": "src/jarvis/actions/registry.py",
+      "sha256": "D202B89942F0BAC1D16D8425145C37DE8DE16A5768506FBE1C97EEF23357F1A1"
+    },
+    {
+      "path": "src/jarvis/config.py",
+      "sha256": "A34EC789307F60251E9A6269A65491AC3F710E136AD2A32BF2330E4603F7AFC2"
+    },
+    {
+      "path": "docs/evaluations/prelora3_retrieval_ab.json",
+      "sha256": "E3EAE9042AB85AF4FED90A06DB89AAF6F9AFC573A7884172C7800BC40480C7E5"
+    },
+    {
+      "path": "docs/evaluations/prelora3_heldout_final.json",
+      "sha256": "1F3089BFC4559CB24929BF77830827B0ED7FD6E54D6054F5DBBD58C771604EE4"
+    },
+    {
+      "path": "docs/evaluations/prelora3_candidate_model_summary.json",
+      "sha256": "E876A9292420A0BB089F74F2D1F2D9ECF8AFED39CD14CAEFAEEA7B2FCECBFF9B"
+    }
+  ]
+}

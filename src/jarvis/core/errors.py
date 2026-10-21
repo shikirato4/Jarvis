@@ -91,6 +91,13 @@ class CapabilityUnavailableError(JarvisError):
     default_component = "capability"
 
 
+class ContextLimitError(JarvisError):
+    """Raised when a request exceeds the configured model context window."""
+
+    default_code = "context_limit_exceeded"
+    default_component = "models"
+
+
 class OrchestrationError(JarvisError):
     """Raised when the orchestration pipeline cannot fulfill a request."""
 

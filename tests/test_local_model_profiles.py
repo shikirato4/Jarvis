@@ -7,10 +7,12 @@ import pytest
 from jarvis.config import Settings
 from jarvis.models_runtime.local_profiles import (
     BASELINE_PROFILE_ID,
+    CONFIGURED_PROFILE_ID,
     QWEN35_PROFILE_ID,
     LocalModelProfile,
     LocalModelProfileConfigurationError,
     baseline_local_model_profile,
+    configured_local_model_profile,
     resolve_local_model_profile,
     registered_local_model_profiles,
 )
@@ -82,6 +84,71 @@ def test_unknown_profile_fails_closed(tmp_path: Path) -> None:
 
     with pytest.raises(LocalModelProfileConfigurationError, match="missing-profile"):
         resolve_local_model_profile(settings)
+
+
+def test_configured_directory_with_single_gguf_is_selected(tmp_path: Path) -> None:
+    """A shared folder holding exactly one model keeps working as configured."""
+    models = tmp_path / "models"
+    models.mkdir()
+    artifact = models / "solo.gguf"
+    artifact.write_bytes(b"")
+
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_model_path=models,
+    )
+
+    profile = resolve_local_model_profile(settings)
+
+    assert profile.id == CONFIGURED_PROFILE_ID
+    assert profile.gguf_path == artifact
+    assert profile.expected_model_family == "configured"
+
+
+def test_resolution_degrades_to_registered_default_without_artifacts(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A missing models folder degrades to the shipped profile with a warning."""
+    settings = Settings(_env_file=None, workspace_root=tmp_path)
+
+    with caplog.at_level("WARNING", logger="jarvis.models_runtime.local_profiles"):
+        profile = resolve_local_model_profile(settings)
+
+    assert profile.id == QWEN35_PROFILE_ID
+    assert [record for record in caplog.records if record.levelname == "WARNING"]
+
+
+def test_configured_directory_without_gguf_fails_closed(tmp_path: Path) -> None:
+    """An explicit but empty models folder is a user error, reported cleanly."""
+    empty = tmp_path / "empty_models"
+    empty.mkdir()
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_profile_id=CONFIGURED_PROFILE_ID,
+        local_runtime_model_path=empty,
+    )
+
+    with pytest.raises(LocalModelProfileConfigurationError, match="GGUF"):
+        configured_local_model_profile(settings)
+
+
+def test_ambiguous_configured_directory_fails_closed(tmp_path: Path) -> None:
+    """Two models in the shared folder stay ambiguous instead of guessing."""
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "a.gguf").write_bytes(b"")
+    (models / "b.gguf").write_bytes(b"")
+
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_model_path=models,
+    )
+
+    with pytest.raises(LocalModelProfileConfigurationError, match="varios"):
+        configured_local_model_profile(settings)
 
 
 def test_qwen35_candidate_is_registered_as_default(tmp_path: Path) -> None:
@@ -233,7 +300,7 @@ def test_qwen35_terminal_action_retains_terminal_tools(tmp_path: Path, prompt: s
         "¿Qué comando sirve para ver la versión de Python?",
     ],
 )
-def test_qwen35_terminal_information_does_not_retain_terminal_tools(
+def test_qwen35_terminal_information_preserves_policy_selected_tools(
     tmp_path: Path, prompt: str
 ) -> None:
     settings = Settings(
@@ -253,4 +320,4 @@ def test_qwen35_terminal_information_does_not_retain_terminal_tools(
 
     payload = provider._request_payload(request, temperature=0, stream=False)
     names = [tool["function"]["name"] for tool in payload["tools"]]
-    assert not any(name.startswith("terminal__") for name in names)
+    assert any(name.startswith("terminal__") for name in names)

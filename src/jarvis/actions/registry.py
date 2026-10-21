@@ -47,6 +47,8 @@ class ActionDefinition:
     idempotent: bool = True
     supports_cancellation: bool = False
     adapter: str = "internal_api"
+    semantic_aliases: tuple[str, ...] = ()
+    companion_names: tuple[str, ...] = ()
 
 
 class ActionRegistry:
@@ -60,6 +62,10 @@ class ActionRegistry:
 
     def get(self, action_name: str) -> ActionDefinition | None:
         return self._definitions.get(action_name)
+
+    def unregister(self, action_name: str) -> bool:
+        """Remove an executable capability from future discovery and dispatch."""
+        return self._definitions.pop(action_name, None) is not None
 
     def list_actions(self) -> list[ActionDefinition]:
         return sorted(self._definitions.values(), key=lambda item: item.name)

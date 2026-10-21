@@ -68,7 +68,9 @@ class DesktopAgentPolicyEngine:
         application = str(step.payload.get("application") or "").casefold()
         if step.action_type == DesktopStepActionType.OPEN_APPLICATION and application:
             if not any(item in application for item in trusted_window_tokens):
-                decision = DesktopPolicyDecision.ALLOW if self._allow_discovered else DesktopPolicyDecision.REQUIRE_CONFIRMATION
+                decision = DesktopPolicyDecision.ALLOW if (
+                    self._allow_discovered or str(permission_mode) == "full_user"
+                ) else DesktopPolicyDecision.REQUIRE_CONFIRMATION
                 return DesktopAgentPolicyResult(
                     decision=decision,
                     risk_level=DesktopAgentRiskLevel.MEDIUM,

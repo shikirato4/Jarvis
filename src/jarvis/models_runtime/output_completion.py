@@ -1162,4 +1162,107 @@ def merge_continuation_text(existing: str, continuation: str) -> tuple[str, int]
             continue
         overlap = size
         break
-    return existing + continuation[overlap:], overlap
+    if overlap:
+        return existing + continuation[overlap:], overlap
+
+    # Some local models mark a resumed fragment with an ellipsis and repeat
+    # the last few words while completing the previously cut word. Treat only
+    # a high-confidence suffix/prefix match as overlap.
+    ellipsis = re.match(r"^\s*(?:\.{3}|…)+\s*", continuation)
+    if ellipsis:
+        resumed = continuation[ellipsis.end():]
+        old_partial = re.search(r"\b(\w{4,})$", existing, re.UNICODE)
+        new_complete = re.match(r"(\w{5,})\b", resumed, re.UNICODE)
+        if (
+            old_partial
+            and new_complete
+            and len(new_complete.group(1)) > len(old_partial.group(1))
+            and new_complete.group(1).casefold().startswith(
+                old_partial.group(1).casefold()
+            )
+        ):
+            removed = len(existing) - old_partial.start() + ellipsis.end()
+            return existing[: old_partial.start()] + resumed, removed
+        old_words = list(re.finditer(r"\b\w+\b", existing[-240:], re.UNICODE))
+        new_words = list(re.finditer(r"\b\w+\b", resumed[:240], re.UNICODE))
+        # A continuation can repeat an entire trailing clause, not only the
+        # last handful of words. Search a bounded clause-sized window so an
+        # ellipsis such as ``paradigma...no solo ... paradigma que`` does not
+        # survive assembly as duplicated prose.
+        for count in range(min(20, len(old_words), len(new_words)), 2, -1):
+            old_group = old_words[-count:]
+            new_group = new_words[:count]
+            old_tokens = [item.group(0).casefold() for item in old_group]
+            new_tokens = [item.group(0).casefold() for item in new_group]
+            exact_prefix = old_tokens[:-1] == new_tokens[:-1]
+            last_matches = (
+                old_tokens[-1] == new_tokens[-1]
+                or (
+                    min(len(old_tokens[-1]), len(new_tokens[-1])) >= 4
+                    and (
+                        old_tokens[-1].startswith(new_tokens[-1])
+                        or new_tokens[-1].startswith(old_tokens[-1])
+                    )
+                )
+            )
+            if not (exact_prefix and last_matches):
+                continue
+            tail_offset = len(existing) - 240 if len(existing) > 240 else 0
+            cut_at = tail_offset + old_group[0].start()
+            removed = len(existing) - cut_at + ellipsis.end()
+            return existing[:cut_at] + resumed, removed
+
+    # A model may restart the complete trailing clause without adding an
+    # ellipsis. Accept this only when a long token run starts at the beginning
+    # of the continuation and reaches the end of the existing text. This
+    # tolerates a small parenthetical difference such as ``(IA)`` while
+    # avoiding broad fuzzy rewrites of unrelated prose.
+    old_tail_offset = max(0, len(existing) - 320)
+    old_tail = existing[old_tail_offset:]
+    new_head = continuation[:320]
+    old_tokens = list(re.finditer(r"\b\w+\b", old_tail, re.UNICODE))
+    new_tokens = list(re.finditer(r"\b\w+\b", new_head, re.UNICODE))
+    if old_tokens and new_tokens:
+        matcher = SequenceMatcher(
+            None,
+            [item.group(0).casefold() for item in old_tokens],
+            [item.group(0).casefold() for item in new_tokens],
+            autojunk=False,
+        )
+        match = matcher.find_longest_match()
+        if (
+            match.size >= 8
+            and match.b <= 3
+            and match.a + match.size >= len(old_tokens) - 1
+        ):
+            cut_at = new_tokens[match.b + match.size - 1].end()
+            return existing + continuation[cut_at:], cut_at
+
+    # A short repeated boundary word (for example ``que`` + ``que``) is too
+    # small for the normal eight-character overlap threshold but is safe to
+    # collapse when both occurrences are complete words.
+    old_word = re.search(r"\b(\w{3,})$", existing, re.UNICODE)
+    new_word = re.match(r"(\w{3,})\b", continuation, re.UNICODE)
+    if (
+        old_word
+        and new_word
+        and old_word.group(1).casefold() == new_word.group(1).casefold()
+    ):
+        return existing + continuation[new_word.end():], new_word.end()
+
+    # Never concatenate two unrelated words merely because a generation
+    # boundary omitted whitespace.
+    old_boundary = re.search(r"(\w+)$", existing, re.UNICODE)
+    new_boundary = re.match(r"(\w+)", continuation, re.UNICODE)
+    separator = (
+        " "
+        if old_boundary
+        and new_boundary
+        and 2 <= len(old_boundary.group(1)) <= 40
+        and 1 <= len(new_boundary.group(1)) <= 40
+        and not (
+            old_boundary.group(1).isupper() and new_boundary.group(1).isupper()
+        )
+        else ""
+    )
+    return existing + separator + continuation, 0

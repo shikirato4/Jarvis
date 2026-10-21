@@ -51,6 +51,8 @@ class _Execution:
     truncated: bool = False
     timer: threading.Timer | None = None
     script_path: Path | None = None
+    run_id: str | None = None
+    correlation_id: str | None = None
 
 
 @dataclass(slots=True)
@@ -71,6 +73,8 @@ class _Session:
     boot_token: str = ""
     boot_ready: threading.Event = field(default_factory=threading.Event)
     job_handle: Any = None
+    run_id: str | None = None
+    correlation_id: str | None = None
 
 
 class TerminalRuntime:
@@ -98,6 +102,8 @@ class TerminalRuntime:
         cwd: str | Path | None = None,
         environment: dict[str, str | None] | None = None,
         venv_path: str | Path | None = None,
+        run_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> TerminalSessionSnapshot:
         if self._closed:
             raise TerminalError(TerminalErrorCode.SESSION_CLOSED, "terminal runtime is closed")
@@ -150,6 +156,8 @@ class TerminalRuntime:
             environment_keys=tuple(sorted(changed_keys)),
             boot_token=uuid4().hex,
             job_handle=self._create_kill_on_close_job(process),
+            run_id=run_id,
+            correlation_id=correlation_id,
         )
         with self._lock:
             self._sessions[session_id] = session
@@ -192,6 +200,8 @@ class TerminalRuntime:
         timeout_seconds: float | None = 30.0,
         wait: bool = True,
         accepts_input: bool = False,
+        run_id: str | None = None,
+        correlation_id: str | None = None,
     ) -> TerminalResult:
         session = self._get_session(session_id)
         if not command.strip() or "\x00" in command or "\r" in command or "\n" in command:
@@ -208,6 +218,8 @@ class TerminalRuntime:
                 timeout_seconds=timeout_seconds,
                 accepts_input=accepts_input,
                 state=ExecutionState.RUNNING,
+                run_id=run_id if run_id is not None else session.run_id,
+                correlation_id=correlation_id if correlation_id is not None else session.correlation_id,
             )
             session.active = execution
             session.executions[execution.execution_id] = execution
@@ -299,6 +311,8 @@ class TerminalRuntime:
         *,
         cwd: str | Path | None = None,
         command: str | None = None,
+        run_id: str | None = None,
+        correlation_id: str | None = None,
         window_name: str | None = None,
     ) -> VisibleTerminalResult:
         kind = ShellKind(shell)
@@ -321,7 +335,7 @@ class TerminalRuntime:
             )
         except OSError as exc:
             raise TerminalError(TerminalErrorCode.SPAWN_FAILED, "Windows Terminal could not be launched") from exc
-        self._publish("terminal.visible_started", {"pid": process.pid, "shell": kind.value, "cwd": str(working_dir), "owned_by_jarvis": True})
+        self._publish("terminal.visible_started", {"pid": process.pid, "shell": kind.value, "cwd": str(working_dir), "owned_by_jarvis": True, **self._context_payload(run_id, correlation_id)})
         return VisibleTerminalResult(pid=process.pid, shell=kind, cwd=str(working_dir))
 
     def shutdown(self) -> None:
@@ -605,7 +619,10 @@ class TerminalRuntime:
             try:
                 import win32api
 
-                win32api.CloseHandle(job_handle)
+                try:
+                    win32api.CloseHandle(job_handle)
+                except Exception:  # noqa: BLE001 - handle already closed by a prior timeout/kill path
+                    pass
                 try:
                     process.wait(timeout=2.0)
                 except subprocess.TimeoutExpired:
@@ -653,8 +670,15 @@ class TerminalRuntime:
 
     @staticmethod
     def _session_event(session: _Session) -> dict[str, Any]:
-        return {"session_id": session.session_id, "shell": session.shell.value, "cwd": str(session.cwd), "state": session.state.value, "pid": session.process.pid, "owned_by_jarvis": True}
+        return {"session_id": session.session_id, "shell": session.shell.value, "cwd": str(session.cwd), "state": session.state.value, "pid": session.process.pid, "owned_by_jarvis": True, **TerminalRuntime._context_payload(session.run_id, session.correlation_id)}
 
     @staticmethod
     def _execution_event(session: _Session, execution: _Execution) -> dict[str, Any]:
-        return {"session_id": session.session_id, "execution_id": execution.execution_id, "shell": session.shell.value, "cwd": str(session.cwd), "status": execution.state.value, "exit_code": execution.exit_code, "owned_by_jarvis": True}
+        return {"session_id": session.session_id, "execution_id": execution.execution_id, "shell": session.shell.value, "cwd": str(session.cwd), "status": execution.state.value, "exit_code": execution.exit_code, "error_code": execution.error_code.value if execution.error_code else None, "owned_by_jarvis": True, **TerminalRuntime._context_payload(execution.run_id, execution.correlation_id)}
+
+    @staticmethod
+    def _context_payload(run_id: str | None, correlation_id: str | None) -> dict[str, str]:
+        return {
+            **({"run_id": run_id} if run_id else {}),
+            **({"correlation_id": correlation_id} if correlation_id else {}),
+        }

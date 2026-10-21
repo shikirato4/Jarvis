@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 
 from jarvis.actions.registry import ActionRegistry
+from jarvis.actions.discovery import register_discovery_action
 from jarvis.actions.router import ActionRouter
 from jarvis.action_executor import ActionExecutor, TypedActionSecurityGate
 from jarvis.agent_runtime import AgentController
@@ -108,7 +109,9 @@ from jarvis.models_runtime import (
     ProviderCoordinator,
     ProviderRegistry,
     build_default_model_catalog,
+    build_model_role_registry,
 )
+from jarvis.models_runtime.adapters import configured_local_adapter
 from jarvis.models_runtime.local_profiles import resolve_local_model_profile
 from jarvis.neural_router import (
     HashedTextFeatureExtractor,
@@ -815,15 +818,25 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         fallback_value=fallback_secret
     )
     nvidia_provider = NvidiaNimProvider(settings, secret_manager=nvidia_secret_manager)
+    model_role_registry, configured_primary_provider = build_model_role_registry(settings)
     local_profile = resolve_local_model_profile(settings)
     local_model_runtime_manager = LocalModelRuntimeManager(
         settings, profile=local_profile, logger=logger
     )
-    local_qwen_provider = QwenLocalProvider(
-        settings, profile=local_profile, runtime_manager=local_model_runtime_manager
-    )
+    if configured_primary_provider is not None:
+        local_qwen_provider = configured_primary_provider
+    elif settings.local_llm_backend == "qwen":
+        local_qwen_provider = QwenLocalProvider(
+            settings, profile=local_profile, runtime_manager=local_model_runtime_manager
+        )
+    else:
+        local_qwen_provider = configured_local_adapter(settings)
     provider_registry.register(nvidia_provider)
     provider_registry.register(local_qwen_provider)
+    for role in model_role_registry.roles:
+        role_provider = model_role_registry.get_provider(role)
+        if role != "primary" and role_provider is not None:
+            provider_registry.register(role_provider)
     attachment_service = AttachmentService(
         AttachmentTypeRegistry(),
         RequestScopedAttachmentStorage(
@@ -858,6 +871,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         logger=logger,
         resilience_controller=resilience,
         coordinator=provider_coordinator,
+        model_roles=model_role_registry,
     )
     embedding_provider_registry = EmbeddingProviderRegistry()
     if settings.embeddings_enabled:
@@ -954,7 +968,9 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
                 settings.pre_lora_agentic_profile
                 if settings.pre_lora_agentic_scaffold_enabled
                 else "off"
-            )
+            ),
+            max_relevant_tools=settings.pre_lora_max_relevant_tools,
+            max_schema_tokens=settings.pre_lora_max_schema_tokens,
         ),
     )
     terminal_runtime = TerminalRuntime(event_sink=event_bus.publish)
@@ -1374,6 +1390,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     module_registry.register(TerminalModule(terminal_runtime))
     module_registry.register(FilesModule(file_navigator))
     module_registry.register_actions(action_registry)
+    register_discovery_action(action_registry)
     module_registry.register_tools(tool_registry)
     module_registry.register_capabilities(capability_registry)
     install_cognitive_capabilities(capability_registry)

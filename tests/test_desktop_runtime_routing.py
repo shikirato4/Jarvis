@@ -161,6 +161,7 @@ def test_desktop_chat_uses_jarvis_identity_and_sanitizes_model_reply(tmp_path) -
 
 def test_desktop_chat_detailed_request_uses_larger_generation_profile(tmp_path) -> None:
     settings = Settings(
+        _env_file=None,
         data_dir=tmp_path / "runtime",
         workspace_root=tmp_path,
         research_allowed_roots=(tmp_path,),
