@@ -422,6 +422,32 @@ class Settings(BaseSettings):
     voice_input_provider_default: str = "faster_whisper"
     voice_input_language: str = "es"
     voice_input_timeout_seconds: float = 4.0
+    # Active listening: transcripts must open with the wake word (tolerant
+    # to transcription noise); within the conversation window after a
+    # dispatch the wake word is not required.
+    voice_wake_word_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "VOICE_WAKE_WORD_ENABLED", "JARVIS_VOICE_WAKE_WORD_ENABLED"
+        ),
+    )
+    voice_wake_word: str = Field(
+        default="jarvis",
+        validation_alias=AliasChoices("VOICE_WAKE_WORD", "JARVIS_VOICE_WAKE_WORD"),
+    )
+    voice_input_continuous: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "VOICE_INPUT_CONTINUOUS", "JARVIS_VOICE_INPUT_CONTINUOUS"
+        ),
+    )
+    voice_conversation_window_seconds: float = Field(
+        default=25.0,
+        validation_alias=AliasChoices(
+            "VOICE_CONVERSATION_WINDOW_SECONDS",
+            "JARVIS_VOICE_CONVERSATION_WINDOW_SECONDS",
+        ),
+    )
     voice_input_silence_threshold: float = 0.02
     voice_push_to_talk_default: bool = False
     voice_wakeword_enabled: bool = False

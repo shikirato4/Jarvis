@@ -31,6 +31,7 @@ class VoiceCommandParseResult(BaseModel):
     matched: bool = False
     command: VoiceCommand | None = None
     requires_confirmation: bool = False
+    wake_heard: bool = False
     rest: str = ""
     normalized: str = ""
 
@@ -70,12 +71,12 @@ def _levenshtein(a: str, b: str) -> int:
     return previous[-1]
 
 
-def _strip_wake_word(normalized: str) -> tuple[bool, str]:
-    """Remove a tolerant leading 'jarvis'; return (heard, rest)."""
+def _strip_wake_word(normalized: str, wake_word: str = _WAKE_WORD) -> tuple[bool, str]:
+    """Remove a tolerant leading wake word; return (heard, rest)."""
     words = normalized.split(" ")
     if not words:
         return False, ""
-    if _levenshtein(words[0], _WAKE_WORD) <= _WAKE_TOLERANCE:
+    if _levenshtein(words[0], wake_word) <= _WAKE_TOLERANCE:
         return True, " ".join(words[1:])
     return False, normalized
 
@@ -93,32 +94,48 @@ class VoiceCommandParser:
         *,
         commands: tuple[VoiceCommandSpec, ...],
         require_wake_word: bool = True,
+        wake_word: str = _WAKE_WORD,
     ) -> None:
         self.commands = tuple(commands)
         self.require_wake_word = require_wake_word
+        self.wake_word = _normalize(wake_word) or _WAKE_WORD
 
     def parse(self, transcript: str) -> VoiceCommandParseResult:
         normalized = _normalize(transcript)
-        heard_wake, rest = _strip_wake_word(normalized)
+        heard_wake, rest_normalized = _strip_wake_word(normalized, self.wake_word)
+        # Keep the user's original words (accents, casing) after the wake
+        # word so dispatch preserves exactly what was said.
+        if heard_wake:
+            original_words = (transcript or "").strip().split(" ", 1)
+            original_rest = original_words[1] if len(original_words) > 1 else ""
+        else:
+            original_rest = (transcript or "").strip()
         if self.require_wake_word and not heard_wake:
-            return VoiceCommandParseResult(normalized=normalized)
+            return VoiceCommandParseResult(
+                wake_heard=False,
+                rest=original_rest,
+                normalized=normalized,
+            )
         # Order matters: first spec whose phrase appears wins, so put more
         # specific phrases first in the catalog.
         for spec in self.commands:
             for phrase in spec.phrases:
                 phrase_normalized = _normalize(phrase)
                 if phrase_normalized and (
-                    rest == phrase_normalized or rest.startswith(phrase_normalized + " ")
+                    rest_normalized == phrase_normalized
+                    or rest_normalized.startswith(phrase_normalized + " ")
                 ):
                     return VoiceCommandParseResult(
                         matched=True,
                         command=spec.command,
                         requires_confirmation=spec.requires_confirmation,
-                        rest=rest,
+                        wake_heard=heard_wake,
+                        rest=original_rest,
                         normalized=normalized,
                     )
         return VoiceCommandParseResult(
-            rest=rest if heard_wake else normalized,
+            wake_heard=heard_wake,
+            rest=original_rest,
             normalized=normalized,
         )
 
