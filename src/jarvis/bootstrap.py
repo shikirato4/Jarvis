@@ -202,6 +202,8 @@ from jarvis.system_runtime import (
     VolumeTopologyService,
 )
 from jarvis.tools.builtin import install_builtin_tools
+from jarvis.tools.web_tools import install_web_tools
+from jarvis.web_search.fetcher import SourceFetcher
 from jarvis.unity_runtime import (
     HttpUnityBridgeBackend,
     NativeUnityInstallationProvider,
@@ -1680,6 +1682,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
             include_history=include_history,
         ),
     )
+    install_web_tools(tool_registry, SourceFetcher())
     runtime_service = JarvisRuntimeService(
         settings=settings,
         mode_manager=mode_manager,
