@@ -269,14 +269,15 @@ class OpenAICompatibleProvider:
                         "reasoning_content"
                     ):
                         reasoning_chunks += 1
-                        # Expose only a sanitized phase signal; raw reasoning
-                        # tokens never leave the provider boundary.
+                        # Reasoning is exposed live to the local owner for
+                        # display; persistence boundaries still strip it.
                         yield StreamChunk(
+                            reasoning=str(delta.get("reasoning_content")),
                             metadata={
                                 "provider": self.provider_name,
                                 "model": self._configured_model,
                                 "reasoning_active": True,
-                            }
+                            },
                         )
                     if choice.get("finish_reason") is not None:
                         finish_reason = str(choice.get("finish_reason"))

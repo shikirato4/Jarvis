@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     )
     nvidia_timeout_seconds: float = 90.0
     nvidia_healthcheck_timeout_seconds: float = 5.0
+    # None = auto-detect by model family (reasoning, glm-5, deepseek, r1).
+    nvidia_reasoning_budget: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "NVIDIA_REASONING_BUDGET", "JARVIS_NVIDIA_REASONING_BUDGET"
+        ),
+    )
     nvidia_reasoning_min_completion_tokens: int = Field(
         default=512,
         gt=0,

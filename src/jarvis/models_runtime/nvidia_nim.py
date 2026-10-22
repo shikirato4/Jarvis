@@ -87,6 +87,7 @@ class NvidiaNimProvider(OpenAICompatibleProvider):
         self._reasoning_min_completion_tokens = (
             settings.nvidia_reasoning_min_completion_tokens
         )
+        self._reasoning_budget_override = settings.nvidia_reasoning_budget
         super().__init__(
             provider_name=self.provider_name,
             provider_kind=self.provider_kind,
@@ -162,12 +163,13 @@ class NvidiaNimProvider(OpenAICompatibleProvider):
                 function["name"] = self._wire_tool_names.get(
                     function.get("name"), function.get("name")
                 )
-        # Nemotron reasoning tokens share the completion budget with visible
-        # output. Desktop generation profiles must reserve enough room for a
-        # final answer, while explicit low-level ModelRequest budgets remain
-        # untouched for callers that intentionally control the API payload.
+        # Reasoning tokens share the completion budget with visible output
+        # (Nemotron, GLM, DeepSeek-R-family...). Desktop generation profiles
+        # must reserve enough room for a final answer, while explicit
+        # low-level ModelRequest budgets remain untouched for callers that
+        # intentionally control the API payload.
         if (
-            "reasoning" in self.configured_model.casefold()
+            self._reasoning_budget_enabled()
             and request.metadata.get("generation_profile")
             and isinstance(payload.get("max_tokens"), int)
         ):
@@ -176,6 +178,23 @@ class NvidiaNimProvider(OpenAICompatibleProvider):
                 self._reasoning_min_completion_tokens,
             )
         return payload
+
+    _REASONING_BUDGET_MODEL_MARKERS = (
+        "reasoning",
+        "glm-5",
+        "deepseek",
+        "-r1",
+    )
+
+    def _reasoning_budget_enabled(self) -> bool:
+        """Explicit setting wins; otherwise auto-detect reasoning families."""
+        if self._reasoning_budget_override is not None:
+            return self._reasoning_budget_override
+        lowered = self.configured_model.casefold()
+        return any(
+            marker in lowered
+            for marker in self._REASONING_BUDGET_MODEL_MARKERS
+        )
 
     def _restore_tool_names(self, response: ModelResponse) -> ModelResponse:
         reverse = {

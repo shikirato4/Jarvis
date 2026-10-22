@@ -46,6 +46,10 @@ class WindowsControlBackend(Protocol):
 
     def launch_application(self, application: str, *, timeout_seconds: float) -> WindowsObservation: ...
 
+    def lock_workstation(self) -> WindowsObservation: ...
+
+    def power(self, operation: str) -> WindowsObservation: ...
+
 
 _APP_ALIASES = {
     "bloc de notas": "notepad.exe",
@@ -295,6 +299,64 @@ class NativeWindowsControlBackend:
                 "Windows did not verify restore state",
             )
         return self._action_observation("window.restore", candidate, before, after)
+
+    def lock_workstation(self) -> WindowsObservation:
+        """Lock the interactive session (the programmatic Win+L equivalent)."""
+        try:
+            import ctypes
+
+            locked = ctypes.windll.user32.LockWorkStation()  # type: ignore[attr-defined]
+        except (AttributeError, OSError) as exc:
+            raise WindowsRuntimeError(
+                WindowsErrorCode.OPERATION_NOT_SUPPORTED,
+                "workstation lock is only supported on Windows interactive sessions",
+            ) from exc
+        if not locked:
+            raise WindowsRuntimeError(
+                WindowsErrorCode.PERMISSION_DENIED,
+                "Windows refused the workstation lock request",
+            )
+        return WindowsObservation(operation="lock_workstation", verified=True)
+
+    def power(self, operation: str) -> WindowsObservation:
+        """Suspend, shut down or restart the machine via native Windows APIs."""
+        if operation == "suspend":
+            try:
+                import ctypes
+
+                result = ctypes.windll.powrprof.SetSuspendState(0, 1, 0)  # type: ignore[attr-defined]
+            except (AttributeError, OSError) as exc:
+                raise WindowsRuntimeError(
+                    WindowsErrorCode.OPERATION_NOT_SUPPORTED,
+                    "suspend is only supported on Windows",
+                ) from exc
+            if result == 0:
+                raise WindowsRuntimeError(
+                    WindowsErrorCode.PERMISSION_DENIED,
+                    "Windows refused the suspend request",
+                )
+            return WindowsObservation(operation="power_suspend", verified=True)
+        flags = {"shutdown": ["/s"], "restart": ["/r"]}.get(operation)
+        if flags is None:
+            raise WindowsRuntimeError(
+                WindowsErrorCode.OPERATION_NOT_SUPPORTED,
+                f"unsupported power operation: {operation}",
+            )
+        try:
+            subprocess.run(
+                ["shutdown", *flags, "/t", "5"],  # noqa: S607  # shutdown.exe lives in System32; PATH resolution is the Windows contract
+                check=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise WindowsRuntimeError(
+                WindowsErrorCode.LAUNCH_FAILED,
+                "Windows could not schedule the power operation",
+            ) from exc
+        return WindowsObservation(operation=f"power_{operation}", verified=True)
 
     def launch_application(self, application: str, *, timeout_seconds: float = 5.0) -> WindowsObservation:
         normalized = _APP_ALIASES.get(application.strip().casefold())
@@ -679,9 +741,23 @@ class InMemoryWindowsControlBackend:
         ]
         self.suppressed_runtime_ids: set[str] = set()
         self.launched: list[str] = []
+        self.power_operations: list[str] = []
 
     def inspect_environment(self):
         return WindowsObservation(operation="environment.inspect", verified=True, environment=self.environment)
+
+    def lock_workstation(self):
+        self.power_operations.append("lock")
+        return WindowsObservation(operation="lock_workstation", verified=True)
+
+    def power(self, operation: str):
+        if operation not in {"suspend", "shutdown", "restart"}:
+            raise WindowsRuntimeError(
+                WindowsErrorCode.OPERATION_NOT_SUPPORTED,
+                f"unsupported power operation: {operation}",
+            )
+        self.power_operations.append(operation)
+        return WindowsObservation(operation=f"power_{operation}", verified=True)
 
     def list_processes(self, *, limit=30, interactive_only=False):
         targetable = [w for w in self.windows if w.runtime_id not in self.suppressed_runtime_ids]

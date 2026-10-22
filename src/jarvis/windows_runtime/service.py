@@ -36,3 +36,9 @@ class WindowsRuntimeService:
 
     def launch_application(self, application: str, *, timeout_seconds: float):
         return self.backend.launch_application(application, timeout_seconds=timeout_seconds)
+
+    def lock_workstation(self):
+        return self.backend.lock_workstation()
+
+    def power(self, operation: str):
+        return self.backend.power(operation)

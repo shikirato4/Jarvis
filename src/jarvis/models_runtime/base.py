@@ -79,6 +79,9 @@ class ModelResponse(JarvisBaseModel):
 
 class StreamChunk(JarvisBaseModel):
     text: str = ""
+    # Live chain-of-thought for the local owner's display; it is never
+    # persisted, logged, or forwarded to third parties.
+    reasoning: str = ""
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
     done: bool = False
     error: str | None = None

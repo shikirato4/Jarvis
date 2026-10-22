@@ -332,7 +332,9 @@ def test_pre_lora_manifest_and_progressive_schema_disclosure_are_dynamic() -> No
 
     assert "windows: AVAILABLE_VIA_TOOL" in context
     assert any(item["function"]["name"] == "windows.window.foreground" for item in selected)
-    assert len(actions.list_actions()) == 9
+    # 9 core window/process actions + workstation lock + the three gated
+    # power actions (suspend/shutdown/restart).
+    assert len(actions.list_actions()) == 13
 
 
 def test_environment_schema_ranks_first_across_action_and_information_paraphrases() -> None:

@@ -67,6 +67,10 @@ class WindowsModule:
             ("windows.window.maximize", "Maximize/maximizar one resolved Windows application window and verify the resulting state. Safe when already maximized.", WindowsWindowActionPayload, self._maximize, ActionRisk.SAFE, True),
             ("windows.window.restore", "Restore/restaurar one resolved Windows application window to its normal non-minimized and non-maximized size, and verify both state flags are false. Use this action when the target is minimized OR maximized; foreground/visible alone does not mean it is already restored. Safe when already in normal state.", WindowsWindowActionPayload, self._restore, ActionRisk.SAFE, True),
             ("windows.application.launch", "Launch/open (abrir) one application from a fixed safe Windows catalog and verify a new application window; arbitrary paths and shell commands are rejected.", WindowsApplicationLaunchPayload, self._launch, ActionRisk.SENSITIVE, False),
+            ("windows.workstation.lock", "Lock/bloquear the workstation session now (the Win+L equivalent). Safe and immediate: the user logs back in with their credentials.", WindowsEnvironmentPayload, self._lock, ActionRisk.SAFE, True),
+            ("windows.power.suspend", "Suspend/suspender (sleep) the machine. Destructive to the session state and requires explicit operator confirmation first.", WindowsEnvironmentPayload, self._suspend, ActionRisk.SENSITIVE, False),
+            ("windows.power.shutdown", "Shut down/apagar the machine with a 5-second delay. Destructive and requires explicit operator confirmation first.", WindowsEnvironmentPayload, self._shutdown, ActionRisk.SENSITIVE, False),
+            ("windows.power.restart", "Restart/reiniciar the machine with a 5-second delay. Destructive and requires explicit operator confirmation first.", WindowsEnvironmentPayload, self._restart, ActionRisk.SENSITIVE, False),
         )
         for name, description, payload, handler, risk, idempotent in definitions:
             aliases, companions = semantics.get(name, ((), ()))
@@ -97,6 +101,10 @@ class WindowsModule:
             "windows.window.maximize",
             "windows.window.restore",
             "windows.application.launch",
+            "windows.workstation.lock",
+            "windows.power.suspend",
+            "windows.power.shutdown",
+            "windows.power.restart",
         )
         registry.register(
             CapabilityDescriptor(
@@ -158,6 +166,18 @@ class WindowsModule:
 
     def _launch(self, _context: ActionContext, payload: WindowsApplicationLaunchPayload) -> ActionResult:
         return self._result(self._runtime.launch_application, payload.application, timeout_seconds=payload.timeout_seconds)
+
+    def _lock(self, _context: ActionContext, _payload: WindowsEnvironmentPayload) -> ActionResult:
+        return self._result(self._runtime.lock_workstation)
+
+    def _suspend(self, _context: ActionContext, _payload: WindowsEnvironmentPayload) -> ActionResult:
+        return self._result(self._runtime.power, "suspend")
+
+    def _shutdown(self, _context: ActionContext, _payload: WindowsEnvironmentPayload) -> ActionResult:
+        return self._result(self._runtime.power, "shutdown")
+
+    def _restart(self, _context: ActionContext, _payload: WindowsEnvironmentPayload) -> ActionResult:
+        return self._result(self._runtime.power, "restart")
 
     @staticmethod
     def _result(operation, *args, **kwargs) -> ActionResult:
