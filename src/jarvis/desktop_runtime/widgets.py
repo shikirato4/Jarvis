@@ -447,9 +447,11 @@ if QWidget is not object:
             self._header = header
             self._details = details
             self._title = ""
+            self._user_toggled = False
             self.update_thought(thought)
 
             def _toggle(expanded: bool) -> None:
+                self._user_toggled = True
                 details.setVisible(expanded)
                 header.setText(f"⌄ {self._title}" if expanded else f"› {self._title}")
 
@@ -466,12 +468,35 @@ if QWidget is not object:
                 title = f"Thought for {float(elapsed):.1f} s"
             self._title = title
             self._header.setText(f"{'⌄' if self._header.isChecked() else '›'} {title}")
+            live_text = thought.get("live_text")
             summary = thought.get("summary")
-            self._details.setText(
-                str(summary)
-                if isinstance(summary, str) and summary
-                else "Reasoning phase detected; summary unavailable."
+            # The owner's own model reasoning, live and after completion;
+            # the sanitized summary remains the fallback.
+            details_text = (
+                str(live_text)
+                if isinstance(live_text, str) and live_text.strip()
+                else (
+                    str(summary)
+                    if isinstance(summary, str) and summary
+                    else "Reasoning phase detected; summary unavailable."
+                )
             )
+            self._details.setText(details_text)
+            # While the model thinks, the live reasoning is shown by default;
+            # when it finishes, fold away unless the user chose a state.
+            # blockSignals: programmatic changes must not count as user choice.
+            if status == "active" and not self._user_toggled:
+                self._header.blockSignals(True)
+                self._header.setChecked(True)
+                self._header.blockSignals(False)
+                self._details.setVisible(True)
+                self._header.setText(f"⌄ {self._title}")
+            elif status in {"completed", "success", "failed"} and not self._user_toggled:
+                self._header.blockSignals(True)
+                self._header.setChecked(False)
+                self._header.blockSignals(False)
+                self._details.setVisible(False)
+                self._header.setText(f"› {self._title}")
 
         def set_thought(self, thought: dict) -> None:
             self.update_thought(thought)

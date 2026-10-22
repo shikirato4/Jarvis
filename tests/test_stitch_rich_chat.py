@@ -426,7 +426,10 @@ def test_streaming_thought_metadata_survives_reused_widget_and_final_render() ->
     app.processEvents()
     original = timeline.message_widgets()[0]
     assert isinstance(original._thought, ThoughtPanel)  # noqa: SLF001
-    assert original._thought._header.text().startswith("› Thinking…")  # noqa: SLF001
+    # Live thinking auto-expands (⌄) so the owner watches the model work;
+    # it folds back to › once the answer completes.
+    assert original._thought._header.text().startswith("⌄ Thinking…")  # noqa: SLF001
+    assert original._thought._details.isVisible() is True  # noqa: SLF001
 
     timeline.set_messages(
         [

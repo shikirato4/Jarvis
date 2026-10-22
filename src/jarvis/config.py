@@ -404,6 +404,14 @@ class Settings(BaseSettings):
     voice_style_preset: str = "cinematic"
     voice_pause_style: str = "balanced"
     voice_speaking_rate: float = 0.90
+    # Spoken once while a voice-originated request is being processed; it is
+    # fixed courtesy text and never carries model reasoning. Empty disables.
+    voice_thinking_phrase: str = Field(
+        default="Un momento, señor.",
+        validation_alias=AliasChoices(
+            "VOICE_THINKING_PHRASE", "JARVIS_VOICE_THINKING_PHRASE"
+        ),
+    )
     voice_formality_level: int = 5
     voice_tts_rate: int = 168
     voice_cleanup_enabled: bool = True
