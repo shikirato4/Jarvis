@@ -264,6 +264,7 @@ from jarvis.voice_runtime.backends import (
     WavFileAudioInputBackend,
     WinsoundAudioOutputBackend,
 )
+from jarvis.voice_runtime.backend_elevenlabs import ElevenLabsTTSProvider
 from jarvis.voice_runtime.backend_openvoice import OpenVoiceProvider
 from jarvis.voice_runtime.backend_rvc import RVCProvider
 from jarvis.voice_runtime.coqui_tts import CoquiXTTSProvider
@@ -786,6 +787,8 @@ def _build_voice_runtime(
         or "pyttsx3" in settings.voice_tts_provider_fallback_order
     ):
         tts_registry.register(Pyttsx3TTSProvider())
+    if settings.elevenlabs_api_key is not None and settings.elevenlabs_voice_id.strip():
+        tts_registry.register(ElevenLabsTTSProvider(settings))
     stt_service = STTService(
         settings,
         mode_manager,

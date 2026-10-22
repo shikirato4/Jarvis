@@ -46,6 +46,29 @@ def test_prepare_rich_markdown_renders_inline_math_but_preserves_code() -> None:
     assert "`$not_math$`" in rendered.markdown
 
 
+def test_code_control_anchors_on_its_code_block_not_the_message_top() -> None:
+    app = _app()
+    content = (
+        "Párrafo uno arriba del bloque.\n\n"
+        "Párrafo dos con suficiente texto para empujar el código hacia abajo "
+        "del documento renderizado y dejar clara la posición esperada.\n\n"
+        "```python\n"
+        "def saludo():\n"
+        "    print('hola')\n"
+        "```\n\n"
+        "Párrafo final debajo del código."
+    )
+    browser = RichMessageBrowser(content)
+    browser.set_content_width(420)
+    app.processEvents()
+
+    control = browser.findChildren(CopyableCodeControl)[0]
+    # The copy control must sit on its rendered code block — not glued to
+    # the message top over the prose (the old multi-line find() fallback).
+    assert control.y() > 24, f"control stuck at message top: y={control.y()}"
+    browser.close()
+
+
 def test_fenced_code_has_language_copy_control_and_exact_clipboard_source() -> None:
     app = _app()
     source = "def saludo():\n\tprint(\"Hola Ω\")\n\n"

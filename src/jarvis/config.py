@@ -389,6 +389,25 @@ class Settings(BaseSettings):
     voice_coqui_speaker_wav: Path | None = None
     voice_coqui_speaker_name: str | None = None
     voice_coqui_tos_agreed: bool = False
+    # Optional cloud TTS; the provider registers only when both are set.
+    elevenlabs_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ELEVENLABS_API_KEY", "JARVIS_ELEVENLABS_API_KEY", "elevenlabs_api_key"
+        ),
+    )
+    elevenlabs_voice_id: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "ELEVENLABS_VOICE_ID", "JARVIS_ELEVENLABS_VOICE_ID", "elevenlabs_voice_id"
+        ),
+    )
+    elevenlabs_model: str = Field(
+        default="eleven_multilingual_v2",
+        validation_alias=AliasChoices(
+            "ELEVENLABS_MODEL", "JARVIS_ELEVENLABS_MODEL", "elevenlabs_model"
+        ),
+    )
     skills_enabled: bool = True
     skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True

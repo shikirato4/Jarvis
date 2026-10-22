@@ -209,8 +209,21 @@ if QTextBrowser is not object:
             layout = self.document().documentLayout()
             search_cursor = QTextCursor(self.document())
             for control, block in zip(self._code_controls, self._prepared.code_blocks):
-                cursor = self.document().find(block.content, search_cursor)
-                if cursor.isNull():
+                # QTextDocument.find() cannot match multi-line content (the
+                # document joins lines with paragraph separators), which used
+                # to strand every control at the message top. Anchor on the
+                # first non-empty code line instead — single-line finds are
+                # reliable — and advance the cursor per block in order.
+                first_line = next(
+                    (line for line in block.content.splitlines() if line.strip()),
+                    "",
+                )
+                cursor = (
+                    self.document().find(first_line, search_cursor)
+                    if first_line
+                    else QTextCursor(self.document())
+                )
+                if not first_line or cursor.isNull():
                     y = 4
                 else:
                     y = int(layout.blockBoundingRect(cursor.block()).top()) + 2
