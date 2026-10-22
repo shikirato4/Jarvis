@@ -408,6 +408,19 @@ class Settings(BaseSettings):
             "ELEVENLABS_MODEL", "JARVIS_ELEVENLABS_MODEL", "elevenlabs_model"
         ),
     )
+    # Free neural cloud TTS via Microsoft Edge's Read-Aloud endpoint.
+    voice_edge_tts_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "VOICE_EDGE_TTS_ENABLED", "JARVIS_VOICE_EDGE_TTS_ENABLED"
+        ),
+    )
+    voice_edge_tts_voice: str = Field(
+        default="es-MX-JorgeNeural",
+        validation_alias=AliasChoices(
+            "VOICE_EDGE_TTS_VOICE", "JARVIS_VOICE_EDGE_TTS_VOICE"
+        ),
+    )
     skills_enabled: bool = True
     skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True

@@ -264,6 +264,7 @@ from jarvis.voice_runtime.backends import (
     WavFileAudioInputBackend,
     WinsoundAudioOutputBackend,
 )
+from jarvis.voice_runtime.backend_edge_tts import EdgeTTSProvider
 from jarvis.voice_runtime.backend_elevenlabs import ElevenLabsTTSProvider
 from jarvis.voice_runtime.backend_openvoice import OpenVoiceProvider
 from jarvis.voice_runtime.backend_rvc import RVCProvider
@@ -789,6 +790,8 @@ def _build_voice_runtime(
         tts_registry.register(Pyttsx3TTSProvider())
     if settings.elevenlabs_api_key is not None and settings.elevenlabs_voice_id.strip():
         tts_registry.register(ElevenLabsTTSProvider(settings))
+    if settings.voice_edge_tts_enabled:
+        tts_registry.register(EdgeTTSProvider(settings))
     stt_service = STTService(
         settings,
         mode_manager,
