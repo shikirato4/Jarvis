@@ -421,6 +421,28 @@ class Settings(BaseSettings):
             "VOICE_EDGE_TTS_VOICE", "JARVIS_VOICE_EDGE_TTS_VOICE"
         ),
     )
+    # Real embedded browser (Playwright/Chromium). Headed by default so
+    # the user SEES JARVIS operate; disable to remove all browser actions.
+    browser_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("BROWSER_ENABLED", "JARVIS_BROWSER_ENABLED"),
+    )
+    browser_headless: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BROWSER_HEADLESS", "JARVIS_BROWSER_HEADLESS"),
+    )
+    browser_read_max_chars: int = Field(
+        default=6000,
+        validation_alias=AliasChoices(
+            "BROWSER_READ_MAX_CHARS", "JARVIS_BROWSER_READ_MAX_CHARS"
+        ),
+    )
+    browser_timeout_seconds: float = Field(
+        default=20.0,
+        validation_alias=AliasChoices(
+            "BROWSER_TIMEOUT_SECONDS", "JARVIS_BROWSER_TIMEOUT_SECONDS"
+        ),
+    )
     skills_enabled: bool = True
     skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True

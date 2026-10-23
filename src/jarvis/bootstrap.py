@@ -142,6 +142,8 @@ from jarvis.modules.voice_module import VoiceModule
 from jarvis.modules.writing_module import WritingModule
 from jarvis.modules.writer_module import WriterModule
 from jarvis.modules.desktop_agent_module import DesktopAgentModule
+from jarvis.modules.browser_module import BrowserModule
+from jarvis.browser_runtime.service import BrowserRuntimeService
 from jarvis.modules.windows_module import WindowsModule
 from jarvis.terminal_runtime import TerminalRuntime
 from jarvis.writing_runtime import (
@@ -335,6 +337,7 @@ class JarvisApplication:
     ops_runtime_service: OpsRuntimeService
     lifecycle_supervisor: RuntimeLifecycleSupervisor
     logger: logging.Logger
+    browser_runtime_service: BrowserRuntimeService | None = None
     started: bool = False
 
     def _startup_service_details(
@@ -1633,6 +1636,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     module_registry.register(WritingModule(writing_runtime_service))
     module_registry.register(DesktopAgentModule(lambda: desktop_agent_runtime_service))  # type: ignore[name-defined]
     module_registry.register(WindowsModule(windows_runtime_service))
+    browser_runtime_service = (
+        BrowserRuntimeService(settings) if settings.browser_enabled else None
+    )
+    if browser_runtime_service is not None:
+        module_registry.register(BrowserModule(browser_runtime_service))
     module_registry.register(
         InterfaceModule(ui_automation_service, semantic_memory_service)
     )
@@ -1905,6 +1913,7 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         embedding_service=embedding_service,
         ui_automation_service=ui_automation_service,
         windows_runtime_service=windows_runtime_service,
+        browser_runtime_service=browser_runtime_service,
         vision_runtime_service=vision_runtime_service,
         voice_runtime_service=voice_runtime_service,
         system_runtime_service=system_runtime_service,
