@@ -148,3 +148,91 @@ def test_continuous_mode_does_not_restart_when_disabled() -> None:
 
     time.sleep(0.3)
     assert restarts == []
+
+
+class _HintVoiceRuntime(_FakeVoiceRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.spoken: list[tuple[str, bool]] = []
+
+    def speak(self, text, correlation_id=None, literal=False):
+        self.spoken.append((text, literal))
+        return SimpleNamespace(success=True)
+
+
+def _hint_controller(settings: Settings, handler_calls: list) -> tuple:
+    runtime = _HintVoiceRuntime()
+    controller = DesktopVoiceInputController(
+        runtime,
+        settings,
+        lambda text, *, correlation_id=None, metadata=None: handler_calls.append(
+            (text, correlation_id)
+        ),
+    )
+    controller._active_correlation_id = "corr-1"  # noqa: SLF001 - simulate live session
+    return controller, runtime
+
+
+def test_ignored_substantive_transcript_gets_audible_hint() -> None:
+    calls: list = []
+    controller, runtime = _hint_controller(_settings(), calls)
+
+    controller._handle_transcript("una conversación ajena en la casa", "corr-1", {})  # noqa: SLF001
+
+    time.sleep(0.2)
+    assert calls == []
+    assert len(runtime.spoken) == 1
+    phrase, literal = runtime.spoken[0]
+    assert "Jarvis" in phrase
+    assert literal is True
+
+
+def test_ignored_ambient_noise_stays_silent() -> None:
+    calls: list = []
+    controller, runtime = _hint_controller(_settings(), calls)
+
+    controller._handle_transcript("eh sí", "corr-1", {})  # noqa: SLF001
+
+    time.sleep(0.2)
+    assert calls == []
+    assert runtime.spoken == []
+
+
+def test_wake_hint_respects_cooldown() -> None:
+    calls: list = []
+    controller, runtime = _hint_controller(_settings(), calls)
+
+    controller._handle_transcript("una conversación ajena en la casa", "corr-1", {})  # noqa: SLF001
+    time.sleep(0.05)
+    controller._maybe_auto_restart()  # re-armar la escucha activa
+    controller._active_correlation_id = "corr-2"  # noqa: SLF001 - nueva sesion
+    controller._handle_transcript("otra conversación ajena en la casa", "corr-2", {})  # noqa: SLF001
+
+    time.sleep(0.2)
+    assert len(runtime.spoken) == 1
+
+
+def test_wake_hint_can_be_disabled() -> None:
+    calls: list = []
+    controller, runtime = _hint_controller(
+        _settings(voice_wake_hint_enabled=False), calls
+    )
+
+    controller._handle_transcript("una conversación ajena en la casa", "corr-1", {})  # noqa: SLF001
+
+    time.sleep(0.2)
+    assert runtime.spoken == []
+
+
+def test_in_window_transcript_dispatches_without_hint() -> None:
+    calls: list = []
+    controller, runtime = _hint_controller(_settings(), calls)
+    controller._last_dispatch_at = time.monotonic() - 2.0  # noqa: SLF001 - recent interaction
+
+    controller._handle_transcript("y en Tokio?", "corr-1", {})  # noqa: SLF001
+
+    deadline = time.monotonic() + 2.0
+    while not calls and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert calls == [("y en Tokio?", "corr-1")]
+    assert runtime.spoken == []

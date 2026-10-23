@@ -10,6 +10,7 @@ from jarvis.config import Settings
 from jarvis.core.errors import JarvisError
 from jarvis.voice_runtime.backend_elevenlabs import _pcm_to_wav
 from jarvis.voice_runtime.base import SynthesisRequest, SynthesisResult
+from jarvis.voice_runtime.buffers import wav_duration_seconds
 
 
 def _decode_mp3_to_pcm(mp3: bytes) -> tuple[bytes, int]:
@@ -101,6 +102,7 @@ class EdgeTTSProvider:
             played=False,
             audio_bytes=wav_bytes,
             audio_format="wav",
+            duration_seconds=wav_duration_seconds(wav_bytes),
             text_payload=request.text,
             latency_ms=latency_ms,
         )

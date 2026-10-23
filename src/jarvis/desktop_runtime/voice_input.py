@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from threading import Lock, Thread
 from uuid import uuid4
@@ -26,6 +27,7 @@ class DesktopVoiceInputController:
         self._active_session_id: str | None = None
         self._processing_thread: Thread | None = None
         self._last_dispatch_at: float | None = None
+        self._last_wake_hint_at: float | None = None
         self._explicit_session: bool = False
         self._wake_parser = (
             VoiceCommandParser(
@@ -207,6 +209,7 @@ class DesktopVoiceInputController:
                     "desktop_voice_wake_gate_ignored",
                     extra={"correlation_id": correlation_id},
                 )
+                self._maybe_speak_wake_hint(transcript)
                 self._reset_after_ignore()
                 return
         with self._lock:
@@ -231,6 +234,39 @@ class DesktopVoiceInputController:
             self._active_session_id = None
             self._state = "IDLE"
         self._maybe_auto_restart()
+
+    def _maybe_speak_wake_hint(self, transcript: str) -> None:
+        """Answer ignored-but-substantive speech so the user is not left cold.
+
+        Silence after "le hablé y no respondió" felt like a broken assistant:
+        if the ignored transcript carries 3+ real words, say the wake
+        protocol out loud (respecting a cooldown so chatty ambience does
+        not loop the hint).
+        """
+        if not self._settings.voice_wake_hint_enabled:
+            return
+        words = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", transcript)
+        if len(words) < 3:
+            return
+        now = time.monotonic()
+        cooldown = self._settings.voice_wake_hint_cooldown_seconds
+        with self._lock:
+            if (
+                self._last_wake_hint_at is not None
+                and (now - self._last_wake_hint_at) <= cooldown
+            ):
+                return
+            self._last_wake_hint_at = now
+        speak = getattr(self._voice_runtime, "speak", None)
+        if speak is None:
+            return
+        try:
+            speak(
+                "¿Me llamó, señor? Para ordenarme algo, comience con Jarvis.",
+                literal=True,
+            )
+        except Exception:  # noqa: BLE001 - hint is best-effort, never break listening
+            self._logger.exception("desktop_voice_wake_hint_failed")
 
     def _maybe_auto_restart(self) -> None:
         """Re-arm listening after an interaction when in continuous mode."""

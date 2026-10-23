@@ -467,6 +467,21 @@ class Settings(BaseSettings):
         default="jarvis",
         validation_alias=AliasChoices("VOICE_WAKE_WORD", "JARVIS_VOICE_WAKE_WORD"),
     )
+    # When the wake gate ignores substantive speech, say the protocol out
+    # loud instead of going silent ("a veces no responde" reports).
+    voice_wake_hint_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "VOICE_WAKE_HINT_ENABLED", "JARVIS_VOICE_WAKE_HINT_ENABLED"
+        ),
+    )
+    voice_wake_hint_cooldown_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices(
+            "VOICE_WAKE_HINT_COOLDOWN_SECONDS",
+            "JARVIS_VOICE_WAKE_HINT_COOLDOWN_SECONDS",
+        ),
+    )
     voice_input_continuous: bool = Field(
         default=True,
         validation_alias=AliasChoices(

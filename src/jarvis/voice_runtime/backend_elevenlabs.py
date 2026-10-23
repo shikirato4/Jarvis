@@ -10,6 +10,7 @@ import httpx
 from jarvis.config import Settings
 from jarvis.core.errors import JarvisError
 from jarvis.voice_runtime.base import SynthesisRequest, SynthesisResult
+from jarvis.voice_runtime.buffers import wav_duration_seconds
 
 
 def _pcm_to_wav(pcm: bytes, *, sample_rate: int, channels: int = 1, sample_width: int = 2) -> bytes:
@@ -115,6 +116,7 @@ class ElevenLabsTTSProvider:
             played=False,
             audio_bytes=wav_bytes,
             audio_format="wav",
+            duration_seconds=wav_duration_seconds(wav_bytes),
             text_payload=request.text,
             latency_ms=latency_ms,
         )
