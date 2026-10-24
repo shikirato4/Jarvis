@@ -70,6 +70,13 @@ class BrowserRuntimeService:
             self._backend = PlaywrightBrowserBackend(self._settings)
         return self._backend
 
+    def _drain_downloads(self) -> list[dict[str, object]]:
+        """Pick up files downloaded by recent clicks (Playwright backend)."""
+        drain = getattr(self.backend, "captured_downloads", None)
+        if drain is None:
+            return []
+        return list(drain())
+
     def _require_page(self) -> BrowserControlBackend:
         if not self._opened:
             raise JarvisError(
@@ -96,12 +103,14 @@ class BrowserRuntimeService:
             self._opened = True
         snapshot.text = self._truncate(snapshot.text)
         logger.info("browser_open", extra={"url": target, "title": snapshot.title})
+        downloads = self._drain_downloads()
         return BrowserReceipt(
             action="open",
             success=True,
             url=snapshot.url,
             snapshot=snapshot,
             detail=f"Pagina abierta: {snapshot.title}",
+            downloads=downloads or None,
         )
 
     def read(self) -> BrowserReceipt:
@@ -117,12 +126,14 @@ class BrowserRuntimeService:
         snapshot = backend.click(int(ref))
         snapshot.text = self._truncate(snapshot.text)
         logger.info("browser_click", extra={"ref": int(ref), "url": snapshot.url})
+        downloads = self._drain_downloads()
         return BrowserReceipt(
             action="click",
             success=True,
             url=snapshot.url,
             snapshot=snapshot,
             detail=f"Elemento [{ref}] activado",
+            downloads=downloads or None,
         )
 
     def type_text(self, ref: int, text: str) -> BrowserReceipt:
@@ -136,6 +147,71 @@ class BrowserRuntimeService:
             url=snapshot.url,
             snapshot=snapshot,
             detail=f"Texto escrito en elemento [{ref}]",
+        )
+
+    def back(self) -> BrowserReceipt:
+        backend = self._require_page()
+        snapshot = backend.back()
+        snapshot.text = self._truncate(snapshot.text)
+        logger.info("browser_back", extra={"url": snapshot.url})
+        return BrowserReceipt(
+            action="back",
+            success=True,
+            url=snapshot.url,
+            snapshot=snapshot,
+            detail=f"Regresado a {snapshot.url}",
+        )
+
+    def find(self, text: str) -> BrowserReceipt:
+        backend = self._require_page()
+        matches = backend.find(str(text))
+        current = backend.read()
+        current.elements = matches
+        current.text = self._truncate(current.text)
+        logger.info("browser_find", extra={"needle": str(text), "matches": len(matches)})
+        return BrowserReceipt(
+            action="find",
+            success=True,
+            url=current.url,
+            snapshot=current,
+            detail=f"{len(matches)} elementos coinciden con {text!r}",
+        )
+
+    def tabs(self) -> BrowserReceipt:
+        backend = self._require_page()
+        listing = backend.tabs()
+        return BrowserReceipt(
+            action="tabs",
+            success=True,
+            url=backend.current_url(),
+            detail=f"{len(listing)} pestanas abiertas",
+        )
+
+    def switch_tab(self, index: int) -> BrowserReceipt:
+        backend = self._require_page()
+        snapshot = backend.switch_tab(int(index))
+        snapshot.text = self._truncate(snapshot.text)
+        return BrowserReceipt(
+            action="switch_tab",
+            success=True,
+            url=snapshot.url,
+            snapshot=snapshot,
+            detail=f"Pestana [{index}] activa: {snapshot.url[:60]}",
+        )
+
+    def new_tab(self, url: str) -> BrowserReceipt:
+        target = validate_url(url)
+        backend = self._require_page()
+        snapshot = backend.new_tab(
+            target, timeout_seconds=self._settings.browser_timeout_seconds
+        )
+        snapshot.text = self._truncate(snapshot.text)
+        return BrowserReceipt(
+            action="new_tab",
+            success=True,
+            url=snapshot.url,
+            snapshot=snapshot,
+            detail=f"Nueva pestana: {snapshot.title or snapshot.url[:60]}",
         )
 
     def press_key(self, key: str) -> BrowserReceipt:

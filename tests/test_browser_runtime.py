@@ -260,3 +260,86 @@ def test_web_operate_skill_loads_in_catalog(tmp_path: Path) -> None:
     )
     skills = {skill.name for skill in catalog.skills}
     assert "web-operate" in skills
+
+
+# ------------------------------------------------ nivel 3: back/find/tabs/downloads
+
+
+def test_in_memory_backend_back_returns_previous_page() -> None:
+    backend = InMemoryBrowserBackend()
+    backend.open("https://a.com")
+    backend.open("https://b.com")
+
+    snapshot = backend.back()
+
+    assert snapshot.url == "https://a.com"
+
+
+def test_service_back_rejects_without_history(tmp_path: Path) -> None:
+    service, _ = _service(tmp_path)
+    service.open("https://example.com")
+
+    # una sola pagina: back se queda en la misma (comportamiento benigno)
+    receipt = service.back()
+    assert receipt.success is True
+
+
+def test_in_memory_backend_find_filters_elements_by_text() -> None:
+    backend = InMemoryBrowserBackend()
+    backend.open("https://example.com")
+
+    matches = backend.find("busca")
+
+    assert matches, "debe encontrar el textbox 'Busqueda' con 'busca'"
+    assert all("busca" in (m.name + m.role).lower() for m in matches)
+
+
+def test_service_find_returns_matching_refs(tmp_path: Path) -> None:
+    service = _service(tmp_path)[0]
+    service.open("https://example.com")
+
+    receipt = service.find("busqueda")
+
+    assert receipt.success is True
+    assert receipt.snapshot is not None
+    assert any("[1]" in element.describe() for element in receipt.snapshot.elements)
+    assert all(
+        "busqueda" in f"{element.name} {element.role}".casefold()
+        for element in receipt.snapshot.elements
+    )
+
+
+def test_in_memory_backend_tabs_lifecycle() -> None:
+    backend = InMemoryBrowserBackend()
+    backend.open("https://a.com")
+    backend.new_tab("https://b.com")
+
+    tabs = backend.tabs()
+
+    assert len(tabs) == 2
+    assert tabs[0]["url"] == "https://a.com"
+    assert tabs[1]["url"] == "https://b.com"
+
+    snapshot = backend.switch_tab(0)
+    assert snapshot.url == "https://a.com"
+
+
+def test_in_memory_backend_records_downloads_dir(tmp_path: Path) -> None:
+    backend = InMemoryBrowserBackend()
+    backend.open("https://example.com")
+
+    downloads = backend.downloads_dir()
+
+    assert str(downloads).endswith("browser_downloads")
+
+
+def test_bootstrap_registers_nivel3_actions(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    try:
+        registry = app.action_registry
+        for name in ("browser.back", "browser.find", "browser.tabs", "browser.switch_tab"):
+            definition = registry.get(name)
+            assert definition is not None, f"missing {name}"
+            assert definition.risk.value == "safe", f"{name} debe ser SAFE"
+    finally:
+        app.stop()

@@ -115,6 +115,41 @@ class BrowserModule:
                 self._screenshot,
                 ActionRisk.SAFE,
             ),
+            (
+                "browser.back",
+                "Go back (regresar/atras) one step in the active tab's history, then return the page state. Use it when a click led somewhere wrong before continuing.",
+                BrowserReadPayload,
+                self._back,
+                ActionRisk.SAFE,
+            ),
+            (
+                "browser.find",
+                "Filter (filtrar/buscar) the interactive elements of the open page by a text fragment (name, role or value), returning only matching [ref] entries. Use it to locate a precise element before browser.click/browser.type instead of scanning the whole list.",
+                BrowserFindPayload,
+                self._find,
+                ActionRisk.SAFE,
+            ),
+            (
+                "browser.tabs",
+                "List (listar) the open browser tabs with their indexes and URLs, marking the active one.",
+                BrowserReadPayload,
+                self._tabs,
+                ActionRisk.SAFE,
+            ),
+            (
+                "browser.switch_tab",
+                "Switch (cambiar) to the browser tab at the given index and return its page state.",
+                BrowserTabPayload,
+                self._switch_tab,
+                ActionRisk.SAFE,
+            ),
+            (
+                "browser.new_tab",
+                "Open (abrir) one http(s) URL in a new tab and make it the active one, returning its snapshot. Non-http schemes are rejected.",
+                BrowserNewTabPayload,
+                self._new_tab,
+                ActionRisk.SAFE,
+            ),
         )
         for name, description, payload, handler, risk in definitions:
             registry.register(
@@ -141,6 +176,11 @@ class BrowserModule:
             "browser.type",
             "browser.press_key",
             "browser.screenshot",
+            "browser.back",
+            "browser.find",
+            "browser.tabs",
+            "browser.switch_tab",
+            "browser.new_tab",
         )
         registry.register(
             CapabilityDescriptor(
@@ -174,6 +214,8 @@ class BrowserModule:
         }
         if receipt.screenshot_path:
             data["screenshot_path"] = receipt.screenshot_path
+        if receipt.downloads:
+            data["downloads"] = receipt.downloads
         if receipt.snapshot is not None:
             data["title"] = receipt.snapshot.title
             data["text"] = receipt.snapshot.text
@@ -216,3 +258,38 @@ class BrowserModule:
     ) -> ActionResult:
         path = Path(payload.path) if payload.path else None
         return self._run(self._service.screenshot, path=path)
+
+    def _back(self, _context: ActionContext, _payload: BrowserReadPayload) -> ActionResult:
+        return self._run(self._service.back)
+
+    def _find(self, _context: ActionContext, payload: BrowserFindPayload) -> ActionResult:
+        return self._run(self._service.find, text=payload.text)
+
+    def _tabs(self, _context: ActionContext, _payload: BrowserReadPayload) -> ActionResult:
+        return self._run(self._service.tabs)
+
+    def _switch_tab(
+        self, _context: ActionContext, payload: BrowserTabPayload
+    ) -> ActionResult:
+        return self._run(self._service.switch_tab, index=payload.index)
+
+    def _new_tab(
+        self, _context: ActionContext, payload: BrowserNewTabPayload
+    ) -> ActionResult:
+        return self._run(self._service.new_tab, url=payload.url)
+
+
+class BrowserFindPayload(BaseModel):
+    text: str = Field(
+        min_length=1,
+        max_length=200,
+        description="Text fragment to search in the interactive elements list.",
+    )
+
+
+class BrowserTabPayload(BaseModel):
+    index: int = Field(ge=0, le=50)
+
+
+class BrowserNewTabPayload(BaseModel):
+    url: str = Field(min_length=3, max_length=2048)

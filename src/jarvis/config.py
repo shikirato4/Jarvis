@@ -443,6 +443,14 @@ class Settings(BaseSettings):
             "BROWSER_TIMEOUT_SECONDS", "JARVIS_BROWSER_TIMEOUT_SECONDS"
         ),
     )
+    # Persistent profile: logins/cookies/localStorage survive restarts so
+    # the user logs into Google/YouTube ONCE.
+    browser_profile_persist: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "BROWSER_PROFILE_PERSIST", "JARVIS_BROWSER_PROFILE_PERSIST"
+        ),
+    )
     skills_enabled: bool = True
     skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True

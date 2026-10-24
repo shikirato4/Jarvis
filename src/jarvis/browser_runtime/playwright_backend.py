@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -65,7 +66,15 @@ class PlaywrightBrowserBackend:
         self._settings = settings
         self._playwright: Any = None
         self._browser: Any = None
+        self._context: Any = None
         self._page: Any = None
+        self._captured_downloads: list[dict[str, object]] = []
+
+    def _profile_dir(self) -> Path:
+        return Path(self._settings.data_dir) / "browser_profile"
+
+    def downloads_dir(self) -> Path:
+        return Path(self._settings.data_dir) / "browser_downloads"
 
     def _require(self) -> Any:
         if self._page is None:
@@ -91,21 +100,40 @@ class PlaywrightBrowserBackend:
             ) from exc
         try:
             self._playwright = sync_playwright().start()
-            self._browser = self._playwright.chromium.launch(
-                headless=bool(self._settings.browser_headless),
-                args=["--start-maximized"],
-            )
-            context = self._browser.new_context(
-                viewport=None,
-                locale="es-MX",
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
-                ),
-            )
-            self._page = context.new_page()
+            if getattr(self._settings, "browser_profile_persist", True):
+                # Persistent profile: logins/cookies/localStorage survive
+                # restarts — the user logs into Google ONCE.
+                self._context = self._playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(self._profile_dir()),
+                    headless=bool(self._settings.browser_headless),
+                    accept_downloads=True,
+                    args=["--start-maximized"],
+                    locale="es-MX",
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                )
+                self._browser = self._context.browser
+            else:
+                self._browser = self._playwright.chromium.launch(
+                    headless=bool(self._settings.browser_headless),
+                    args=["--start-maximized"],
+                )
+                self._context = self._browser.new_context(
+                    viewport=None,
+                    locale="es-MX",
+                    accept_downloads=True,
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                )
+            self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
             self._page.set_default_timeout(self._settings.browser_timeout_seconds * 1000)
+            self._attach_download_handler()
         except JarvisError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -115,6 +143,30 @@ class PlaywrightBrowserBackend:
                 code="browser_start_failed",
                 recoverable=True,
             ) from exc
+
+    def _attach_download_handler(self) -> None:
+        downloads = Path(self.downloads_dir())
+        downloads.mkdir(parents=True, exist_ok=True)
+        captured = self._captured_downloads
+
+        def _on_download(download) -> None:
+            try:
+                suggested = download.suggested_filename or f"descarga-{time.time_ns()}.bin"
+                target = downloads / suggested
+                download.save_as(str(target))
+                captured.append(
+                    {"filename": suggested, "path": str(target)}
+                )
+            except Exception:  # noqa: BLE001 - download capture is best-effort
+                logger.exception("browser_download_capture_failed")
+
+        self._context.on("download", _on_download)
+
+    def captured_downloads(self) -> list[dict[str, object]]:
+        """Downloads captured since the last call (clicks of download links)."""
+        pending = list(self._captured_downloads)
+        self._captured_downloads.clear()
+        return pending
 
     def stop(self) -> None:
         for closer in (
@@ -165,6 +217,11 @@ class PlaywrightBrowserBackend:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
         except Exception as exc:  # noqa: BLE001
+            if "Download is starting" in str(exc):
+                # The URL is an attachment: the download handler captures
+                # it; the page stays where it was. Not an error.
+                self._settle_after_action(page)
+                return self._snapshot(page)
             raise JarvisError(
                 f"No se pudo abrir {url}: {exc}",
                 component="browser_runtime",
@@ -266,6 +323,71 @@ class PlaywrightBrowserBackend:
                 recoverable=True,
             ) from exc
         self._settle_after_action(page)
+        return self._snapshot(page)
+
+    def back(self) -> BrowserSnapshot:
+        page = self._require()
+        try:
+            page.go_back(wait_until="domcontentloaded", timeout=10_000)
+        except Exception as exc:  # noqa: BLE001
+            raise JarvisError(
+                f"Regresar fallo: {exc}",
+                component="browser_runtime",
+                code="browser_back_failed",
+                recoverable=True,
+            ) from exc
+        return self._snapshot(page)
+
+    def find(self, text: str) -> list[BrowserElement]:
+        needle = str(text).strip().casefold()
+        return [
+            element
+            for element in self.read().elements
+            if needle in f"{element.name} {element.role} {element.value}".casefold()
+        ]
+
+    def tabs(self) -> list[dict[str, object]]:
+        self._require()
+        return [
+            {"index": index, "url": tab.url, "active": tab is self._page}
+            for index, tab in enumerate(self._context.pages)
+        ]
+
+    def new_tab(self, url: str, *, timeout_seconds: float = 20.0) -> BrowserSnapshot:
+        self._require()
+        page = self._context.new_page()
+        page.set_default_timeout(self._settings.browser_timeout_seconds * 1000)
+        self._page = page
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
+        except Exception as exc:  # noqa: BLE001
+            if "Download is starting" in str(exc):
+                self._settle_after_action(page)
+                return self._snapshot(page)
+            raise JarvisError(
+                f"No se pudo abrir {url} en la nueva pestana: {exc}",
+                component="browser_runtime",
+                code="browser_navigation_failed",
+                recoverable=True,
+            ) from exc
+        return self._snapshot(page)
+
+    def switch_tab(self, index: int) -> BrowserSnapshot:
+        self._require()
+        pages = self._context.pages
+        if not 0 <= index < len(pages):
+            raise JarvisError(
+                f"Pestana {index} no existe (0..{len(pages) - 1})",
+                component="browser_runtime",
+                code="browser_bad_tab",
+                recoverable=True,
+            )
+        page = pages[index]
+        try:
+            page.bring_to_front()
+        except Exception:  # noqa: BLE001 - front-raise is cosmetic
+            pass
+        self._page = page
         return self._snapshot(page)
 
     def screenshot(self, path: Path) -> Path:
