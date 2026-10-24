@@ -457,6 +457,20 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VRAM_SWAP_ENABLED", "JARVIS_VRAM_SWAP_ENABLED"),
     )
+    # Gemini (AI Studio, free tier, no card): image generation in the
+    # cloud — zero VRAM — and later the Live API for realtime voice.
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "GEMINI_API_KEY", "JARVIS_GEMINI_API_KEY", "gemini_api_key"
+        ),
+    )
+    gemini_image_model: str = Field(
+        default="gemini-2.5-flash-image",
+        validation_alias=AliasChoices(
+            "GEMINI_IMAGE_MODEL", "JARVIS_GEMINI_IMAGE_MODEL"
+        ),
+    )
     skills_enabled: bool = True
     skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True

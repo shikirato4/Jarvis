@@ -1756,6 +1756,10 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
             local_manager=local_model_runtime_manager,
             image_service=image_runtime_service,
         )
+    if settings.gemini_api_key is not None:
+        from jarvis.image_runtime.gemini_backend import GeminiImageProvider
+
+        runtime_service._gemini_image_provider = GeminiImageProvider(settings)  # noqa: SLF001
     retention_manager = RetentionManager(
         state_manager=state_manager,
         event_bus=event_bus,
