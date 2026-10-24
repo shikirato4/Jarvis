@@ -348,20 +348,38 @@ class ProviderCoordinator:
         local_request = provider is self._local
         if local_request:
             self._begin_local_request()
+        cloud_retries_left = 1
         try:
-            for chunk in provider.stream_infer(
-                request,
-                model_name=provider.configured_model,
-                temperature=request.temperature,
-                timeout_seconds=request.timeout_seconds,
-                cancel_check=cancel_check,
-            ):
-                emitted_content = emitted_content or bool(chunk.text)
-                chunk.metadata.update(self._selection_metadata(selection, context))
-                yield chunk
-            if provider is self._nvidia:
-                self._cloud_circuit.record_success()
-            return
+            while True:
+                try:
+                    for chunk in provider.stream_infer(
+                        request,
+                        model_name=provider.configured_model,
+                        temperature=request.temperature,
+                        timeout_seconds=request.timeout_seconds,
+                        cancel_check=cancel_check,
+                    ):
+                        emitted_content = emitted_content or bool(chunk.text)
+                        chunk.metadata.update(self._selection_metadata(selection, context))
+                        yield chunk
+                    if provider is self._nvidia:
+                        self._cloud_circuit.record_success()
+                    return
+                except OpenAICompatibleError as exc:
+                    if (
+                        cloud_retries_left > 0
+                        and provider is self._nvidia
+                        and self._fallback_eligible(exc)
+                        and not emitted_content
+                        and self._cloud_retry_within_cap(exc)
+                    ):
+                        # Transient cloud hiccup (429/5xx/timeout) with nothing
+                        # emitted yet: give the strong model one bounded retry
+                        # before dropping to the local fallback.
+                        cloud_retries_left -= 1
+                        self._sleep_cloud_retry(exc)
+                        continue
+                    raise
         except OpenAICompatibleError as exc:
             can_fallback = (
                 self.selected_mode is LLMMode.AUTO
@@ -607,6 +625,23 @@ class ProviderCoordinator:
                 NvidiaProtocolError,
             ),
         ) and error.status_code not in {400, 401, 403}
+
+    _CLOUD_RETRY_CAP_SECONDS = 5.0
+
+    def _cloud_retry_within_cap(self, error: OpenAICompatibleError) -> bool:
+        """A retry is worth it only when the asked wait is small."""
+        retry_after = getattr(error, "retry_after_seconds", None)
+        return retry_after is None or retry_after <= self._CLOUD_RETRY_CAP_SECONDS
+
+    def _sleep_cloud_retry(self, error: OpenAICompatibleError) -> None:
+        """Wait the server-requested backoff (bounded) before the one retry."""
+        retry_after = getattr(error, "retry_after_seconds", None)
+        delay = min(max(float(retry_after or 1.0), 0.5), self._CLOUD_RETRY_CAP_SECONDS)
+        sleeper = getattr(self._clock, "sleep", None)
+        if callable(sleeper):
+            sleeper(delay)
+        else:
+            time.sleep(delay)
 
     def _status_for_cloud_exception(
         self, error: OpenAICompatibleError
