@@ -4,7 +4,8 @@ import logging
 import time
 from dataclasses import dataclass
 
-from jarvis.actions.registry import ActionRegistry
+from jarvis.actions.registry import ActionDefinition, ActionRegistry
+from jarvis.actions.models import ActionRisk
 from jarvis.actions.discovery import register_discovery_action
 from jarvis.actions.router import ActionRouter
 from jarvis.action_executor import ActionExecutor, TypedActionSecurityGate
@@ -269,6 +270,7 @@ from jarvis.voice_runtime.backends import (
 )
 from jarvis.voice_runtime.backend_edge_tts import EdgeTTSProvider
 from jarvis.voice_runtime.backend_elevenlabs import ElevenLabsTTSProvider
+from jarvis.voice_runtime.gemini_live import GeminiLiveConversationService
 from jarvis.voice_runtime.backend_openvoice import OpenVoiceProvider
 from jarvis.voice_runtime.backend_rvc import RVCProvider
 from jarvis.voice_runtime.coqui_tts import CoquiXTTSProvider
@@ -1642,6 +1644,62 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     if browser_runtime_service is not None:
         module_registry.register(BrowserModule(browser_runtime_service))
+    gemini_live_service = (
+        GeminiLiveConversationService(settings)
+        if settings.gemini_api_key is not None and settings.gemini_live_enabled
+        else None
+    )
+
+    def _live_action_result(outcome: dict):  # noqa: ANN001
+        from jarvis.actions.models import ActionResult, ExecutionStatus
+
+        return ActionResult(
+            status=ExecutionStatus.SUCCESS,
+            message=(
+                "Conversacion Live activa: hable con JARVIS en tiempo real."
+                if outcome.get("active")
+                else "Conversacion Live terminada."
+            ),
+            data=outcome,
+        )
+
+    if gemini_live_service is not None:
+        from pydantic import BaseModel as _EmptyPayloadBase
+
+        class _LivePayload(_EmptyPayloadBase):
+            pass
+
+        action_registry.register(
+            ActionDefinition(
+                name="voice.live.start",
+                description=(
+                    "Start (iniciar) a realtime spoken conversation with Gemini Live: "
+                    "the microphone streams directly to Gemini and it answers by "
+                    "voice with natural interruptions. Use when the user asks for "
+                    "'modo live', conversacion natural, or wants to talk with JARVIS "
+                    "in real time. The normal wake-word chat stays available after "
+                    "voice.live.stop."
+                ),
+                payload_model=_LivePayload,
+                handler=lambda context, payload: _live_action_result(
+                    gemini_live_service.start_conversation()
+                ),
+                tags=("voice", "live", "conversation"),
+                risk=ActionRisk.SAFE,
+            )
+        )
+        action_registry.register(
+            ActionDefinition(
+                name="voice.live.stop",
+                description="End (terminar) the Gemini Live realtime conversation and free the microphone.",
+                payload_model=_LivePayload,
+                handler=lambda context, payload: _live_action_result(
+                    gemini_live_service.stop_conversation()
+                ),
+                tags=("voice", "live", "conversation"),
+                risk=ActionRisk.SAFE,
+            )
+        )
     module_registry.register(
         InterfaceModule(ui_automation_service, semantic_memory_service)
     )

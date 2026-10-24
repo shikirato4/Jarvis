@@ -471,6 +471,25 @@ class Settings(BaseSettings):
             "GEMINI_IMAGE_MODEL", "JARVIS_GEMINI_IMAGE_MODEL"
         ),
     )
+    # Gemini Live: conversacion de voz en tiempo real (WebSocket).
+    gemini_live_model: str = Field(
+        default="gemini-3.8-live",
+        validation_alias=AliasChoices(
+            "GEMINI_LIVE_MODEL", "JARVIS_GEMINI_LIVE_MODEL"
+        ),
+    )
+    gemini_live_voice: str = Field(
+        default="Charon",
+        validation_alias=AliasChoices(
+            "GEMINI_LIVE_VOICE", "JARVIS_GEMINI_LIVE_VOICE"
+        ),
+    )
+    gemini_live_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "GEMINI_LIVE_ENABLED", "JARVIS_GEMINI_LIVE_ENABLED"
+        ),
+    )
     skills_enabled: bool = True
     skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True

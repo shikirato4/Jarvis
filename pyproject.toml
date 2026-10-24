@@ -20,6 +20,7 @@ dependencies = [
   "soundfile>=0.13.0",
   "edge-tts>=7.0.0",
   "playwright>=1.49.0",
+  "websocket-client>=1.8.0",
   "pypdf>=6.1.0",
   "pydantic>=2.11.0",
   "pydantic-settings>=2.8.0",
