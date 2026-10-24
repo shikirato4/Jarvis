@@ -205,6 +205,7 @@ from jarvis.system_runtime import (
 )
 from jarvis.tools.builtin import install_builtin_tools
 from jarvis.tools.web_tools import install_web_tools
+from jarvis.tools.browser_tools import install_browser_tools
 from jarvis.web_search.fetcher import SourceFetcher
 from jarvis.unity_runtime import (
     HttpUnityBridgeBackend,
@@ -1697,6 +1698,8 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         ),
     )
     install_web_tools(tool_registry, SourceFetcher())
+    if browser_runtime_service is not None:
+        install_browser_tools(tool_registry, browser_runtime_service)
     runtime_service = JarvisRuntimeService(
         settings=settings,
         mode_manager=mode_manager,

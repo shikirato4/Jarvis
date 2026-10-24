@@ -175,3 +175,88 @@ def test_browser_disabled_skips_action_registration(tmp_path: Path) -> None:
         assert app.browser_runtime_service is None
     finally:
         app.stop()
+
+
+# ---------------------------------------------------------------- agent tools
+
+
+def test_browser_tools_registered_for_agent_loop(tmp_path: Path) -> None:
+    from jarvis.tools.browser_tools import install_browser_tools
+    from jarvis.browser_runtime.in_memory import InMemoryBrowserBackend
+    from jarvis.browser_runtime.service import BrowserRuntimeService
+
+    class _FakeToolRegistry:
+        def __init__(self) -> None:
+            self.definitions = []
+
+        def register(self, definition) -> None:
+            self.definitions.append(definition)
+
+    registry = _FakeToolRegistry()
+    service = BrowserRuntimeService(
+        _settings(tmp_path), backend=InMemoryBrowserBackend()
+    )
+    install_browser_tools(registry, service)
+
+    names = {tool.name for tool in registry.definitions}
+    assert {
+        "browser.open",
+        "browser.read",
+        "browser.click",
+        "browser.type",
+        "browser.press_key",
+        "browser.screenshot",
+    } <= names
+
+
+def test_browser_tool_open_returns_snapshot_data(tmp_path: Path) -> None:
+    from jarvis.tools.browser_tools import install_browser_tools
+    from jarvis.browser_runtime.in_memory import InMemoryBrowserBackend
+    from jarvis.browser_runtime.service import BrowserRuntimeService
+
+    class _FakeToolRegistry:
+        def __init__(self) -> None:
+            self.definitions = []
+
+        def register(self, definition) -> None:
+            self.definitions.append(definition)
+
+    registry = _FakeToolRegistry()
+    backend = InMemoryBrowserBackend()
+    service = BrowserRuntimeService(_settings(tmp_path), backend=backend)
+    install_browser_tools(registry, service)
+
+    open_tool = next(tool for tool in registry.definitions if tool.name == "browser.open")
+    payload = open_tool.input_model(url="https://example.com")
+    result = open_tool.handler(None, payload)
+
+    assert result.data["url"] == "https://example.com"
+    assert result.data["title"] == "Example Domain"
+    assert any("[3]" in str(element) or "[0]" in str(element) for element in result.data["elements"])
+
+
+def test_bootstrap_installs_browser_tools_only_when_enabled(tmp_path: Path) -> None:
+    app = _app(tmp_path)
+    try:
+        names = {tool.name for tool in app.tool_registry.list_tools()}
+        assert "browser.open" in names
+        assert "browser.press_key" in names
+    finally:
+        app.stop()
+
+    app2 = _app(tmp_path, browser_enabled=False)
+    try:
+        names2 = {tool.name for tool in app2.tool_registry.list_tools()}
+        assert "browser.open" not in names2
+    finally:
+        app2.stop()
+
+
+def test_web_operate_skill_loads_in_catalog(tmp_path: Path) -> None:
+    from jarvis.skills_runtime.registry import SkillRegistry
+
+    catalog = SkillRegistry().load_directory(
+        Path(__file__).resolve().parent.parent / "skills"
+    )
+    skills = {skill.name for skill in catalog.skills}
+    assert "web-operate" in skills
