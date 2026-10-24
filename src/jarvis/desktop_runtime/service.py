@@ -1746,7 +1746,18 @@ class DesktopRuntimeService:
             any(word in folded for word in ("calcula", "calcular", "calculate"))
             and "calculator.evaluate" in available
         )
-        return dns_action or file_search or calculation
+        browser_action = (
+            any(word in folded for word in ("abre", "abrir", "entra", "visita", "navega", "muestra"))
+            and any(
+                word in folded
+                for word in (
+                    "navegador", "browser", "youtube", "google", "sitio", "pagina",
+                    "página", "web", "http", "www", "url", "internet",
+                )
+            )
+            and "browser.open" in available
+        )
+        return dns_action or file_search or calculation or browser_action
 
     @staticmethod
     def _has_operational_language(text: str) -> bool:

@@ -90,6 +90,16 @@ class GeminiImageProvider:
                 detail = str(response.json().get("error", {}).get("message", ""))
             except Exception:  # noqa: BLE001
                 pass
+            if getattr(response, "status_code", 200) == 429:
+                raise JarvisError(
+                    "La llave gratis de Gemini no tiene cuota de generacion de "
+                    "imagenes (429). Se usara el modelo de imagen local (SDXL) "
+                    "en su lugar; para imagenes en la nube necesitas billing "
+                    "activo en Google AI Studio.",
+                    component="image_runtime",
+                    code="gemini_quota_exceeded",
+                    recoverable=True,
+                )
             raise JarvisError(
                 f"Gemini rechazo la generacion (HTTP {response.status_code}): {detail}",
                 component="image_runtime",

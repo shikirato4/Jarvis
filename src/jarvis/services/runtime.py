@@ -706,7 +706,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
             from jarvis.image_runtime.models import ImageGenerationJob, ImageJobStatus
 
             try:
-                output_dir = parsed.output_dir or self._image_runtime_service.output_dir()
+                output_dir = parsed.output_dir or self._image_runtime_service.output_dir
                 path = gemini.generate(parsed.prompt, output_dir=output_dir)
                 return ImageGenerationJob(
                     prompt_original=parsed.prompt,
