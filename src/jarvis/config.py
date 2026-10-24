@@ -451,6 +451,12 @@ class Settings(BaseSettings):
             "BROWSER_PROFILE_PERSIST", "JARVIS_BROWSER_PROFILE_PERSIST"
         ),
     )
+    # VRAM dance: unload the local LLM while the local image model
+    # generates, then unload the image model and restore the LLM.
+    vram_swap_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VRAM_SWAP_ENABLED", "JARVIS_VRAM_SWAP_ENABLED"),
+    )
     skills_enabled: bool = True
     skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True

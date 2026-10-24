@@ -1748,6 +1748,14 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
     )
     runtime_service._desktop_agent_runtime_service = desktop_agent_runtime_service  # noqa: SLF001
     runtime_service._image_runtime_service = image_runtime_service  # noqa: SLF001
+    if image_runtime_service is not None:
+        from jarvis.image_runtime.vram_swap import VramSwapGuard
+
+        runtime_service._vram_guard = VramSwapGuard(  # noqa: SLF001
+            settings,
+            local_manager=local_model_runtime_manager,
+            image_service=image_runtime_service,
+        )
     retention_manager = RetentionManager(
         state_manager=state_manager,
         event_bus=event_bus,

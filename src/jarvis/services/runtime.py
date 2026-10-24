@@ -102,6 +102,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
         ops_runtime_service=None,
         desktop_agent_runtime_service=None,
         image_runtime_service=None,
+        vram_guard=None,
     ) -> None:
         self._settings = settings
         self._mode_manager = mode_manager
@@ -136,6 +137,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
         self._ops_runtime_service = ops_runtime_service
         self._desktop_agent_runtime_service = desktop_agent_runtime_service
         self._image_runtime_service = image_runtime_service
+        self._vram_guard = vram_guard
         self._started = False
 
     def start(self) -> None:
@@ -694,7 +696,11 @@ class JarvisRuntimeService(RuntimeServiceContract):
         if self._image_runtime_service is None:
             raise ServiceUnavailableError("image runtime is not available")
         parsed = ImageGenerationRequest.model_validate(request)
-        return self._image_runtime_service.generate_sync(parsed) if wait else self._image_runtime_service.submit(parsed)
+        guard = self._vram_guard
+        if guard is None:
+            return self._image_runtime_service.generate_sync(parsed) if wait else self._image_runtime_service.submit(parsed)
+        with guard.image_generation():
+            return self._image_runtime_service.generate_sync(parsed) if wait else self._image_runtime_service.submit(parsed)
 
     def image_cancel(self, job_id: str | None = None):
         self._ensure_started()
