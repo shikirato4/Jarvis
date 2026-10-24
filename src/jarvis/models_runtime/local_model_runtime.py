@@ -708,6 +708,11 @@ class LocalModelRuntimeManager:
             str(parsed.port),
             "--flash-attn",
             "off",
+            # --jinja makes llama-server apply the model's embedded chat
+            # template: without it the OpenAI-compatible endpoint cannot
+            # render tools into the prompt nor parse the model's tool
+            # calls, so the local model can never act (only chat).
+            "--jinja",
         ]
         if self._profile.mmproj_path is not None:
             mmproj_path = self._resolved_path(self._profile.mmproj_path)

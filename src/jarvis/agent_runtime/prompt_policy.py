@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import json
 import logging
+from typing import ClassVar
 import unicodedata
 from dataclasses import dataclass
 from enum import StrEnum
@@ -368,6 +369,29 @@ class AgenticPromptPolicy:
             return ""
         return f"{SKILLS_MARKER}\n{context}"
 
+    _FAMILY_GUIDE_ES: ClassVar[dict[str, str]] = {
+        "browser": (
+            "Navegador real (Chromium). browser.open(url) devuelve la pagina con "
+            "elementos [N]; actua con browser.click/type/press_key (Enter mejor "
+            "que clic en buscadores); [ref] SIEMPRE del ultimo snapshot; nunca "
+            "contrasenas; descargas llegan a browser_downloads."
+        ),
+        "image": (
+            "Generacion de imagenes: pasa TODA la informacion en el prompt "
+            "(textos y cifras EXACTAS que deben salir; el modelo de imagen no "
+            "ve la conversacion)."
+        ),
+        "windows": (
+            "Control real de Windows: bloquear pantalla, ventanas, suspender/apagar "
+            "(irreversibles piden confirmacion)."
+        ),
+        "voice": "voice.live.start/stop: conversacion hablada en tiempo real por microfono.",
+        "web": "web.fetch_page lee paginas publicas; para investigacion con citas usa el flujo de research.",
+        "files": "Buscar, listar y abrir archivos locales.",
+        "terminal": "Comandos acotados con revision de seguridad.",
+        "memory": "Guardar y recuperar hechos duraderos del usuario.",
+    }
+
     @staticmethod
     def capability_context(tools: list[dict[str, Any]]) -> str:
         manifest = build_capability_manifest(AgenticPromptPolicy._unique_tools(tools))
@@ -376,16 +400,21 @@ class AgenticPromptPolicy:
                 f"{CAPABILITY_MARKER}\nNo executable capability family is "
                 "currently reported. Do not claim runtime access."
             )
-        entries = [
-            f"{family}: AVAILABLE_VIA_TOOL ({len(names)} operations)"
-            for family, names in manifest.items()
-        ]
+        entries = []
+        for family, names in manifest.items():
+            guide = AgenticPromptPolicy._FAMILY_GUIDE_ES.get(family)
+            if guide:
+                entries.append(f"{family}: {guide} (operaciones: {', '.join(names)})")
+            else:
+                entries.append(
+                    f"{family}: AVAILABLE_VIA_TOOL ({len(names)} operations)"
+                )
         return (
             f"{CAPABILITY_MARKER}\n"
             "Generated from the current canonical executable registry; only these "
             "families are known executable now. "
-            + "; ".join(entries)
-            + ". A listed family must not be denied merely because only some detailed "
+            + "\n".join(f"- {entry}" for entry in entries)
+            + "\nA listed family must not be denied merely because only some detailed "
             "schemas are shown. Use disclosed discovery if more detail is needed."
         )
 

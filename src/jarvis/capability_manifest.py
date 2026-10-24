@@ -120,8 +120,9 @@ def get_capabilities_for_prompt(context_profile: str) -> str:
         )
     if profile == "web":
         return (
-            "Jarvis puede usar Brave Search como fuente web y el modelo configurado para redactar. "
-            "No debe inventar datos fuera de las fuentes ni mandar secretos a internet."
+            "Jarvis puede investigar en la web con el buscador configurado y citar fuentes. "
+            "Puede leer paginas con web.fetch_page y OPERAR sitios reales con el navegador "
+            "(browser.open/click/type). No debe inventar datos fuera de las fuentes ni mandar secretos a internet."
         )
     if profile == "project":
         return (

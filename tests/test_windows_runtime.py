@@ -330,7 +330,7 @@ def test_pre_lora_manifest_and_progressive_schema_disclosure_are_dynamic() -> No
     )
     context = policy.capability_context(tools)
 
-    assert "windows: AVAILABLE_VIA_TOOL" in context
+    assert "windows:" in context and "pantalla" in context.casefold()
     assert any(item["function"]["name"] == "windows.window.foreground" for item in selected)
     # 9 core window/process actions + workstation lock + the three gated
     # power actions (suspend/shutdown/restart).
@@ -384,7 +384,7 @@ def test_capability_absent_manifest_does_not_advertise_windows() -> None:
     )
 
     context = AgenticPromptPolicy.capability_context(executor.tool_schemas())
-    assert "windows: AVAILABLE_VIA_TOOL" not in context
+    assert "windows:" not in context
 
 
 def test_action_execution_is_provider_neutral() -> None:

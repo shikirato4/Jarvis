@@ -106,8 +106,8 @@ def test_family_manifest_uses_all_tools_while_schema_context_is_selected() -> No
     )
 
     system = composed[0].content
-    assert "files: AVAILABLE_VIA_TOOL" in system
-    assert "terminal: AVAILABLE_VIA_TOOL" in system
+    assert "files:" in system and "operations" in system
+    assert "terminal:" in system
     assert "files.search (required=target)" in system
     selected = system.split(SCHEMA_MARKER, 1)[1]
     assert "terminal.run" not in selected
@@ -279,3 +279,39 @@ def test_prompt_profiles_fit_production_token_budgets() -> None:
     assert counts[AgenticPromptProfile.COMPACT] <= 1_600
     assert 2_000 <= counts[AgenticPromptProfile.FULL] <= 3_200
     assert FULL_CHARTER_MARKER in AgenticPromptPolicy().static_prompt
+
+
+# ------------------- familia de capacidades con guia en espanol
+
+
+def _schema(name: str, description: str = "") -> dict:
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": {}},
+    }
+
+
+def test_capability_context_briefs_browser_usage_in_spanish() -> None:
+    tools = [
+        _schema("browser.open", "open a url"),
+        _schema("browser.type", "type text"),
+        _schema("browser.press_key", "press a key"),
+        _schema("image.generate", "generate an image"),
+        _schema("windows.workstation.lock", "lock the screen"),
+    ]
+    context = AgenticPromptPolicy.capability_context(tools)
+
+    assert "browser" in context
+    assert "browser.open" in context
+    assert "navegador" in context.casefold()
+    assert "browser.press_key" in context
+    assert "imagen" in context.casefold()
+    assert "pantalla" in context.casefold()
+
+
+def test_capability_context_keeps_fallback_for_unknown_families() -> None:
+    tools = [_schema("weirdfamily.thing", "unknown op")]
+    context = AgenticPromptPolicy.capability_context(tools)
+
+    assert "weirdfamily" in context
+    assert "AVAILABLE_VIA_TOOL" in context

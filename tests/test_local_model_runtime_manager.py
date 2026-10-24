@@ -168,6 +168,9 @@ def test_cuda_is_preferred_and_launch_uses_validated_stable_flags(tmp_path) -> N
     assert command[command.index("--flash-attn") + 1] == "off"
     assert "--n-gpu-layers" not in command
     assert "--threads" not in command
+    # Sin --jinja llama-server no parsea tool calls: el modelo local
+    # nunca podria usar herramientas (solo chatear).
+    assert "--jinja" in command
     assert "--batch-size" not in command
 
 
@@ -361,3 +364,4 @@ def _capture_runtime_error(manager, errors) -> None:
         manager.ensure_ready()
     except LocalModelRuntimeError as exc:
         errors.append(exc)
+

@@ -67,6 +67,31 @@ class BrowserModule:
     name = "browser_runtime"
     description = "Real embedded browser (Playwright/Chromium) the agent operates."
 
+    # Spanish retrieval aliases: the agent's tool selector ranks schemas
+    # by these, so "abre youtube" must match browser actions without
+    # exact English/infinitive forms.
+    _SPANISH_ALIASES = {
+        "browser.open": (
+            "abre", "abrir", "abren", "abre el navegador", "navegador",
+            "entra a", "entra en", "entra al", "ve a", "visita",
+            "youtube", "pagina", "página", "sitio web", "sitio",
+            "navega", "navegar", "browser", "web",
+        ),
+        "browser.read": ("leer pagina", "le la pagina", "que ves", "que dice la pagina"),
+        "browser.click": ("clic", "click", "dale clic", "presiona el boton", "oprime", "toca"),
+        "browser.type": (
+            "escribe", "escribir", "teclea", "llenar", "llena el formulario",
+            "busca en youtube", "pon lofi", "pon la cancion", "escribe en el buscador",
+        ),
+        "browser.press_key": ("enter", "presiona enter", "da enter", "escapa"),
+        "browser.back": ("regresa", "atras", "volver", "regresar a la pagina anterior"),
+        "browser.find": ("busca el elemento", "encuentra el boton", "localiza"),
+        "browser.tabs": ("pestanas", "pestañas", "tabs", "ventanas del navegador"),
+        "browser.switch_tab": ("cambia de pestana", "cambia de pestaña", " cambia a la"),
+        "browser.new_tab": ("nueva pestana", "nueva pestaña", "otra pestana", "abre otra"),
+        "browser.screenshot": ("captura", "screenshot", "pantallazo", "foto de la pantalla"),
+    }
+
     def __init__(self, service: BrowserRuntimeService) -> None:
         self._service = service
 
@@ -158,10 +183,11 @@ class BrowserModule:
                     description=description,
                     payload_model=payload,
                     handler=handler,
-                    tags=("browser", "web", "control"),
+                    tags=("browser", "web", "operate"),
                     risk=risk,
                     idempotent=False,
                     supports_cancellation=True,
+                    semantic_aliases=self._SPANISH_ALIASES.get(name, ()),
                 )
             )
 
