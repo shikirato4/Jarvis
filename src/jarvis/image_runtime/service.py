@@ -243,17 +243,26 @@ class ImageGenerationService:
         self._settings = settings
         self._logger = logger or logging.getLogger("jarvis.image_runtime")
         kind = str(getattr(settings, "image_model_kind", "sdxl") or "sdxl").casefold()
-        if backend is None and kind == "qwen_turbo":
-            from jarvis.image_runtime.qwen_backend import QwenImageBackend
-
-            backend = QwenImageBackend()
+        model_path: Path | None = None
         if kind == "qwen_turbo":
             qwen_dir = Path(getattr(settings, "qwen_image_dir", "models/qwen_image_turbo"))
             if not qwen_dir.is_absolute():
                 qwen_dir = Path.cwd() / qwen_dir
-            model_path = qwen_dir
-        else:
+            if (qwen_dir / "model_index.json").exists():
+                if backend is None:
+                    from jarvis.image_runtime.qwen_backend import QwenImageBackend
+
+                    backend = QwenImageBackend()
+                model_path = qwen_dir
+            else:
+                # clon limpio sin los ~24GB de Qwen: caer a SDXL sin romperse.
+                self._logger.warning(
+                    "image_model_kind=qwen_turbo pero %s no existe; usando SDXL", qwen_dir
+                )
+                kind = "sdxl"
+        if kind != "qwen_turbo":
             model_path = getattr(settings, "resolved_image_model_path", None) or _DEFAULT_MODEL_PATH
+        assert model_path is not None  # invariant: uno de los dos ramos lo asigna
         self._model = ImageModelManager(
             model_path=model_path,
             keep_loaded=bool(getattr(settings, "image_keep_model_loaded", True)),

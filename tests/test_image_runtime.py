@@ -28,6 +28,10 @@ def _settings(tmp_path: Path) -> Settings:
         image_default_height=768,
         image_default_steps=25,
         image_timeout_seconds=1800,
+        # hermetico: sin esto hereda JARVIS_IMAGE_MODEL_KIND del .env del
+        # repo y en la maquina del usuario (con modelos de Qwen reales)
+        # los tests intentarian cargar el pipeline de 24GB.
+        image_model_kind="sdxl",
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -225,6 +229,9 @@ def test_default_image_model_path_is_not_bound_to_arbitrary_cwd(monkeypatch, tmp
 
 
 def test_image_cli_status(monkeypatch, tmp_path: Path) -> None:
+    # hermetico: sin esto hereda el .env del repo (p.ej. IMAGE_MODEL_KIND
+    # del desarrollador) y el resultado depende de la maquina
+    monkeypatch.setenv("JARVIS_IMAGE_MODEL_KIND", "sdxl")
     monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setenv("JARVIS_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("JARVIS_IMAGE_MODEL_PATH", str(tmp_path / "model.safetensors"))
@@ -316,3 +323,39 @@ def test_backend_load_uses_model_cpu_offload_for_cuda_offload() -> None:
         )
     assert "cpu_offload" in calls
     assert "to" not in calls, "offload y .to juntos causan fallos Half/Float"
+
+
+def test_image_model_kind_defaults_to_qwen_and_falls_back_without_models(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """kind=qwen_turbo usa el backend Qwen; sin modelos en disco cae a SDXL."""
+    from jarvis.image_runtime.service import DiffusersImageBackend, ImageGenerationService
+
+    # default del config: sdxl (seguro en clones limpios; el usuario lo sube
+    # via .env). _env_file=None + sin vars para no heredar el ambient.
+    monkeypatch.delenv("JARVIS_IMAGE_MODEL_KIND", raising=False)
+    monkeypatch.delenv("IMAGE_MODEL_KIND", raising=False)
+    settings = Settings(data_dir=tmp_path / "d", _env_file=None)
+    assert settings.image_model_kind == "sdxl"
+
+    # con el dir de qwen presente (model_index.json) -> backend Qwen
+    qwen_dir = tmp_path / "qwen"
+    (qwen_dir / "sub").mkdir(parents=True)
+    (qwen_dir / "model_index.json").write_text("{}", encoding="utf-8")
+    svc = ImageGenerationService(
+        settings=Settings(
+            data_dir=tmp_path / "d2", image_model_kind="qwen_turbo", qwen_image_dir=qwen_dir
+        )
+    )
+    from jarvis.image_runtime.qwen_backend import QwenImageBackend
+
+    assert isinstance(svc._model._backend, QwenImageBackend)  # noqa: SLF001
+    assert svc._model.model_path == qwen_dir  # noqa: SLF001
+
+    # sin el dir -> fallback SDXL
+    svc2 = ImageGenerationService(
+        settings=Settings(
+            data_dir=tmp_path / "d3", image_model_kind="qwen_turbo", qwen_image_dir=tmp_path / "nohay"
+        )
+    )
+    assert isinstance(svc2._model._backend, DiffusersImageBackend)  # noqa: SLF001
