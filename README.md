@@ -1,8 +1,20 @@
 # Jarvis Cognitive OS
 
-Jarvis is a local cognitive operating system organized around a shared runtime kernel. The same services back its desktop interface, CLI, HTTP API, automation, memory, model routing, voice, vision, system, Unity, research, writing, science, security, indexing, autonomy, and code-agent capabilities.
+Jarvis is a local cognitive operating system organized around a shared runtime kernel. The same services back its desktop interface, CLI, HTTP API, automation, memory, model routing, voice, vision, system, research, writing, science, security, indexing, autonomy, and code-agent capabilities — plus an integrated real browser (Playwright), realtime voice conversation (Gemini Live), a face-guard that locks the workstation when a banned face appears, and local image generation with Qwen-Image-2.1-Turbo (legible text/infographics) or JuggernautXL SDXL.
 
 ## Cambios recientes
+
+### 2026-10-25 — Navegador real, voz en vivo, guardián de caras y Qwen-Image
+
+- **Navegador integrado (nivel 3)**: Playwright con sesión persistente (los logins sobreviven arranques), referencias de accesibilidad `[N]` para que el agente cite elementos exactos, captura de descargas con ruta de retorno, `browser.back`, `browser.find` y multi-pestaña. Acciones con alias en español (`abre youtube`, `regresa`, `busca en la página`).
+- **Agente consciente de sus herramientas**: guías por familia de acción en español (`_FAMILY_GUIDE_ES`), `semantic_aliases` en todas las acciones y arranque de llama-server con `--jinja` para que las herramientas funcionen de verdad con el modelo local. Verificado E2E: el modelo local abrió YouTube solo.
+- **Conversación en tiempo real por voz ("Jarvis, modo live")**: Gemini Live vía WebSocket `v1beta` (`BidiGenerateContent`), audio subido como `realtimeInput.audio`, cierre de turno por VAD del servidor. Launcher en `scripts/jarvis_live.py`. Frases como "modo live" o "conversación natural" enrutan al agente y activan el modo.
+- **Guardián de caras prohibidas** (`face_guard/`): "Jarvis, banea esa cara" → la webcam toma fotos → YuNet+SFace (`models/face/`, incluidos en el repo) generan un embedding → la cara queda en lista prohibida. El monitor periódico bloquea la estación de trabajo (Win+L) tras N avisos consecutivos de una cara baneada. Acciones `faceguard.ban/status/remove/monitor.start/monitor.stop`; ban y remove son SENSITIVE.
+- **Generación local de imágenes — Qwen-Image-2.1-Turbo**: texto perfectamente legible (el punto débil de SDXL). Ciclo de vida secuencial diseñado para 8GB VRAM/15GB RAM: el encoder Qwen3-VL codifica el prompt en CPU y se libera, el transformer (cuantizado a FP8 rowwise con torchao, 3.6GB) y la VAE decodifican en GPU. En la máquina de desarrollo es el modelo por defecto (`JARVIS_IMAGE_MODEL_KIND=qwen_turbo`); el default del código sigue siendo `sdxl` y cae automáticamente a SDXL si faltan los ~24GB de modelos. La imagen online usa `gemini-2.5-flash-image` (tier gratis) con fallback local.
+- **SDXL 28× más rápido en 8GB**: detección automática de VRAM libre — con <10GB el runtime usa `enable_model_cpu_offload` + VAE tiling (2.8 s/paso a 1024px; antes 78.8 s/paso thrasheando a RAM).
+- **VRAM swap**: `VramSwapGuard` detiene el LLM local antes de cargar modelos pesados y lo regresa después, respetando ownership externa.
+- **Voz**: edge-tts como proveedor por defecto (voz Álvaro, español natural, cero latencia de red), XTTS con re-clonación pendiente, fallbacks en cascada; los textos largos se segmentan y se lee markdown limpio (sin asteriscos).
+- **Estabilidad de suite/CI**: importorskip en tests que requieren GPU (CI no instala extras de imagen), pin de `transformers` eliminado del workflow, 1366 tests verdes con la configuración real de la máquina activa, CI Windows verde.
 
 ### 2026-08-16 — Nemotron híbrido, adjuntos multimodales y estabilización
 
@@ -41,84 +53,48 @@ Jarvis is a local cognitive operating system organized around a shared runtime k
 
 ## Source Tree
 
+Árbol condensado por subsistemas (`src/jarvis/`):
+
 ```text
 src/jarvis/
-  __main__.py
-  bootstrap.py
-  cli.py
-  config.py
-  jarvis_logging.py
-  actions/
-    base.py
-    models.py
-    registry.py
-    router.py
-  api/
-    app.py
-  automation/
-    service.py
-  cognition/
-    models.py
-    orchestrator.py
-  core/
-    capabilities.py
-    errors.py
-    events.py
-    metacommands.py
-    models.py
-    modes.py
-    modules.py
-    process.py
-    safety.py
-    services.py
-    state.py
-  memory/
-    base.py
-    models.py
-    repository.py
-    service.py
-  models/
-    base.py
-  models_runtime/
-    base.py
-    catalog.py
-    coordinator.py
-    hybrid.py
-    nemotron_local.py
-    nvidia_nim.py
-    openai_compatible.py
-    registry.py
-    router.py
-    service.py
-  attachments/
-    models.py
-    pipeline.py
-    processors.py
-    registry.py
-    service.py
-    storage.py
-  local_runtime/
-    diagnostics.py
-    registry.py
-    service.py
-    vllm_backend.py
-  modules/
-    memory_module.py
-    operations_module.py
-    research_module.py
-    vision_module.py
-    voice_module.py
-    writer_module.py
-  routing/
-    models.py
-    task_router.py
-  services/
-    runtime.py
-  tools/
-    builtin.py
-    models.py
-    registry.py
+  __main__.py  bootstrap.py  cli.py  config.py  identity.py
+  desktop.py  jarvis_logging.py  persistent_config.py  reasoning.py
+  capability_manifest.py  legacy_model_config.py  runtime_paths.py
+  # núcleo
+  core/            # errors, events, modes, safety, services, state
+  actions/         # contratos de acciones, registro, receipts, routing
+  tools/           # tool calling de bajo nivel
+  routing/         # task router: metacommands / tools / actions / orquestación
+  cognition/       # kernel de orquestación intent→plan
+  conversation_context/  conversational_safety.py  chat_optimization.py
+  # modelos
+  models_runtime/  # nvidia_nim, qwen_local, nemotron_local, hybrid, router,
+                   # local_profiles, model_identity, roles, adapters
+  local_runtime/   # diagnóstico de hardware y lanzadores de backend
+  neural_router.py  local_model_ab.py
+  # runtimes de capacidad
+  voice_runtime/        # TTS (edge-tts, XTTS, pyttsx3), STT, segmentación,
+                        # gemini_live (conversación en tiempo real)
+  browser_runtime/      # Playwright: sesión persistente, a11y [N], descargas,
+                        # back/find, tabs
+  image_runtime/        # Qwen-Image-2.1-Turbo (qwen_backend, secuencial) y
+                        # SDXL (DiffusersImageBackend) + Gemini online
+  face_guard/           # YuNet+SFace, lista de caras prohibidas, monitor+lock
+  vision_runtime/       terminal_runtime/  system_runtime/  windows_runtime/
+  file_runtime/  indexing_runtime/  research_runtime/  writing_runtime/
+  science_runtime/  data_analyzer/  calculator_runtime.py  hud_runtime/
+  # agentic y automatización
+  agent_runtime/  desktop_agent_runtime/  code_agent_runtime/
+  skills_runtime/  self_improvement_runtime/  automation/  autonomy/
+  security_runtime/  memory/  memory_semantic/  web_search/  ingestion/
+  integrations/  ops/  services/  modules/  ui_automation/  unity_runtime/
+  # superficies
+  api/app.py  desktop.py  benchmark.py
 ```
+
+Los tests viven en `tests/` (188 archivos); los modelos en `models/`
+(`llm/` GGUF del LLM local, `image/` checkpoint SDXL, `qwen_image_turbo/`
+pipeline Qwen, `face/` ONNX YuNet+SFace — los últimos incluidos en el repo).
 
 ## Core Dependencies
 
@@ -421,7 +397,14 @@ python -m jarvis serve
 python -m jarvis.desktop
 ```
 
-Resultados verificados el 2026-08-16:
+Resultados verificados el 2026-10-25 (round navegador/live/guardián/Qwen):
+
+- Batería local completa con la `.env` real de la máquina activa: `1366 passed, 5 skipped` en ~5 min.
+- CI de GitHub (Windows runner) verde en `59ee522`: ruff + batería completa con entorno recién instalado.
+- E2E reales verificados en la laptop (RTX 5070 8GB / 15GB RAM): generación Qwen-Image-2.1 con texto legible, arranque del modo live con micrófono, navegador abriendo YouTube por comando de voz del modelo local, guardián de caras con webcam (detección honesta sin cara presente).
+- Benchmarks medidos: SDXL offload 2.8 s/paso @1024px; Qwen secuencial ~23 min/imagen (FP8 sin triton en Windows).
+
+Resultados históricos del 2026-08-16 (migración Nemotron):
 
 - Línea base anterior a la migración: `632 passed, 2 skipped`.
 - Primera batería completa de cierre: `720 passed, 3 failed, 3 skipped` en 1171.55 s. Los tres fallos reprodujeron contaminación del modo persistido en dos pruebas y la pérdida del encabezado/política del benchmark; sus causas se corrigieron y las cuatro regresiones focalizadas pasaron.
@@ -441,57 +424,105 @@ El workspace de esta sesión impide que procesos secundarios creen o actualicen 
 
 ## Voz y degradación controlada
 
-El runtime de voz selecciona un proveedor TTS y un backend de salida de forma independiente. Si XTTS o el backend de reproducción no están disponibles, Jarvis conserva el texto de la respuesta y recorre los fallbacks configurados. Un fallback de reproducción queda registrado en los metadatos del resultado para que el fallo original siga siendo observable.
+El runtime de voz selecciona un proveedor TTS y un backend de salida de forma independiente. El proveedor por defecto es **edge-tts** (voz `es-MX-AlvaroNeural`, español natural sin latencia de red ni descargas de modelos); XTTS queda disponible para clonación de voz con una muestra `speaker_wav`, y `in_memory`/`pyttsx3` siguen de respaldo. Los textos largos se segmentan en frases y se reproducen en orden, y el markdown se lee limpio (los `**negritas**` no se verbalizan con asteriscos).
 
 Configuración principal en `.env`:
 
 ```dotenv
 JARVIS_VOICE_ENABLED=true
-JARVIS_VOICE_TTS_PROVIDER_DEFAULT=coqui_xtts
-JARVIS_VOICE_TTS_PROVIDER_FALLBACK_ORDER=pyttsx3,in_memory
+JARVIS_VOICE_TTS_PROVIDER_DEFAULT=edge_tts
+JARVIS_VOICE_TTS_PROVIDER_FALLBACK_ORDER=coqui_xtts,pyttsx3,in_memory
 JARVIS_VOICE_AUDIO_OUTPUT_BACKEND_DEFAULT=winsound
 JARVIS_VOICE_COQUI_DEVICE_PREFERENCE=auto
-JARVIS_VOICE_COQUI_SPEAKER_WAV=C:\ruta\a\speaker.wav
+JARVIS_VOICE_COQUI_SPEAKER_WAV=C:/ruta/a/speaker.wav
 ```
 
 Usa `auto` para seleccionar CUDA sólo cuando PyTorch confirme que está disponible. Si configuras `cuda` explícitamente en un equipo CPU-only, XTTS se marcará como no saludable y Jarvis continuará con el orden de fallback. La muestra WAV debe existir antes de que XTTS cargue el modelo.
+
+### Conversación en tiempo real (`voice.live`)
+
+Con una `GEMINI_API_KEY` configurada, **"Jarvis, modo live"** abre una
+conversación por voz bidireccional con latencia de conversación humana
+(Gemini Live sobre WebSocket): hablas, te escucha y responde por audio
+en el mismo turno, con el cierre de turno por silencio (VAD del
+servidor). Las acciones `voice.live.start` / `voice.live.stop` (alias en
+español incluidos) la controlan desde el chat o la voz. El LLM local
+queda liberado mientras dura el modo.
 
 Comandos útiles:
 
 ```powershell
 python -m jarvis voice status
 python -m jarvis voice speak "Sistema en línea"
+python scripts/jarvis_live.py   # launcher directo del modo live
 python -m jarvis doctor
 ```
 
+### Guardián de caras prohibidas
+
+"Jarvis, banea esa cara" captura a la persona frente a la webcam, genera
+su embedding con YuNet+SFace (`models/face/`, incluidos en el repo) y la
+agrega a la lista prohibida. El monitor periódico bloquea la sesión de
+Windows (Win+L) cuando detecta una cara baneada de forma consecutiva.
+Acciones: `faceguard.ban` y `faceguard.remove` (SENSITIVE),
+`faceguard.status`, `faceguard.monitor.start/stop` (SAFE). Activable con
+`JARVIS_FACE_GUARD_ENABLED=true`.
+
 ## Local Image Runtime
 
-Jarvis can generate images locally with JuggernautXL SDXL through Diffusers. Fooocus is not used as the runtime; the Fooocus checkpoint can be copied into the Jarvis workspace and loaded directly by Diffusers.
+Jarvis genera imágenes localmente con dos motores intercambiables mediante
+`JARVIS_IMAGE_MODEL_KIND`:
 
-Expected local checkpoint path:
+| Kind | Modelo | Punto fuerte | Hardware |
+| --- | --- | --- | --- |
+| `qwen_turbo` | Qwen-Image-2.1-Turbo (7B, 8 pasos, FP8) | Texto perfectamente legible, infografías, rótulos | 8GB VRAM (ciclo secuencial), ~24GB en disco |
+| `sdxl` (default del código) | JuggernautXL v8 via Diffusers | Velocidad, fotorrealismo | 8GB VRAM con offload automático |
+
+Qwen usa un **ciclo de vida secuencial** pensado para laptops de 8GB VRAM:
+el encoder Qwen3-VL codifica el prompt en CPU y se libera (~9GB), después el
+transformer — cuantizado a FP8 rowwise con torchao (3.6GB) — y la VAE
+trabajan en GPU y se liberan al terminar. Nunca hay dos componentes pesados
+residentes a la vez. Con `qwen_turbo` activo y sin modelos en disco, el
+servicio cae a SDXL con un warning en vez de morir.
+
+SDXL detecta la VRAM libre: con <10GB usa `enable_model_cpu_offload` + VAE
+tiling automáticamente (2.8 s/paso a 1024px en una RTX 5070 Laptop, ~28× más
+rápido que el `.to(cuda)` ingenuo que thrashea a RAM).
+
+La imagen **online** usa `gemini-2.5-flash-image` (tier gratis de Google AI
+Studio vía `GEMINI_API_KEY`) con fallback al motor local.
+
+Rutas esperadas:
 
 ```text
-models/image/checkpoints/juggernautXL_v8Rundiffusion.safetensors
+models/image/checkpoints/juggernautXL_v8Rundiffusion.safetensors   # SDXL
+models/qwen_image_turbo/   # pipeline Qwen (transformer+encoder+VAE, ~24GB)
+models/face/              # ONNX del guardián de caras (incluir en repo)
 ```
 
-Large model files are ignored by Git. Do not commit `.safetensors`, `.ckpt`, `.bin`, `.pt`, `.pth`, generated images, `.env`, API keys, or output folders.
+Los archivos de modelo grandes quedan ignorados por Git (`.safetensors`,
+`.ckpt`, `.bin`, `.pt`, `.pth`, `models/qwen_image_turbo/`). No subas
+imágenes generadas, `.env`, claves ni carpetas de salida.
 
-Useful commands:
+Comandos:
 
 ```powershell
 python -m jarvis image status
-python -m jarvis image generate --prompt "a futuristic blue Jarvis orb made of glowing particles"
+python -m jarvis image generate --prompt "un póster que diga 'JARVIS OS' en letras neón"
 python -m jarvis image cancel
 python -m jarvis image unload
 ```
 
-Optional image dependencies:
+Dependencias de imagen opcionales (diffusers, torch, transformers>=4.57,
+accelerate, torchao):
 
 ```powershell
 python -m pip install -e .[image]
 ```
 
-The first generation can take a long time because the SDXL checkpoint is loaded lazily. The model remains cached when possible and can be unloaded with `python -m jarvis image unload`.
+La primera generación tarda porque el pipeline se carga de forma diferida; los
+modelos permanecen cacheados cuando es posible y se descargan con
+`python -m jarvis image unload`.
 
 ## Example Commands
 
@@ -515,11 +546,11 @@ Keep the virtual environment at the repository root, not inside `src/jarvis`.
 Recommended setup on Windows:
 
 ```powershell
-cd C:\Users\GAMER\Documents\jarvis
+cd C:/ruta/al/repositorio/Jarvis
 py -3.12 -m venv .venv
 .\.venv\Scripts\activate
 python -m pip install --upgrade pip
-python -m pip install -e .[desktop,voice]
+python -m pip install -e .[desktop,voice,image]
 python -m pip install -e .[dev]
 ```
 
