@@ -28,7 +28,7 @@ jobs:
           pip install -e ".[dev,desktop]"
           # Only the prompt-token-budget test needs a tokenizer; installing
           # just transformers avoids pulling the whole image extra (torch).
-          pip install "transformers>=4.57,<4.58"
+          pip install "transformers>=4.57"
 
       - name: Ruff (project rules)
         run: ruff check src
