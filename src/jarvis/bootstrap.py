@@ -271,6 +271,8 @@ from jarvis.voice_runtime.backends import (
 from jarvis.voice_runtime.backend_edge_tts import EdgeTTSProvider
 from jarvis.voice_runtime.backend_elevenlabs import ElevenLabsTTSProvider
 from jarvis.voice_runtime.gemini_live import GeminiLiveConversationService
+from jarvis.face_guard.service import FaceGuardService
+from jarvis.face_guard.opencv_backend import OpenCVCamera, OpenCVFaceEngine
 from jarvis.voice_runtime.backend_openvoice import OpenVoiceProvider
 from jarvis.voice_runtime.backend_rvc import RVCProvider
 from jarvis.voice_runtime.coqui_tts import CoquiXTTSProvider
@@ -1663,12 +1665,27 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
             data=outcome,
         )
 
+    def _face_guard_result(outcome: dict):  # noqa: ANN001
+        from jarvis.actions.models import ActionResult, ExecutionStatus
+
+        return ActionResult(status=ExecutionStatus.SUCCESS, message="", data=outcome)
+
+    def _face_guard_lock_workstation() -> None:
+        """Win+L via ctypes - mismo primitivo seguro que windows.workstation.lock."""
+        import ctypes
+
+        logging.getLogger("jarvis.face_guard").info("face_guard_lock_executed")
+        ctypes.windll.user32.LockWorkStation()  # type: ignore[attr-defined]
+
+    from pydantic import BaseModel as _EmptyPayloadBase
+
+    class _LivePayload(_EmptyPayloadBase):
+        pass
+
+    class _FaceGuardRemovePayload(_EmptyPayloadBase):
+        ban_id: str
+
     if gemini_live_service is not None:
-        from pydantic import BaseModel as _EmptyPayloadBase
-
-        class _LivePayload(_EmptyPayloadBase):
-            pass
-
         action_registry.register(
             ActionDefinition(
                 name="voice.live.start",
@@ -1686,6 +1703,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
                 ),
                 tags=("voice", "live", "conversation"),
                 risk=ActionRisk.SAFE,
+                semantic_aliases=(
+                    "modo live", "modo en vivo", "live", "conversacion natural",
+                    "conversa en vivo", "habla conmigo en tiempo real",
+                    "conversacion en tiempo real", "activa el modo live",
+                ),
             )
         )
         action_registry.register(
@@ -1698,6 +1720,11 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
                 ),
                 tags=("voice", "live", "conversation"),
                 risk=ActionRisk.SAFE,
+                semantic_aliases=(
+                    "termina modo live", "terminar modo live", "sal del modo live",
+                    "apaga el modo live", "termina la conversacion en vivo",
+                    "deja de hablar en tiempo real", "cierra live",
+                ),
             )
         )
     module_registry.register(
@@ -1818,6 +1845,105 @@ def build_application(settings: Settings | None = None) -> JarvisApplication:
         from jarvis.image_runtime.gemini_backend import GeminiImageProvider
 
         runtime_service._gemini_image_provider = GeminiImageProvider(settings)  # noqa: SLF001
+    face_guard_service = (
+        FaceGuardService(
+            settings,
+            camera_factory=OpenCVCamera,
+            engine_factory=lambda: OpenCVFaceEngine(settings),
+            lock_callable=_face_guard_lock_workstation,
+        )
+        if settings.face_guard_enabled
+        else None
+    )
+    if face_guard_service is not None:
+        action_registry.register(
+            ActionDefinition(
+                name="faceguard.ban",
+                description=(
+                    "Ban (banear/bloquear) the face currently in front of the "
+                    "webcam: capture several photos, build its biometric "
+                    "embedding and add it to the forbidden list. From then "
+                    "on, when the monitor sees that face at the laptop it "
+                    "locks the session. Use when the user says 'banea esa "
+                    "cara' or 'bloquea esa cara'. The person must be in "
+                    "front of the camera with good light."
+                ),
+                payload_model=_LivePayload,
+                handler=lambda context, payload: _face_guard_result(
+                    face_guard_service.ban_current_face(
+                        reason="baneada por orden del usuario"
+                    )
+                ),
+                tags=("face_guard", "security", "vision"),
+                risk=ActionRisk.SENSITIVE,
+                semantic_aliases=(
+                    "banea esa cara", "banear esa cara", "bloquea esa cara",
+                    "bloquear esa cara", "cara prohibida", "prohibida esa cara",
+                    "no quiero que entre", "banea a esta persona",
+                    "guardian de caras", "cara no grata",
+                ),
+            )
+        )
+        action_registry.register(
+            ActionDefinition(
+                name="faceguard.status",
+                description="Report (reportar) the face guard state: monitoring, banned count, consecutive hits.",
+                payload_model=_LivePayload,
+                handler=lambda context, payload: _face_guard_result(
+                    face_guard_service.status()
+                ),
+                tags=("face_guard", "security"),
+                risk=ActionRisk.SAFE,
+                semantic_aliases=("estado del guardian", "caras baneadas", "quien esta baneado"),
+            )
+        )
+        action_registry.register(
+            ActionDefinition(
+                name="faceguard.remove",
+                description="Remove (quitar) one face from the forbidden list by its ban id so it no longer triggers the lock.",
+                payload_model=_FaceGuardRemovePayload,
+                handler=lambda context, payload: _face_guard_result(
+                    {"removed": face_guard_service.remove_banned(payload.ban_id)}
+                ),
+                tags=("face_guard", "security"),
+                risk=ActionRisk.SENSITIVE,
+                semantic_aliases=("desbanea", "desbanear", "quita la cara", "permite esa cara"),
+            )
+        )
+        action_registry.register(
+            ActionDefinition(
+                name="faceguard.monitor.start",
+                description=(
+                    "Start (iniciar) the periodic face guard monitor: checks "
+                    "the webcam every few seconds and, after N consecutive "
+                    "banned-face sightings, locks the workstation. Use when "
+                    "the user wants the protection active."
+                ),
+                payload_model=_LivePayload,
+                handler=lambda context, payload: _face_guard_result(
+                    face_guard_service.start_monitoring()
+                ),
+                tags=("face_guard", "security"),
+                risk=ActionRisk.SAFE,
+                semantic_aliases=(
+                    "activa el guardian", "vigila las caras", "monitorea las caras",
+                    "protege la laptop",
+                ),
+            )
+        )
+        action_registry.register(
+            ActionDefinition(
+                name="faceguard.monitor.stop",
+                description="Stop (detener) the face guard monitor.",
+                payload_model=_LivePayload,
+                handler=lambda context, payload: _face_guard_result(
+                    face_guard_service.stop_monitoring()
+                ),
+                tags=("face_guard", "security"),
+                risk=ActionRisk.SAFE,
+                semantic_aliases=("detiene el guardian", "apaga el guardian"),
+            )
+        )
     retention_manager = RetentionManager(
         state_manager=state_manager,
         event_bus=event_bus,

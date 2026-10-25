@@ -267,3 +267,50 @@ def test_cuda_component_normalization_keeps_vae_upcast_policy() -> None:
     assert next(pipe.text_encoder_2.parameters()).dtype is torch.float16
     # A force_upcast VAE may legitimately remain float32 for numerical safety.
     assert next(pipe.vae.parameters()).dtype is torch.float32
+
+
+def test_torch_device_prefers_cpu_offload_on_small_vram(monkeypatch) -> None:
+    """Con <10GB libres la carga usa cuda_offload (28x mas rapido en la
+    5070 de 8GB: el pipeline completo no cabe y .to(cuda) thrashea."""
+    from jarvis.image_runtime import service as image_service
+
+    monkeypatch.setattr(image_service, "_free_cuda_vram_gb", lambda: 7.5)
+    monkeypatch.setattr(image_service, "_cuda_available", lambda: True)
+    device, dtype = image_service._torch_device_and_dtype()
+    assert device == "cuda_offload"
+    assert dtype is not None
+
+    monkeypatch.setattr(image_service, "_free_cuda_vram_gb", lambda: 16.0)
+    device, _ = image_service._torch_device_and_dtype()
+    assert device == "cuda"
+
+    monkeypatch.setattr(image_service, "_cuda_available", lambda: False)
+    device, dtype = image_service._torch_device_and_dtype()
+    assert device == "cpu"
+
+
+def test_backend_load_uses_model_cpu_offload_for_cuda_offload() -> None:
+    calls: list[str] = []
+
+    class _FakePipe:
+        def enable_model_cpu_offload(self) -> None:
+            calls.append("cpu_offload")
+
+        def enable_attention_slicing(self) -> None:
+            calls.append("slicing")
+
+        def to(self, *args, **kwargs):  # noqa: ANN001
+            calls.append("to")
+            return self
+
+    from jarvis.image_runtime.service import DiffusersImageBackend
+    from unittest.mock import patch
+
+    with patch(
+        "diffusers.StableDiffusionXLPipeline.from_single_file", return_value=_FakePipe()
+    ):
+        DiffusersImageBackend().load(
+            Path("x.safetensors"), device="cuda_offload", torch_dtype="fp16"
+        )
+    assert "cpu_offload" in calls
+    assert "to" not in calls, "offload y .to juntos causan fallos Half/Float"

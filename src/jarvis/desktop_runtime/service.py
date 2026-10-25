@@ -1757,7 +1757,14 @@ class DesktopRuntimeService:
             )
             and "browser.open" in available
         )
-        return dns_action or file_search or calculation or browser_action
+        live_mode = (
+            any(
+                phrase in folded
+                for phrase in ("modo live", "modo en vivo", "en tiempo real", "conversacion natural", "conversación natural")
+            )
+            and "voice.live.start" in available
+        )
+        return dns_action or file_search or calculation or browser_action or live_mode
 
     @staticmethod
     def _has_operational_language(text: str) -> bool:

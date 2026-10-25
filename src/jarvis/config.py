@@ -457,6 +457,48 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VRAM_SWAP_ENABLED", "JARVIS_VRAM_SWAP_ENABLED"),
     )
+    # Local image model selector: "sdxl" (Juggernaut, rapido) or
+    # "qwen_turbo" (Qwen-Image-2.1-Turbo: mejor texto/infografias).
+    image_model_kind: str = Field(
+        default="sdxl",
+        validation_alias=AliasChoices("IMAGE_MODEL_KIND", "JARVIS_IMAGE_MODEL_KIND"),
+    )
+    qwen_image_dir: Path = Field(
+        default=Path("models/qwen_image_turbo"),
+        validation_alias=AliasChoices("QWEN_IMAGE_DIR", "JARVIS_QWEN_IMAGE_DIR"),
+    )
+    # Guardian de caras prohibidas: banea la cara frente a la webcam y
+    # bloquea la sesion cuando esa cara reaparece.
+    face_guard_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_ENABLED", "JARVIS_FACE_GUARD_ENABLED"
+        ),
+    )
+    face_guard_models_dir: Path = Field(
+        default=Path("models/face"),
+        validation_alias=AliasChoices(
+            "FACE_GUARD_MODELS_DIR", "JARVIS_FACE_GUARD_MODELS_DIR"
+        ),
+    )
+    face_guard_match_threshold: float = Field(
+        default=0.363,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_MATCH_THRESHOLD", "JARVIS_FACE_GUARD_MATCH_THRESHOLD"
+        ),
+    )
+    face_guard_consecutive_hits: int = Field(
+        default=3,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_CONSECUTIVE_HITS", "JARVIS_FACE_GUARD_CONSECUTIVE_HITS"
+        ),
+    )
+    face_guard_interval_seconds: float = Field(
+        default=4.0,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_INTERVAL_SECONDS", "JARVIS_FACE_GUARD_INTERVAL_SECONDS"
+        ),
+    )
     # Gemini (AI Studio, free tier, no card): image generation in the
     # cloud — zero VRAM — and later the Live API for realtime voice.
     gemini_api_key: SecretStr | None = Field(
