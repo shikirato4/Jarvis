@@ -272,6 +272,7 @@ def test_cuda_component_normalization_keeps_vae_upcast_policy() -> None:
 def test_torch_device_prefers_cpu_offload_on_small_vram(monkeypatch) -> None:
     """Con <10GB libres la carga usa cuda_offload (28x mas rapido en la
     5070 de 8GB: el pipeline completo no cabe y .to(cuda) thrashea."""
+    pytest.importorskip("torch", reason="ci installs no image extras")
     from jarvis.image_runtime import service as image_service
 
     monkeypatch.setattr(image_service, "_free_cuda_vram_gb", lambda: 7.5)
@@ -290,6 +291,7 @@ def test_torch_device_prefers_cpu_offload_on_small_vram(monkeypatch) -> None:
 
 
 def test_backend_load_uses_model_cpu_offload_for_cuda_offload() -> None:
+    pytest.importorskip("diffusers", reason="ci installs no image extras")
     calls: list[str] = []
 
     class _FakePipe:
