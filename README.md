@@ -1,5 +1,10 @@
 # Jarvis Cognitive OS
 
+[![CI](https://github.com/shikirato4/Jarvis/actions/workflows/ci.yml/badge.svg?branch=checkpoint%2Fresearch-v2-p4a)](https://github.com/shikirato4/Jarvis/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.12%2B-3776AB?logo=python&logoColor=white)
+![Plataforma](https://img.shields.io/badge/plataforma-Windows-0078D6?logo=windows&logoColor=white)
+![Runtime](https://img.shields.io/badge/runtime-local%20%2B%20h%C3%ADbrido-8A2BE2)
+
 Jarvis is a local cognitive operating system organized around a shared runtime kernel. The same services back its desktop interface, CLI, HTTP API, automation, memory, model routing, voice, vision, system, research, writing, science, security, indexing, autonomy, and code-agent capabilities — plus an integrated real browser (Playwright), realtime voice conversation (Gemini Live), a face-guard that locks the workstation when a banned face appears, and local image generation with Qwen-Image-2.1-Turbo (legible text/infographics) or JuggernautXL SDXL.
 
 ## Cambios recientes
