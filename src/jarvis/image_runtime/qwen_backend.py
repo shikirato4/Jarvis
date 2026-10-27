@@ -166,18 +166,33 @@ class QwenImageBackend:
             width, height = _snap_to_native(width, height)
 
         logger.info("qwen fase 2: cargando transformer + vae")
-        # bf16 en todo (embeds del encoder CPU son bf16); el cuantizado FP8
-        # deja los pesos en 3.6GB y las activaciones/normas en bf16.
-        transformer = QwenImage21Transformer2DModel.from_pretrained(
-            self._pipeline_dir / "transformer", dtype=torch.bfloat16
-        )
-        try:
-            from torchao.quantization import Float8WeightOnlyConfig, quantize_  # type: ignore
+        # Preferir el GGUF Q4_K_M (kernels maduros de diffusers, ~10x mas
+        # rapido que la ruta bf16+torchao fp8 en Windows); fallback a la
+        # ruta anterior si no esta descargado.
+        gguf_path = self._pipeline_dir.parent / "qwen_image_turbo_gguf" / "qwen-image-2.1-turbo-Q4_K_M.gguf"
+        if gguf_path.is_file():
+            from diffusers import GGUFQuantizationConfig  # type: ignore
 
-            quantize_(transformer, Float8WeightOnlyConfig())
-            logger.info("qwen fase 2: transformer cuantizado a FP8 rowwise")
-        except Exception as exc:  # noqa: BLE001 - sin torchao seguimos en fp16
-            logger.warning("torchao no disponible, transformer queda fp16: %s", exc)
+            logger.info("qwen fase 2: transformer desde GGUF Q4_K_M (%s)", gguf_path.name)
+            transformer = QwenImage21Transformer2DModel.from_single_file(
+                str(gguf_path),
+                quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
+                config=str(self._pipeline_dir),
+                subfolder="transformer",
+            )
+        else:
+            # bf16 en todo (embeds del encoder CPU son bf16); el cuantizado FP8
+            # deja los pesos en 3.6GB y las activaciones/normas en bf16.
+            transformer = QwenImage21Transformer2DModel.from_pretrained(
+                self._pipeline_dir / "transformer", dtype=torch.bfloat16
+            )
+            try:
+                from torchao.quantization import Float8WeightOnlyConfig, quantize_  # type: ignore
+
+                quantize_(transformer, Float8WeightOnlyConfig())
+                logger.info("qwen fase 2: transformer cuantizado a FP8 rowwise")
+            except Exception as exc:  # noqa: BLE001 - sin torchao seguimos en fp16
+                logger.warning("torchao no disponible, transformer queda fp16: %s", exc)
         pipeline.transformer = transformer
         # La VAE de Qwen en fp16 da imagenes negras: siempre bf16 (0.68GB).
         pipeline.vae = AutoencoderKLQwenImage21.from_pretrained(
