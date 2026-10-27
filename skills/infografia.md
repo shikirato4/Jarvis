@@ -41,3 +41,16 @@ en el prompt de la imagen.
   redondos y frases cortas cuando puedas.
 - Para estilos: sé específico (flat, 3D, isométrico, acuarela,
   minimalista) y fija la paleta con nombres de color.
+
+## Garantia total de letras (híbrido)
+
+Si necesitas CERO galimatías (paneles del modelo inventando texto),
+usa el generador híbrido: el modelo pinta la plantilla SIN TEXTO y
+PIL escribe las letras exactas con tipografía real.
+
+```
+python scripts/infografia_hibrida.py ejemplo -o poster.png
+```
+
+Spec JSON: {titulo, subtitulo, paneles:[{titulo, puntos:[...]}],
+pie, fuente, estilo}. Verificado: transcripción 11/11 exacta.
