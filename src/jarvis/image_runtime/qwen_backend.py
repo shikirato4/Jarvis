@@ -46,17 +46,19 @@ class QwenImageBackend:
     def load(self, model_path: Path, *, device: str, torch_dtype: object | None) -> object:
         import os
 
-        from diffusers import QwenImage21Pipeline  # type: ignore
-
         # Evitar fragmentacion en GPUs de 8GB al intercambiar componentes.
         os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
         del device, torch_dtype  # los componentes fijan dtype/destino por fase
         if not (Path(model_path) / "model_index.json").exists():
+            # antes del import de diffusers: el error honesto debe poder
+            # probarse (y mostrarse) en entornos sin extras de imagen.
             raise FileNotFoundError(
                 f"No encontré los modelos de Qwen-Image en {model_path}. "
                 "Descarga el pipeline con: huggingface-cli download unsloth/Qwen-Image-2.1-Turbo-FP8 "
                 "--local-dir models/qwen_image_turbo"
             )
+        from diffusers import QwenImage21Pipeline  # type: ignore
+
         # Esqueleto ligero: scheduler + processor (~MB). Los pesos pesados se
         # cargan por fase en generate() y se liberan al terminar.
         pipe = QwenImage21Pipeline.from_pretrained(
