@@ -1352,7 +1352,7 @@ if QApplication is not None:
             image_layout.setSpacing(8)
             image_layout.addWidget(
                 self._section_header(
-                    "Image Studio", "JuggernautXL SDXL local · Diffusers · sin Fooocus"
+                    "Image Studio", "Qwen-Image-2.1-Turbo local · Diffusers"
                 )
             )
             self._image_status = QLabel("Image Runtime standby")
@@ -2921,7 +2921,7 @@ if QApplication is not None:
                 else []
             )
             self._image_status.setText(
-                f"Model: JuggernautXL SDXL | Backend: {image.get('backend', 'diffusers')} | "
+                f"Model: Qwen-Image-2.1-Turbo | Backend: {image.get('backend', 'diffusers')} | "
                 f"Status: {model_state} | Queue: {image.get('queue_length', 0)} | Fooocus: not required"
             )
             lines = [
@@ -3007,7 +3007,7 @@ if QApplication is not None:
                     "",
                     "Image Runtime:",
                     f"Backend: {image.get('backend', 'diffusers')}",
-                    "Model: JuggernautXL SDXL",
+                    "Model: Qwen-Image-2.1-Turbo",
                     f"Model loaded/status: {image.get('model_status', 'unknown')}",
                     f"Fooocus required: {str(bool(image.get('fooocus_required', False))).lower()}",
                     f"Output dir: {image.get('output_dir', '')}",

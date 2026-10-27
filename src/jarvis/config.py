@@ -457,12 +457,11 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("VRAM_SWAP_ENABLED", "JARVIS_VRAM_SWAP_ENABLED"),
     )
-    # Local image model selector: "sdxl" (Juggernaut, default seguro para
-    # clenes limpios) or "qwen_turbo" (Qwen-Image-2.1-Turbo: mejor texto
-    # legible/infografias). La laptop del usuario lo activa via .env
-    # (JARVIS_IMAGE_MODEL_KIND=qwen_turbo); sin modelos en disco cae a SDXL.
+    # Local image model selector: "qwen_turbo" (Qwen-Image-2.1-Turbo, EL
+    # motor de imagenes) or "sdxl" (legado). Sin modelos de Qwen en disco
+    # la generacion falla con instrucciones de descarga (sin fallback).
     image_model_kind: str = Field(
-        default="sdxl",
+        default="qwen_turbo",
         validation_alias=AliasChoices("IMAGE_MODEL_KIND", "JARVIS_IMAGE_MODEL_KIND"),
     )
     qwen_image_dir: Path = Field(

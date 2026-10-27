@@ -725,7 +725,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
             except JarvisError as exc:
                 logging.getLogger("jarvis.runtime").warning(
                     "image_generate_gemini_failed",
-                    extra={"error": str(exc), "fallback": "local_sdxl"},
+                    extra={"error": str(exc), "fallback": "local_image"},
                 )
         guard = self._vram_guard
         if guard is None:

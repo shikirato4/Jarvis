@@ -17,7 +17,7 @@ _REAL_CAPABILITIES = (
     "Parches revisables con confirmacion antes de aplicar.",
     "Git local seguro y GitHub/repo learning como referencia.",
     "Agent Mode real en Guided Control: observa, planea, pide confirmacion, ejecuta y verifica acciones aprobadas.",
-    "Generacion local de imagenes con JuggernautXL SDXL via Diffusers directo; Fooocus no requerido.",
+    "Generacion local de imagenes con Qwen-Image-2.1-Turbo (texto legible e infografias) via Diffusers.",
     "Voz/TTS local con salida preparada para no leer codigo largo.",
     "Doctor, benchmark, estado híbrido y diagnóstico verificable de NVFP4.",
     "Politica de seguridad: herramientas locales con permisos, secretos protegidos y contexto remoto mínimo.",
@@ -106,7 +106,7 @@ def get_capabilities_for_context_tab() -> str:
         "local. AUTO prefiere la ruta remota y usa la local sólo ante un fallo seguro; las rutas explícitas son "
         "estrictas. Brave Search aporta fuentes web; memoria, herramientas, permisos y "
         "estado permanecen locales. Conserva Code Agent, Git seguro, repo learning, adjuntos multimodales, "
-        "generacion local de imagenes con JuggernautXL via Diffusers sin Fooocus y voz/TTS. "
+        "generacion local de imagenes con Qwen-Image-2.1-Turbo via Diffusers y voz/TTS. "
         "Agent Mode real esta disponible con confirmacion para acciones sensibles y Stop Agent."
     )
 

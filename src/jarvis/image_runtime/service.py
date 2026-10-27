@@ -242,24 +242,17 @@ class ImageGenerationService:
     def __init__(self, *, settings, backend: ImageBackend | None = None, logger: logging.Logger | None = None, event_bus=None) -> None:
         self._settings = settings
         self._logger = logger or logging.getLogger("jarvis.image_runtime")
-        kind = str(getattr(settings, "image_model_kind", "sdxl") or "sdxl").casefold()
+        kind = str(getattr(settings, "image_model_kind", "qwen_turbo") or "qwen_turbo").casefold()
         model_path: Path | None = None
         if kind == "qwen_turbo":
             qwen_dir = Path(getattr(settings, "qwen_image_dir", "models/qwen_image_turbo"))
             if not qwen_dir.is_absolute():
                 qwen_dir = Path.cwd() / qwen_dir
-            if (qwen_dir / "model_index.json").exists():
-                if backend is None:
-                    from jarvis.image_runtime.qwen_backend import QwenImageBackend
+            model_path = qwen_dir
+            if backend is None:
+                from jarvis.image_runtime.qwen_backend import QwenImageBackend
 
-                    backend = QwenImageBackend()
-                model_path = qwen_dir
-            else:
-                # clon limpio sin los ~24GB de Qwen: caer a SDXL sin romperse.
-                self._logger.warning(
-                    "image_model_kind=qwen_turbo pero %s no existe; usando SDXL", qwen_dir
-                )
-                kind = "sdxl"
+                backend = QwenImageBackend()
         if kind != "qwen_turbo":
             model_path = getattr(settings, "resolved_image_model_path", None) or _DEFAULT_MODEL_PATH
         assert model_path is not None  # invariant: uno de los dos ramos lo asigna
@@ -303,7 +296,7 @@ class ImageGenerationService:
         return {
             "enabled": bool(getattr(self._settings, "image_enabled", True)),
             "backend": getattr(self._settings, "image_backend", "diffusers"),
-            "model": "JuggernautXL SDXL",
+            "model": "Qwen-Image-2.1-Turbo" if getattr(self._settings, "image_model_kind", "qwen_turbo") == "qwen_turbo" else "JuggernautXL SDXL",
             "model_status": self._model.status.value,
             "model_path": str(self._model.model_path),
             "model_path_exists": self._model.model_path.exists(),

@@ -83,7 +83,7 @@ code_patch_app = typer.Typer(help="Reviewable patch proposals and safe patch app
 code_change_app = typer.Typer(help="Controlled natural-language change generation for reviewable patches.")
 code_llm_app = typer.Typer(help="Safe optional LLM provider status and configuration.")
 web_app = typer.Typer(help="Safe web search status and Brave Search queries.")
-image_app = typer.Typer(help="Local image generation with JuggernautXL SDXL.")
+image_app = typer.Typer(help="Local image generation with Qwen-Image-2.1-Turbo.")
 app.add_typer(semantic_app, name="semantic")
 app.add_typer(ui_app, name="ui")
 app.add_typer(voice_app, name="voice")

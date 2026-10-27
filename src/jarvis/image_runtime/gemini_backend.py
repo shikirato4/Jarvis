@@ -93,7 +93,7 @@ class GeminiImageProvider:
             if getattr(response, "status_code", 200) == 429:
                 raise JarvisError(
                     "La llave gratis de Gemini no tiene cuota de generacion de "
-                    "imagenes (429). Se usara el modelo de imagen local (SDXL) "
+                    "imagenes (429). Se usara el modelo de imagen local "
                     "en su lugar; para imagenes en la nube necesitas billing "
                     "activo en Google AI Studio.",
                     component="image_runtime",

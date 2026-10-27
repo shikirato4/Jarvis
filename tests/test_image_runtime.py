@@ -331,12 +331,12 @@ def test_image_model_kind_defaults_to_qwen_and_falls_back_without_models(
     """kind=qwen_turbo usa el backend Qwen; sin modelos en disco cae a SDXL."""
     from jarvis.image_runtime.service import DiffusersImageBackend, ImageGenerationService
 
-    # default del config: sdxl (seguro en clones limpios; el usuario lo sube
-    # via .env). _env_file=None + sin vars para no heredar el ambient.
+    # default del config: qwen_turbo (Qwen es EL motor de imagenes).
+    # _env_file=None + sin vars para no heredar el ambient.
     monkeypatch.delenv("JARVIS_IMAGE_MODEL_KIND", raising=False)
     monkeypatch.delenv("IMAGE_MODEL_KIND", raising=False)
     settings = Settings(data_dir=tmp_path / "d", _env_file=None)
-    assert settings.image_model_kind == "sdxl"
+    assert settings.image_model_kind == "qwen_turbo"
 
     # con el dir de qwen presente (model_index.json) -> backend Qwen
     qwen_dir = tmp_path / "qwen"
@@ -352,10 +352,20 @@ def test_image_model_kind_defaults_to_qwen_and_falls_back_without_models(
     assert isinstance(svc._model._backend, QwenImageBackend)  # noqa: SLF001
     assert svc._model.model_path == qwen_dir  # noqa: SLF001
 
-    # sin el dir -> fallback SDXL
+    # sin el dir -> SIN fallback: backend Qwen y error honesto al cargar
+    # (el usuario decidio que solo Qwen es el motor; nada de SDXL oculto)
     svc2 = ImageGenerationService(
         settings=Settings(
             data_dir=tmp_path / "d3", image_model_kind="qwen_turbo", qwen_image_dir=tmp_path / "nohay"
         )
     )
-    assert isinstance(svc2._model._backend, DiffusersImageBackend)  # noqa: SLF001
+    assert isinstance(svc2._model._backend, QwenImageBackend)  # noqa: SLF001
+    from jarvis.image_runtime.qwen_backend import QwenImageBackend as _QB
+
+    try:
+        _QB().load(tmp_path / "nohay", device="cpu", torch_dtype=None)
+        raised = False
+    except FileNotFoundError as exc:
+        raised = True
+        assert "huggingface-cli download" in str(exc)
+    assert raised, "debe fallar con instrucciones de descarga"

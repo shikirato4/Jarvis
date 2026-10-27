@@ -25,7 +25,7 @@ class _ImageServiceLike(Protocol):
 class VramSwapGuard:
     """VRAM dance coordinator: one heavy model in the 8 GB GPU at a time.
 
-    Image generation with the local SDXL needs the whole GPU, so while it
+    Image generation with the local image model needs the whole GPU, so while it
     runs the local LLM is unloaded, and when it finishes the image model is
     unloaded and the LLM is restored in the background. External
     llama-servers are never touched.

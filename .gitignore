@@ -30,3 +30,4 @@ models/**/*.gguf
 /dist/
 /runtimes/llama-cpp-cuda/
 models/qwen_image_turbo/
+.env.bak*
