@@ -329,7 +329,7 @@ def test_image_model_kind_defaults_to_qwen_and_falls_back_without_models(
     monkeypatch, tmp_path: Path
 ) -> None:
     """kind=qwen_turbo usa el backend Qwen; sin modelos en disco cae a SDXL."""
-    from jarvis.image_runtime.service import DiffusersImageBackend, ImageGenerationService
+    from jarvis.image_runtime.service import ImageGenerationService
 
     # default del config: qwen_turbo (Qwen es EL motor de imagenes).
     # _env_file=None + sin vars para no heredar el ambient.
