@@ -130,6 +130,35 @@ class QwenImageBackend:
         return embeds
 
     # ---------------------------------------------------------------- fase 2
+    def _parchar_bf16_gguf(self, transformer: object, gguf_path: Path) -> None:
+        """from_single_file mangla los tensores BF16 del GGUF (los bytes se
+        reinterpretan como uint8 de doble ancho). Los BF16 reales se leen
+        directo del archivo y se reasignan. Verificado: txt_in (4096,4096)."""
+        import gguf  # type: ignore
+        import torch
+
+        lector = gguf.GGUFReader(str(gguf_path))
+        bf16 = gguf.GGMLQuantizationType.BF16
+        prefijo = "model.diffusion_model."
+        parchados = 0
+        with torch.no_grad():
+            for tensor in lector.tensors:
+                if tensor.tensor_type != bf16 or not tensor.name.startswith(prefijo):
+                    continue
+                relativo = tensor.name[len(prefijo):]
+                try:
+                    param = transformer.get_parameter(relativo)
+                except Exception:  # noqa: BLE001 - tensores sin contraparte
+                    continue
+                esperado = tuple(int(d) for d in tensor.shape)
+                if tuple(param.shape) != esperado or param.dtype == torch.uint8:
+                    datos = torch.from_numpy(tensor.data.view(dtype="uint16").astype("uint16"))
+                    correcto = datos.view(torch.bfloat16).reshape(esperado)
+                    param.data = correcto.to(param.device)
+                    parchados += 1
+        if parchados:
+            logger.info("qwen fase 2: %d tensores BF16 parchados del GGUF", parchados)
+
     def _generate_inner(
         self,
         pipeline: object,
@@ -180,6 +209,10 @@ class QwenImageBackend:
                 config=str(self._pipeline_dir),
                 subfolder="transformer",
             )
+            # Parchar los tensores BF16 que from_single_file mangla
+            # (reinterpretando los bytes como uint8 de doble ancho):
+            # son pocos (txt_in y normas); los leemos directo del GGUF.
+            self._parchar_bf16_gguf(transformer, gguf_path)
         else:
             # bf16 en todo (embeds del encoder CPU son bf16); el cuantizado FP8
             # deja los pesos en 3.6GB y las activaciones/normas en bf16.
