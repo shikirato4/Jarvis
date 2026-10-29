@@ -83,7 +83,7 @@ code_patch_app = typer.Typer(help="Reviewable patch proposals and safe patch app
 code_change_app = typer.Typer(help="Controlled natural-language change generation for reviewable patches.")
 code_llm_app = typer.Typer(help="Safe optional LLM provider status and configuration.")
 web_app = typer.Typer(help="Safe web search status and Brave Search queries.")
-image_app = typer.Typer(help="Local image generation with JuggernautXL SDXL.")
+image_app = typer.Typer(help="Local image generation with Qwen-Image-2.1-Turbo.")
 app.add_typer(semantic_app, name="semantic")
 app.add_typer(ui_app, name="ui")
 app.add_typer(voice_app, name="voice")
@@ -122,10 +122,10 @@ def _parse_json(raw: str | None) -> dict[str, Any]:
         normalized = normalized.replace(": True", ": true").replace(": False", ": false").replace(": None", ": null")
         try:
             return json.loads(normalized)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             parsed = ast.literal_eval(raw)
             if not isinstance(parsed, dict):
-                raise ValueError("payload must resolve to a dictionary")
+                raise ValueError("payload must resolve to a dictionary") from exc
             return parsed
 
 

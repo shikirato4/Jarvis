@@ -16,6 +16,11 @@ dependencies = [
   "numpy>=2.1.0",
   "Pillow>=11.2.0",
   "platformdirs>=4.3.0",
+  "psutil>=6.0.0",
+  "soundfile>=0.13.0",
+  "edge-tts>=7.0.0",
+  "playwright>=1.49.0",
+  "websocket-client>=1.8.0",
   "pypdf>=6.1.0",
   "pydantic>=2.11.0",
   "pydantic-settings>=2.8.0",
@@ -38,12 +43,13 @@ desktop = [
   "PySide6>=6.8.0",
   "mss>=10.0.0",
   "pywin32>=308",
+  "opencv-python>=5.0.0",
 ]
 image = [
   "accelerate>=1.1.0",
   "diffusers>=0.31.0",
   "safetensors>=0.4.5",
-  "transformers>=4.57,<4.58",
+  "transformers>=4.57",
 ]
 voice = [
   "faster-whisper>=1.1.1",
@@ -51,7 +57,7 @@ voice = [
   "coqui-tts[codec]>=0.27.5,<0.28",
   "torch>=2.11,<2.12",
   "torchaudio>=2.11,<2.12",
-  "transformers>=4.57,<4.58",
+  "transformers>=4.57",
   "pyttsx3>=2.98",
   "sounddevice>=0.4.7",
 ]
@@ -88,7 +94,47 @@ norecursedirs = [
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F"]
+# Broad families enforced since the 2026-10 quality pass. Rules disabled
+# below are deliberate, documented decisions — not oversights.
+select = ["E", "F", "W", "UP", "B", "SIM", "ASYNC", "S"]
+ignore = [
+  # Line length is legacy debt (~6k over 100 chars); tracked separately.
+  "E501",
+  # Asserts double as runtime invariants in this local app; the test
+  # suite obviously asserts by design.
+  "S101",
+  # "Hardcoded" tokens only appear in test fixtures (fake credentials).
+  "S105",
+  "S106",
+  # Tolerated best-effort cleanup paths; a dedicated pass is pending.
+  "S110",
+  "S112",
+  # urlopen is the fetcher module's job.
+  "S310",
+  # External feed XML via xml.etree; defusedxml migration pending.
+  "S314",
+  # subprocess with shell=False is the intended secure pattern here.
+  "S603",
+  # Popen without a shell, same rationale as S603.
+  "S606",
+  # Fires on prompt charter prose ("select ... from"); no SQL is executed.
+  "S608",
+  # Style-only rewrites (contextlib.suppress, if-collapsing, env casing).
+  "SIM102",
+  "SIM105",
+  "SIM112",
+  # typer.Option/Argument in defaults is the documented Typer idiom.
+  "B008",
+  # zip strictness needs a per-site review pass.
+  "B905",
+  # StrEnum changes str()/format semantics; needs a behavior review.
+  "UP042",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401", "F403"]
+# Offline research harnesses: dynamic loading and PATH-resolved tools by design.
+"scripts/eval_*.py" = ["S102", "S607"]
+# Tests exercise the guarded behaviors themselves (shell=True paths, PATH
+# binaries, fixture paths); the guards under test live in src/.
+"tests/**" = ["S108", "S604", "S607"]

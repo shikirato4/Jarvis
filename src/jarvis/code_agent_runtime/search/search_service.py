@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from hashlib import sha1
 from typing import Any
 
@@ -107,7 +107,7 @@ class LocalSearchService:
         docs: list[SearchDocument] = []
         tags = sorted(set([*repo.tags, *repo.frameworks]))
         skills = self._skills_for(tags, repo.languages.keys())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         metadata_body = self._sanitize(
             " ".join(
                 [
@@ -300,4 +300,4 @@ class LocalSearchService:
     @staticmethod
     def _id(*parts: str) -> str:
         raw = ":".join(parts)
-        return f"search-{sha1(raw.encode('utf-8')).hexdigest()[:16]}"
+        return f"search-{sha1(raw.encode('utf-8')).hexdigest()[:16]}"  # noqa: S324  # cache key, not crypto

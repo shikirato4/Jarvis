@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 from jarvis.config import Settings
@@ -109,7 +109,7 @@ class IndexingIngestionService:
                     },
                     provenance=build_provenance(source_path=path.resolve(), content=content).model_dump(mode="json"),
                     size_bytes=stat.st_size,
-                    modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                    modified_at=datetime.fromtimestamp(stat.st_mtime, tz=UTC),
                 )
             )
         return items

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -58,7 +58,7 @@ class WebSearchResponse(JarvisBaseModel):
     http_status: int | None = None
     retry_after_seconds: int | None = None
     rate_limited_retried: bool = False
-    searched_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    searched_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     used_private_context: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -75,6 +75,23 @@ class ResearchDepth(StrEnum):
     NONE = "none"
     NORMAL = "normal"
     DEEP = "deep"
+
+
+class ResponseDepth(StrEnum):
+    BRIEF = "brief"
+    STANDARD = "standard"
+    DETAILED = "detailed"
+    EXTENSIVE = "extensive"
+    EXHAUSTIVE = "exhaustive"
+
+
+class ResponseLengthRequest(JarvisBaseModel):
+    depth: ResponseDepth = ResponseDepth.STANDARD
+    target_words: int | None = None
+    minimum_words: int = 0
+    maximum_words: int | None = None
+    explicit_word_count: bool = False
+    matched_instruction: str | None = None
 
 
 class SourceScope(StrEnum):
@@ -104,7 +121,28 @@ class ResearchIntent(JarvisBaseModel):
     depth: ResearchDepth
     source_scope: SourceScope
     requested_format: str = "answer"
+    requested_length: ResponseLengthRequest = Field(
+        default_factory=ResponseLengthRequest
+    )
     requirements: list[ResearchRequirement] = Field(default_factory=list)
+
+
+class AnswerOutlineSection(JarvisBaseModel):
+    section_id: str
+    heading: str
+    question: str
+    aspects: list[str] = Field(default_factory=list)
+    requirement_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    citation_ids: list[str] = Field(default_factory=list)
+    target_words: int = 0
+    depth: ResponseDepth = ResponseDepth.STANDARD
+
+
+class AnswerOutline(JarvisBaseModel):
+    requested_words: int | None = None
+    target_words: int = 0
+    sections: list[AnswerOutlineSection] = Field(default_factory=list)
 
 
 class FreshnessWindow(StrEnum):
@@ -157,7 +195,7 @@ class FetchedSource(JarvisBaseModel):
     links: list[str] = Field(default_factory=list)
     published_at: str | None = None
     updated_at: str | None = None
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     page_references: list[int] = Field(default_factory=list)
     status: str = "ok"
     error: str | None = None
@@ -166,6 +204,8 @@ class FetchedSource(JarvisBaseModel):
     provider: str = "unknown"
     author: str | None = None
     organization: str | None = None
+    metadata_provenance: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    metadata_audit: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
 
 class EvidenceChunk(JarvisBaseModel):
@@ -179,7 +219,7 @@ class EvidenceChunk(JarvisBaseModel):
     relevance_score: float = 0.0
     published_at: str | None = None
     updated_at: str | None = None
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     page: int | None = None
     evidence_type: str = "factual"
     untrusted: bool = True
@@ -198,11 +238,12 @@ class CitationRecord(JarvisBaseModel):
     url: str
     domain: str
     published_at: str | None = None
-    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    retrieved_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     source_type: str = "web"
     provider: str = "unknown"
     author: str | None = None
     organization: str | None = None
+    metadata_provenance: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 class ResearchMetrics(JarvisBaseModel):
@@ -249,7 +290,7 @@ class WebResearchSession(JarvisBaseModel):
     citations: list[CitationRecord] = Field(default_factory=list)
     progress: list[ResearchProgress] = Field(default_factory=list)
     metrics: ResearchMetrics = Field(default_factory=ResearchMetrics)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
     limit_reached: bool = False
     partial: bool = False
@@ -267,5 +308,49 @@ class CitationValidation(JarvisBaseModel):
     cited_ids: list[str] = Field(default_factory=list)
     invalid_ids: list[str] = Field(default_factory=list)
     invalid_urls: list[str] = Field(default_factory=list)
+    malformed_citations: list[str] = Field(default_factory=list)
     unsupported_claims: list[str] = Field(default_factory=list)
     answer: str = ""
+
+
+class ClaimSupportStatus(StrEnum):
+    SUPPORTED = "SUPPORTED"
+    PARTIALLY_SUPPORTED = "PARTIALLY_SUPPORTED"
+    UNSUPPORTED = "UNSUPPORTED"
+    CONTRADICTED = "CONTRADICTED"
+
+
+class ClaimRequirementStatus(StrEnum):
+    DIRECTLY_RELEVANT = "DIRECTLY_RELEVANT"
+    SUPPORTING_CONTEXT = "SUPPORTING_CONTEXT"
+    OFF_REQUIREMENT = "OFF_REQUIREMENT"
+
+
+class ClaimEvidenceCheck(JarvisBaseModel):
+    claim_id: str
+    text: str
+    citation_ids: list[str] = Field(default_factory=list)
+    evidence_ids: list[str] = Field(default_factory=list)
+    suggested_citation_ids: list[str] = Field(default_factory=list)
+    preferred_citation_ids: list[str] = Field(default_factory=list)
+    replaced_citation_ids: list[str] = Field(default_factory=list)
+    requirement_id: str | None = None
+    section_heading: str | None = None
+    section_requirement_id: str | None = None
+    requirement_status: ClaimRequirementStatus = ClaimRequirementStatus.DIRECTLY_RELEVANT
+    requirement_reason: str = ""
+    status: ClaimSupportStatus
+    reason: str = ""
+    important: bool = True
+
+
+class ClaimLevelValidation(JarvisBaseModel):
+    valid: bool
+    claims: list[ClaimEvidenceCheck] = Field(default_factory=list)
+    supported: int = 0
+    partially_supported: int = 0
+    unsupported: int = 0
+    contradicted: int = 0
+    directly_relevant: int = 0
+    supporting_context: int = 0
+    off_requirement: int = 0

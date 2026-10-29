@@ -48,7 +48,7 @@ class CalculatorModule:
                 name="calculator.runtime",
                 module_name=self.name,
                 intent="calculator",
-                description="Bounded arithmetic evaluation for Nemotron tool calls.",
+                description="Bounded arithmetic evaluation for model tool calls.",
                 action_names=("calculator.evaluate",),
                 keywords=("calcula", "porcentaje", "raiz", "raíz", "multiplica"),
                 mode_policy=(

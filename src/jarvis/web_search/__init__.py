@@ -3,7 +3,13 @@ from __future__ import annotations
 from .fetcher import RawPage, SourceFetcher, UnsafeUrlError, normalize_url, validate_public_url
 from .models import (
     CitationValidation,
+    ClaimEvidenceCheck,
+    ClaimLevelValidation,
+    ClaimRequirementStatus,
+    ClaimSupportStatus,
     CitationRecord,
+    AnswerOutline,
+    AnswerOutlineSection,
     EvidenceChunk,
     FetchedSource,
     FreshnessRequirement,
@@ -12,6 +18,8 @@ from .models import (
     ResearchDepth,
     ResearchIntent,
     ResearchRequirement,
+    ResponseDepth,
+    ResponseLengthRequest,
     RequirementStatus,
     SearchMode,
     SourceScope,
@@ -32,7 +40,8 @@ from .providers import (
     check_brave_search_health,
 )
 from .provider_router import WebProviderRouter, build_web_search_router
-from .intent import parse_research_intent, public_web_topic, resolve_auto_scope
+from .intent import parse_research_intent, parse_response_length, public_web_topic, resolve_auto_scope
+from .metadata import MetadataSanityValidator
 from .research import (
     SearchPlanner,
     WebResearchOrchestrator,
@@ -52,16 +61,25 @@ __all__ = [
     "WebProviderRouter",
     "DisabledWebSearchProvider",
     "CitationValidation",
+    "ClaimEvidenceCheck",
+    "ClaimLevelValidation",
+    "ClaimRequirementStatus",
+    "ClaimSupportStatus",
     "CitationRecord",
+    "AnswerOutline",
+    "AnswerOutlineSection",
     "EvidenceChunk",
     "FetchedSource",
     "FreshnessRequirement",
     "FreshnessWindow",
+    "MetadataSanityValidator",
     "RawPage",
     "ResearchPlan",
     "ResearchDepth",
     "ResearchIntent",
     "ResearchRequirement",
+    "ResponseDepth",
+    "ResponseLengthRequest",
     "RequirementStatus",
     "SearchMode",
     "SourceScope",
@@ -83,6 +101,7 @@ __all__ = [
     "detect_freshness",
     "normalize_url",
     "parse_research_intent",
+    "parse_response_length",
     "public_web_topic",
     "resolve_auto_scope",
     "rank_and_deduplicate",

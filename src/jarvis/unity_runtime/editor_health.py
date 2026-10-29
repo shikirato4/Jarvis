@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from pydantic import Field
 
@@ -19,7 +19,7 @@ class UnityBridgeHealth(JarvisBaseModel):
     endpoint: str | None = None
     timeout_ms: int | None = None
     retry_count: int = 0
-    last_checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     last_error: str | None = None
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, object] = Field(default_factory=dict)

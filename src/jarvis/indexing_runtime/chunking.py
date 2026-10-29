@@ -33,7 +33,7 @@ class IntelligentIndexChunker:
                     token_estimate=raw.token_estimate,
                     start_offset=start_offset,
                     end_offset=end_offset,
-                    fingerprint=hashlib.sha256(f"{document.document_id}:{raw.index}:{raw.content}".encode("utf-8")).hexdigest(),
+                    fingerprint=hashlib.sha256(f"{document.document_id}:{raw.index}:{raw.content}".encode()).hexdigest(),
                     lexical_terms_hash=hashlib.sha256(raw.content.casefold().encode("utf-8")).hexdigest(),
                     metadata=document.metadata.copy(),
                     provenance=document.provenance.copy(),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from jarvis.autonomy.base import MissionRequest
@@ -84,7 +84,7 @@ class ResearchRuntimeService(RuntimeServiceContract):
             task.collection_name = payload.collection_name or task.collection_name
             task.autonomy_enabled = payload.run_via_autonomy
             task.metadata.update(payload.metadata)
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(UTC)
 
         self._repository.upsert_task(task)
         self._repository.append_event(task_id=task.task_id, event_type="research.started", payload={"query": task.query})
@@ -110,7 +110,7 @@ class ResearchRuntimeService(RuntimeServiceContract):
             )
             task.mission_id = mission.mission_id
             task.status = ResearchTaskStatus.DELEGATED
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(UTC)
             self._repository.upsert_task(task)
             self._repository.append_event(task_id=task.task_id, event_type="research.delegated", payload={"mission_id": mission.mission_id})
             self._event_bus.publish("deep_research.delegated", {"task_id": task.task_id, "mission_id": mission.mission_id})
@@ -118,7 +118,7 @@ class ResearchRuntimeService(RuntimeServiceContract):
 
         if should_require_approval(task):
             task.status = ResearchTaskStatus.WAITING_APPROVAL
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(UTC)
             self._repository.upsert_task(task)
             self._repository.append_event(task_id=task.task_id, event_type="research.approval_required", payload={"reason": "long_running_research"})
             self._event_bus.publish("deep_research.approval_required", {"task_id": task.task_id, "reason": "long_running_research"})
@@ -138,7 +138,7 @@ class ResearchRuntimeService(RuntimeServiceContract):
                 )
                 if handle.record.status.value == "deferred":
                     task.status = ResearchTaskStatus.PENDING
-                    task.updated_at = datetime.now(timezone.utc)
+                    task.updated_at = datetime.now(UTC)
                     self._repository.upsert_task(task)
                     return task
             task = self._pipeline.run(task, payload, correlation_id=f"research-{task.task_id}", operation_handle=handle)
@@ -153,7 +153,7 @@ class ResearchRuntimeService(RuntimeServiceContract):
                 self._operations.fail(handle.operation_id, error=str(exc), metadata={"task_id": task.task_id})
             task.status = ResearchTaskStatus.FAILED
             task.last_error = str(exc)
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(UTC)
             self._repository.upsert_task(task)
             self._repository.append_event(task_id=task.task_id, event_type="research.failed", payload={"error": str(exc)})
             self._event_bus.publish("deep_research.failed", {"task_id": task.task_id, "error": str(exc)})
@@ -163,7 +163,7 @@ class ResearchRuntimeService(RuntimeServiceContract):
         self._ensure_started()
         task = self.get_task(task_id)
         task.status = ResearchTaskStatus.CANCELLED
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self._repository.upsert_task(task)
         if self._operations is not None:
             self._operations.cancel_by_metadata("task_id", task_id, reason="research task cancelled")
@@ -174,7 +174,7 @@ class ResearchRuntimeService(RuntimeServiceContract):
         self._ensure_started()
         task = self.get_task(task_id)
         task.status = ResearchTaskStatus.PENDING
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self._repository.upsert_task(task)
         self._repository.append_event(task_id=task.task_id, event_type="research.approved", payload={})
         return self.run(

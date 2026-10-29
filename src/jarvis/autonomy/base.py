@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -167,7 +167,7 @@ class MissionPlan(JarvisBaseModel):
     summary: str
     strategy_name: str
     steps: list[MissionStep] = Field(default_factory=list)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -248,8 +248,8 @@ class MissionStepResult(JarvisBaseModel):
     message: str
     receipts: list[dict[str, Any]] = Field(default_factory=list)
     data: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class MissionState(JarvisBaseModel):
@@ -272,7 +272,7 @@ class MissionState(JarvisBaseModel):
     last_decision_at: datetime | None = None
     last_decision_by: str | None = None
     resume_token: str | None = None
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class MissionApprovalRequest(JarvisBaseModel):
@@ -290,7 +290,7 @@ class MissionApprovalRecord(JarvisBaseModel):
     decision: ApprovalDecision
     reason: str | None = None
     actor: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -303,7 +303,7 @@ class MissionControlActionRequest(JarvisBaseModel):
 
 
 class MissionPersistenceSnapshot(JarvisBaseModel):
-    mission: "AutonomousMission"
+    mission: AutonomousMission
     events: list[dict[str, Any]] = Field(default_factory=list)
     approvals: list[MissionApprovalRecord] = Field(default_factory=list)
 
@@ -334,8 +334,8 @@ class MissionReceipt(JarvisBaseModel):
     reflection: ReflectionResult | None = None
     recent_results: list[MissionStepResult] = Field(default_factory=list)
     message: str = ""
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class AutonomousMission(JarvisBaseModel):
@@ -352,8 +352,8 @@ class AutonomousMission(JarvisBaseModel):
     approval_history: list[MissionApprovalRecord] = Field(default_factory=list)
     control_events: list[dict[str, Any]] = Field(default_factory=list)
     verification_summary: MissionVerificationSummary | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

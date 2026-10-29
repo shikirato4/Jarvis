@@ -1,0 +1,320 @@
+[
+  {
+    "id": "files_search_1",
+    "intent": "action",
+    "family": "files_search",
+    "prompt": "Busca el informe trimestral en mis archivos.",
+    "required": [
+      "files.search"
+    ]
+  },
+  {
+    "id": "files_search_2",
+    "intent": "action",
+    "family": "files_search",
+    "prompt": "Find the quarterly report locally.",
+    "required": [
+      "files.search"
+    ]
+  },
+  {
+    "id": "files_search_3",
+    "intent": "action",
+    "family": "files_search",
+    "prompt": "Localiza el documento fiscal en el proyecto.",
+    "required": [
+      "files.search"
+    ]
+  },
+  {
+    "id": "files_read_1",
+    "intent": "action",
+    "family": "files_read",
+    "prompt": "Encuentra notas.txt y lee su contenido.",
+    "required": [
+      "files.search",
+      "files.read_text"
+    ]
+  },
+  {
+    "id": "files_read_2",
+    "intent": "action",
+    "family": "files_read",
+    "prompt": "Find notes.txt and read its text.",
+    "required": [
+      "files.search",
+      "files.read_text"
+    ]
+  },
+  {
+    "id": "files_read_3",
+    "intent": "action",
+    "family": "files_read",
+    "prompt": "Busca el acta y revisa lo que contiene.",
+    "required": [
+      "files.search",
+      "files.read_text"
+    ]
+  },
+  {
+    "id": "files_size_1",
+    "intent": "action",
+    "family": "files_size",
+    "prompt": "Busca foto.png y dime su tamaño.",
+    "required": [
+      "files.search",
+      "files.stat"
+    ]
+  },
+  {
+    "id": "files_size_2",
+    "intent": "action",
+    "family": "files_size",
+    "prompt": "Find photo.png and report its file size.",
+    "required": [
+      "files.search",
+      "files.stat"
+    ]
+  },
+  {
+    "id": "files_size_3",
+    "intent": "action",
+    "family": "files_size",
+    "prompt": "Localiza el PDF y consulta sus metadatos.",
+    "required": [
+      "files.search",
+      "files.stat"
+    ]
+  },
+  {
+    "id": "files_copy_1",
+    "intent": "action",
+    "family": "files_copy",
+    "prompt": "Busca el archivo y cópialo a la carpeta destino.",
+    "required": [
+      "files.search",
+      "files.copy"
+    ]
+  },
+  {
+    "id": "files_copy_2",
+    "intent": "action",
+    "family": "files_copy",
+    "prompt": "Find the file and copy it to the destination.",
+    "required": [
+      "files.search",
+      "files.copy"
+    ]
+  },
+  {
+    "id": "files_copy_3",
+    "intent": "action",
+    "family": "files_copy",
+    "prompt": "Localiza el informe y duplica una copia segura.",
+    "required": [
+      "files.search",
+      "files.copy"
+    ]
+  },
+  {
+    "id": "files_move_1",
+    "intent": "action",
+    "family": "files_move",
+    "prompt": "Busca el archivo y muévelo a otra carpeta.",
+    "required": [
+      "files.search",
+      "files.move"
+    ]
+  },
+  {
+    "id": "files_move_2",
+    "intent": "action",
+    "family": "files_move",
+    "prompt": "Find the file and move it elsewhere.",
+    "required": [
+      "files.search",
+      "files.move"
+    ]
+  },
+  {
+    "id": "files_move_3",
+    "intent": "action",
+    "family": "files_move",
+    "prompt": "Encuentra el documento y trasládalo al destino.",
+    "required": [
+      "files.search",
+      "files.move"
+    ]
+  },
+  {
+    "id": "windows_environment_1",
+    "intent": "state",
+    "family": "windows_environment",
+    "prompt": "Revisa qué versión de Windows tiene esta PC.",
+    "required": [
+      "windows.environment.inspect"
+    ]
+  },
+  {
+    "id": "windows_environment_2",
+    "intent": "state",
+    "family": "windows_environment",
+    "prompt": "Check this computer's Windows version.",
+    "required": [
+      "windows.environment.inspect"
+    ]
+  },
+  {
+    "id": "windows_environment_3",
+    "intent": "state",
+    "family": "windows_environment",
+    "prompt": "Comprueba la compilación del sistema operativo actual.",
+    "required": [
+      "windows.environment.inspect"
+    ]
+  },
+  {
+    "id": "windows_launch_1",
+    "intent": "action",
+    "family": "windows_launch",
+    "prompt": "Abre el Bloc de notas.",
+    "required": [
+      "windows.application.launch"
+    ]
+  },
+  {
+    "id": "windows_launch_2",
+    "intent": "action",
+    "family": "windows_launch",
+    "prompt": "Launch Notepad.",
+    "required": [
+      "windows.application.launch"
+    ]
+  },
+  {
+    "id": "windows_launch_3",
+    "intent": "action",
+    "family": "windows_launch",
+    "prompt": "Inicia la aplicación Calculadora.",
+    "required": [
+      "windows.application.launch"
+    ]
+  },
+  {
+    "id": "web_research_1",
+    "intent": "state",
+    "family": "web_research",
+    "prompt": "Busca en Internet la versión más reciente de ExampleDB.",
+    "required": [
+      "web.search"
+    ]
+  },
+  {
+    "id": "web_research_2",
+    "intent": "state",
+    "family": "web_research",
+    "prompt": "Search the web for the latest ExampleDB release.",
+    "required": [
+      "web.search"
+    ]
+  },
+  {
+    "id": "web_research_3",
+    "intent": "state",
+    "family": "web_research",
+    "prompt": "Investiga fuentes actuales sobre ExampleDB.",
+    "required": [
+      "web.search"
+    ]
+  },
+  {
+    "id": "python_version_1",
+    "intent": "state",
+    "family": "python_version",
+    "prompt": "Revisa la versión de Python instalada aquí.",
+    "required": [
+      "terminal.run"
+    ]
+  },
+  {
+    "id": "python_version_2",
+    "intent": "state",
+    "family": "python_version",
+    "prompt": "Check the installed Python version.",
+    "required": [
+      "terminal.run"
+    ]
+  },
+  {
+    "id": "python_version_3",
+    "intent": "state",
+    "family": "python_version",
+    "prompt": "Ejecuta un comando para saber la versión local de Python.",
+    "required": [
+      "terminal.run"
+    ]
+  },
+  {
+    "id": "windows_howto_1",
+    "intent": "information",
+    "family": "windows_howto",
+    "prompt": "¿Cómo consulto la versión de Windows?",
+    "required": []
+  },
+  {
+    "id": "windows_howto_2",
+    "intent": "information",
+    "family": "windows_howto",
+    "prompt": "How do I find my Windows version?",
+    "required": []
+  },
+  {
+    "id": "windows_howto_3",
+    "intent": "information",
+    "family": "windows_howto",
+    "prompt": "Explícame cómo ver el build del sistema operativo.",
+    "required": []
+  },
+  {
+    "id": "files_howto_1",
+    "intent": "information",
+    "family": "files_howto",
+    "prompt": "¿Cómo busco un archivo en Windows?",
+    "required": []
+  },
+  {
+    "id": "files_howto_2",
+    "intent": "information",
+    "family": "files_howto",
+    "prompt": "How can I find a local file?",
+    "required": []
+  },
+  {
+    "id": "files_howto_3",
+    "intent": "information",
+    "family": "files_howto",
+    "prompt": "Explícame cómo copiar un documento.",
+    "required": []
+  },
+  {
+    "id": "absent_email_1",
+    "intent": "action",
+    "family": "absent_email",
+    "prompt": "Envía un correo al equipo desde JARVIS.",
+    "required": []
+  },
+  {
+    "id": "absent_email_2",
+    "intent": "action",
+    "family": "absent_email",
+    "prompt": "Send an email to the team now.",
+    "required": []
+  },
+  {
+    "id": "absent_email_3",
+    "intent": "action",
+    "family": "absent_email",
+    "prompt": "Manda el informe por correo electrónico.",
+    "required": []
+  }
+]

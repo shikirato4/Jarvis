@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -37,7 +37,7 @@ class OperationStatus(StrEnum):
 class ServiceStatus(JarvisBaseModel):
     name: str
     status: HealthStatus
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     details: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -47,7 +47,7 @@ class RuntimeTaskRecord(JarvisBaseModel):
     target: str
     source: str
     status: TaskLifecycleStatus
-    received_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    received_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     output_summary: str | None = None
@@ -58,7 +58,7 @@ class ToolInvocationRecord(JarvisBaseModel):
     correlation_id: str
     tool_name: str
     status: str
-    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -72,7 +72,7 @@ class ModelInvocationRecord(JarvisBaseModel):
     status: str
     latency_ms: float | None = None
     fallback_used: bool = False
-    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -86,7 +86,7 @@ class EmbeddingInvocationRecord(JarvisBaseModel):
     status: str
     latency_ms: float | None = None
     fallback_used: bool = False
-    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -96,7 +96,7 @@ class UIAutomationRecord(JarvisBaseModel):
     risk_level: str
     status: str
     window_title: str | None = None
-    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -108,7 +108,7 @@ class VoiceInvocationRecord(JarvisBaseModel):
     status: str
     latency_ms: float | None = None
     session_id: str | None = None
-    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -122,7 +122,7 @@ class VisionInvocationRecord(JarvisBaseModel):
     latency_ms: float | None = None
     capture_target: str | None = None
     fallback_used: bool = False
-    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -134,7 +134,7 @@ class AutonomyInvocationRecord(JarvisBaseModel):
     step_id: str | None = None
     goal: str | None = None
     stop_reason: str | None = None
-    invoked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    invoked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -142,7 +142,7 @@ class ModeSnapshot(JarvisBaseModel):
     active_mode: str
     previous_mode: str | None = None
     sticky: bool = True
-    changed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    changed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     reason: str | None = None
 
 
@@ -204,7 +204,7 @@ class ServiceHealthProbe(JarvisBaseModel):
     liveness: bool
     readiness: bool
     status: OperationalHealthStatus
-    checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     latency_ms: float | None = None
     failures_recent: int = 0
     warnings: list[str] = Field(default_factory=list)
@@ -220,14 +220,14 @@ class OperationalIssue(JarvisBaseModel):
     symptom: str | None = None
     probable_cause: str | None = None
     dependency_name: str | None = None
-    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class DiagnosticReport(JarvisBaseModel):
     service_name: str
     status: OperationalHealthStatus
-    checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     issues: list[OperationalIssue] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     dependencies: list[DependencyHealthProbe] = Field(default_factory=list)
@@ -241,7 +241,7 @@ class FailureRecord(JarvisBaseModel):
     operation_name: str
     dependency_name: str | None = None
     error: str
-    recorded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -251,7 +251,7 @@ class SlowOperationRecord(JarvisBaseModel):
     operation_name: str
     dependency_name: str | None = None
     latency_ms: float
-    recorded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -260,8 +260,8 @@ class RecoveryRecord(JarvisBaseModel):
     service_name: str
     success: bool
     message: str
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -281,9 +281,9 @@ class ActiveOperationRecord(JarvisBaseModel):
     service_name: str
     operation_name: str
     status: OperationStatus
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_heartbeat_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_heartbeat_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     finished_at: datetime | None = None
     deadline_at: datetime | None = None
     cancel_requested_at: datetime | None = None
@@ -297,7 +297,7 @@ class ActiveOperationRecord(JarvisBaseModel):
 
 
 class ResourceSample(JarvisBaseModel):
-    sampled_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    sampled_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     cpu_percent: float | None = None
     process_cpu_percent: float | None = None
     ram_percent: float | None = None
@@ -323,7 +323,7 @@ class AutoRecoveryPolicy(JarvisBaseModel):
 class ServiceLifecycleRecord(JarvisBaseModel):
     service_name: str
     state: ServiceLifecycleState
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     start_count: int = 0
     stop_count: int = 0
     recover_count: int = 0
@@ -346,7 +346,7 @@ class ResilienceExecutionReceipt(JarvisBaseModel):
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    recorded_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    recorded_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ServiceOperationalSnapshot(JarvisBaseModel):
@@ -360,7 +360,7 @@ class ServiceOperationalSnapshot(JarvisBaseModel):
 
 
 class OperationalSnapshot(JarvisBaseModel):
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     app_name: str
     environment: str
     mode: ModeSnapshot
@@ -376,7 +376,7 @@ class OperationalSnapshot(JarvisBaseModel):
 
 
 class RuntimeDiagnosticsSnapshot(JarvisBaseModel):
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     app_name: str
     environment: str
     reports: list[DiagnosticReport] = Field(default_factory=list)

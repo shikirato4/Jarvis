@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -27,7 +27,7 @@ class DocumentProvenance(JarvisBaseModel):
     checksum_sha256: str | None = None
     author: str | None = None
     section: str | None = None
-    imported_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    imported_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -35,7 +35,7 @@ class CollectionRecord(JarvisBaseModel):
     name: str
     description: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
 
 
@@ -47,7 +47,7 @@ class DocumentRecord(JarvisBaseModel):
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     provenance: DocumentProvenance = Field(default_factory=DocumentProvenance)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
 
 
@@ -65,7 +65,7 @@ class ChunkRecord(JarvisBaseModel):
     embedding_vector: list[float] = Field(default_factory=list)
     embedding_model: str | None = None
     embedding_provider: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime | None = None
 
 
@@ -82,7 +82,7 @@ class DocumentIngestionRequest(JarvisBaseModel):
     persist_memory: bool = False
 
     @model_validator(mode="after")
-    def _validate_source(self) -> "DocumentIngestionRequest":
+    def _validate_source(self) -> DocumentIngestionRequest:
         if not self.path and not self.content:
             raise ValueError("either path or content must be provided")
         return self

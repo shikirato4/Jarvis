@@ -14,7 +14,7 @@ class LLMPromptBuilder:
     max_file_chars = 1_500
     max_targets = 3
 
-    def __init__(self, executor: "CodeAgentExecutor") -> None:
+    def __init__(self, executor: CodeAgentExecutor) -> None:
         self._executor = executor
 
     def build(self, task: str, targets: list[ResolvedTarget], *, skills: list[str]) -> LLMGenerateRequest:

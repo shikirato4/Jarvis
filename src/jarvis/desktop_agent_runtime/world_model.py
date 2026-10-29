@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import re
 from uuid import uuid4
 
@@ -23,7 +23,7 @@ class DesktopWorldModelBuilder:
             target_application=target_application,
             metadata={
                 "request": payload.model_dump(mode="json"),
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "initial_strategy": "grounded_desktop_agent",
             },
         )

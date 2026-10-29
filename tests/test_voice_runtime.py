@@ -1201,6 +1201,10 @@ def test_optional_clone_backend_absence_does_not_break_system(tmp_path: Path) ->
     assert result.provider_name == "in_memory"
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / ".env").exists(),
+    reason="root .env is developer-local; CI runs on factory defaults",
+)
 def test_settings_load_root_env_file_from_nested_cwd(monkeypatch) -> None:
     nested_cwd = Path(__file__).resolve().parents[1] / "src" / "jarvis"
     monkeypatch.chdir(nested_cwd)
@@ -1295,7 +1299,9 @@ def test_voice_runtime_segments_long_speech_and_plays_all_segments_in_order(tmp_
     )
     try:
         app.voice_runtime_service.speak(long_text, correlation_id="long-voice")
-        for _ in range(120):
+        # hasta 60s: en runners CI de 2 nucleos la sintesis+reproduccion de 11
+        # segmentos puede rebasar los 6s originales y falsificar el fallo.
+        for _ in range(1200):
             status = app.voice_runtime_service.status(lightweight_voice_clone=True)
             last = status["last_speech_result"]
             if last and last.get("correlation_id") == "long-voice":

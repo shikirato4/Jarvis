@@ -8,10 +8,11 @@ import re
 import socket
 import time
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .metadata import MetadataSanityValidator
 from .models import FetchedSource, SourceCandidate
 
 
@@ -166,6 +167,7 @@ class _MainContentParser(HTMLParser):
         self.links: list[str] = []
         self.title = ""
         self.metadata: dict[str, str] = {}
+        self.metadata_candidates: dict[str, list[dict[str, object]]] = {}
         self._in_title = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -182,19 +184,23 @@ class _MainContentParser(HTMLParser):
             key = str(values.get("property") or values.get("name") or "").casefold()
             content = str(values.get("content") or "").strip()
             aliases = {
-                "author": "author",
-                "article:author": "author",
-                "byl": "author",
-                "og:site_name": "organization",
-                "application-name": "organization",
-                "article:published_time": "published_at",
-                "date": "published_at",
-                "datepublished": "published_at",
-                "article:modified_time": "updated_at",
-                "datemodified": "updated_at",
+                "author": ("author", "meta:author", 0.86),
+                "article:author": ("author", "opengraph", 0.78),
+                "byl": ("author", "meta:byl", 0.82),
+                "og:site_name": ("organization", "opengraph", 0.90),
+                "application-name": ("organization", "meta:author", 0.70),
+                "article:published_time": ("published_at", "opengraph", 0.86),
+                "date": ("published_at", "meta:author", 0.72),
+                "datepublished": ("published_at", "schema.org", 0.96),
+                "article:modified_time": ("updated_at", "opengraph", 0.86),
+                "datemodified": ("updated_at", "schema.org", 0.96),
             }
             if key in aliases and content:
-                self.metadata.setdefault(aliases[key], content)
+                field_name, source, confidence = aliases[key]
+                self.metadata_candidates.setdefault(field_name, []).append(
+                    {"value": content, "source": source, "confidence": confidence}
+                )
+                self.metadata.setdefault(field_name, content)
         if tag in {"h1", "h2", "h3", "h4", "p", "li", "blockquote", "pre", "article", "section", "br"}:
             self._parts.append("\n")
         if tag == "a":
@@ -284,6 +290,28 @@ class SourceFetcher:
                 extracted = {}
             if not text.strip():
                 return self._failed(candidate, "empty", "page contained no extractable text")
+            metadata_candidates = {
+                key: list(value)
+                for key, value in dict(extracted.pop("_candidates", {})).items()
+            }
+            for field_name, value in {
+                "author": candidate.metadata.get("author"),
+                "organization": candidate.metadata.get("organization"),
+                "published_at": candidate.published_at,
+                "updated_at": raw.headers.get("last-modified"),
+            }.items():
+                if value:
+                    metadata_candidates.setdefault(field_name, []).append(
+                        {"value": value, "source": "candidate", "confidence": 0.55}
+                    )
+            if not metadata_candidates:
+                metadata_candidates = MetadataSanityValidator.from_flat(
+                    extracted, source="pdf" if content_type == "application/pdf" else "meta:author"
+                )
+            metadata = MetadataSanityValidator.validate(
+                metadata_candidates,
+                fallback_domain=urlsplit(final_url).hostname or candidate.domain,
+            )
             fetched = FetchedSource(
                 source_id=candidate.source_id,
                 url=candidate.url,
@@ -293,12 +321,18 @@ class SourceFetcher:
                 content_type=content_type,
                 text=text,
                 links=links[:100],
-                published_at=extracted.get("published_at") or candidate.published_at,
-                updated_at=extracted.get("updated_at") or raw.headers.get("last-modified"),
+                published_at=metadata.values.get("published_at"),
+                updated_at=metadata.values.get("updated_at"),
                 page_references=pages,
                 provider=candidate.provider,
-                author=extracted.get("author") or candidate.metadata.get("author"),
-                organization=extracted.get("organization"),
+                author=metadata.values.get("author"),
+                organization=metadata.values.get("organization"),
+                metadata_provenance=metadata.provenance,
+                metadata_audit={
+                    "rejected": metadata.rejected,
+                    "conflicts": metadata.conflicts,
+                    "publisher_fallbacks": metadata.publisher_fallbacks,
+                },
             )
             self._cache[safe_url] = (time.monotonic(), fetched.model_copy(deep=True))
             return fetched
@@ -313,11 +347,14 @@ class SourceFetcher:
         encoding = match.group(1) if match else "utf-8"
         return body.decode(encoding, errors="replace")
 
-    def _extract_html(self, body: bytes, headers: dict[str, str], base_url: str) -> tuple[str, str, list[str], dict[str, str]]:
+    def _extract_html(self, body: bytes, headers: dict[str, str], base_url: str) -> tuple[str, str, list[str], dict[str, object]]:
         parser = _MainContentParser()
         parser.feed(self._decode(body, headers))
         links = [urljoin(base_url, item) for item in parser.links if item.startswith(("http://", "https://", "/"))]
-        return parser.text(), parser.title, links, parser.metadata
+        return parser.text(), parser.title, links, {
+            **parser.metadata,
+            "_candidates": parser.metadata_candidates,
+        }
 
     @staticmethod
     def _extract_pdf(body: bytes) -> tuple[str, list[int]]:
@@ -325,7 +362,7 @@ class SourceFetcher:
         return text, pages
 
     @staticmethod
-    def _extract_pdf_with_metadata(body: bytes) -> tuple[str, list[int], dict[str, str]]:
+    def _extract_pdf_with_metadata(body: bytes) -> tuple[str, list[int], dict[str, object]]:
         import pypdf
 
         reader = pypdf.PdfReader(io.BytesIO(body))
@@ -348,7 +385,10 @@ class SourceFetcher:
             }.items()
             if value
         }
-        return "\n\n".join(parts), pages, metadata
+        return "\n\n".join(parts), pages, {
+            **metadata,
+            "_candidates": MetadataSanityValidator.from_flat(metadata, source="pdf"),
+        }
 
     @staticmethod
     def _failed(candidate: SourceCandidate, status: str, error: str) -> FetchedSource:

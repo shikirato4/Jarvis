@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from hashlib import sha1
 
 from jarvis.code_agent_runtime.repo_library.models import RepoRecord, RepoSnippet
@@ -73,7 +73,7 @@ class LearningExtractor:
     def _entry(self, *, repo: RepoRecord, source_file: str, skill: str, learning_type: str, title: str, summary: str, observed_pattern: str, when_to_use: str, when_to_avoid: str, snippet: str, tags: list[str]) -> LearningEntry:
         raw_id = f"{repo.id}:{source_file}:{skill}:{learning_type}:{title}"
         return LearningEntry(
-            id=f"learn-{sha1(raw_id.encode('utf-8')).hexdigest()[:12]}",
+            id=f"learn-{sha1(raw_id.encode('utf-8')).hexdigest()[:12]}",  # noqa: S324  # content fingerprint, not crypto
             repo_id=repo.id,
             repo_name=repo.name,
             source_file=source_file,
@@ -86,7 +86,7 @@ class LearningExtractor:
             when_to_avoid=self._sanitize(when_to_avoid),
             snippet=self._sanitize(snippet),
             license="unknown",
-            extracted_at=datetime.now(timezone.utc).isoformat(),
+            extracted_at=datetime.now(UTC).isoformat(),
             confidence=self._confidence(repo, source_file),
             tags=sorted(set(self._sanitize(tag) for tag in tags if tag)),
         )

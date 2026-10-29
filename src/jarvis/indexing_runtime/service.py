@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import RLock
 from uuid import uuid4
 
@@ -163,7 +163,7 @@ class IndexingRuntimeService(RuntimeServiceContract):
             trigger=payload.trigger,
             requested_by=payload.requested_by,
             metadata=payload.metadata,
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
         )
         self._event_bus.publish("indexing.job.started", {"job_id": job.job_id, "source_ids": list(job.source_ids), "trigger": job.trigger.value})
         receipt = self._pipeline.run(job=job, sources=sources, force_reindex=payload.force_reindex)
@@ -224,7 +224,7 @@ class IndexingRuntimeService(RuntimeServiceContract):
 
     def reconcile(self) -> dict[str, object]:
         self._ensure_started()
-        self._last_reconcile_at = datetime.now(timezone.utc)
+        self._last_reconcile_at = datetime.now(UTC)
         return {"reconciled_at": self._last_reconcile_at.isoformat(), "sources": len(self._repository.list_sources())}
 
     def list_jobs(self) -> list[IndexJob]:

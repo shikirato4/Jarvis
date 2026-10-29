@@ -1,0 +1,13 @@
+{
+  "version": "prelora31-v1",
+  "partitions": {
+    "development": {
+      "cases": 36,
+      "sha256": "619c2121b5910070d0b82527612404d8065e311a7fe0c736311e453a1da6ab8e"
+    },
+    "blind_final": {
+      "cases": 36,
+      "sha256": "4a6bb75de65099d98f0f55caa603ad504cab0a6ff0bb7f06e20abe5d738f39ba"
+    }
+  }
+}

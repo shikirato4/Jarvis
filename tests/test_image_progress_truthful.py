@@ -39,6 +39,7 @@ def _service(backend):
         _env_file=None,
         workspace_root=Path.cwd(),
         data_dir=Path.cwd(),
+        image_model_kind="sdxl",
         image_model_path=Path("pyproject.toml"),
         image_output_dir=Path.cwd(),
     )

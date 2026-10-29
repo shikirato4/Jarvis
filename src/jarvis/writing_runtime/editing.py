@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from jarvis.integrations import WordCOMBackend, WordCOMError, WordCOMUnavailableError, WordNoActiveDocumentError
 from jarvis.ui_automation.base import UIOperationReceipt, UIOperationStatus, UIRiskLevel
@@ -40,7 +40,7 @@ class WritingEditor:
     def _write_via_word_com(self, *, text: str, context: WritingContext, request: WritingContinuationRequest, correlation_id: str) -> UIOperationReceipt | None:
         if self._word_backend is None:
             return None
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         try:
             write_result = self._word_backend.insert_text_at_cursor(text)
             if bool(request.metadata.get("save_document", False)):
@@ -61,7 +61,7 @@ class WritingEditor:
                     **write_result,
                 },
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
         except WordNoActiveDocumentError:
             raise

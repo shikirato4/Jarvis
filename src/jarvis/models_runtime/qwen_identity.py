@@ -13,8 +13,8 @@ class InvalidQwenIdentityError(ValueError):
 
 def local_model_policy_description() -> str:
     return (
-        "Configured Qwen3.5-9B IQ4_XS quantized local profile; configured "
-        "aliases may identify the same model through an OpenAI-compatible local server"
+        "Qwen3.5-9B quantized (IQ4_XS GGUF); the configured model identifier and "
+        "aliases are matched against the local OpenAI-compatible server"
     )
 
 

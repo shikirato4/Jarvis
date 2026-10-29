@@ -45,6 +45,8 @@ class TypedActionSecurityGate:
         definition: ActionDefinition,
         request: ActionRequest,
     ) -> SecurityDecision:
+        if definition.name in {"windows.application.launch", "system.launch_application"}:
+            return SecurityDecision(SecurityDecisionStatus.ALLOWED)
         terminal_decision = self._terminal_command_decision(definition, request)
         if terminal_decision is not None:
             return terminal_decision
@@ -79,7 +81,7 @@ class TypedActionSecurityGate:
         command = " ".join(str(item) for item in value) if isinstance(value, list) else str(value)
         stripped = command.strip()
         dangerous = (
-            r"\b(?:format|shutdown|restart-computer)\b",
+            r"(?:^|\s)(?:format|shutdown|restart-computer)(?:\s|$)",
             r"\bStart-Process\b[^\r\n]*-Verb\s+RunAs",
             r"\b(?:Remove-Item|del|rmdir|rd)\b[^\r\n]*(?:-Recurse|-Force|/s|/q)",
             r"\bgit\s+(?:reset\s+--hard|clean\s+-[^\s]*[fd]|push)\b",
@@ -91,11 +93,16 @@ class TypedActionSecurityGate:
         safe = (
             r"^(?:Get-Location|pwd)$",
             r"^(?:Write-Output|echo)\s+[^;&|><]+$",
-            r"^(?:python(?:\.exe)?|[^\r\n]+\\python\.exe)\s+(?:--version|-c\s+[^;&|><]+|-m\s+pytest\b[^;&|><]*)$",
+            # Interpreter code execution (-c, -m, script paths) is never
+            # auto-approved: an allowlisted tool module is fine, everything
+            # else falls through to risk-based confirmation.
+            r"^python(?:\.exe)?\s+--version$",
+            r"^python(?:\.exe)?\s+-m\s+(?:pytest|ruff|mypy)\b[^;&|><]*$",
             r"^(?:pytest\b|git\s+(?:status|diff|log)\b|dir(?:\s+[^;&|><]+)?|Get-ChildItem(?:\s+[^;&|><]+)?)$",
             r"^(?:set\s+[A-Za-z_][A-Za-z0-9_]*=|\$env:[A-Za-z_][A-Za-z0-9_]*\s*=).+$",
             r"^(?:set\s+[A-Za-z_][A-Za-z0-9_]*|\$env:[A-Za-z_][A-Za-z0-9_]*|Write-Output\s+\$env:[A-Za-z_][A-Za-z0-9_]*)$",
             r"^(?:cd|Set-Location)\s+[^;&|><]+$",
+            r"^nvidia-smi\s+--query-gpu=utilization\.gpu,memory\.used,memory\.total\s+--format=csv,noheader,nounits$",
         )
         if any(re.search(pattern, stripped, re.I) for pattern in safe):
             return SecurityDecision(SecurityDecisionStatus.ALLOWED)

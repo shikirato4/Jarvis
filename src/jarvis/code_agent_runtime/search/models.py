@@ -44,7 +44,7 @@ class SearchDocument:
         }
 
     @staticmethod
-    def from_dict(payload: dict[str, Any]) -> "SearchDocument":
+    def from_dict(payload: dict[str, Any]) -> SearchDocument:
         return SearchDocument(
             id=str(payload.get("id", "")),
             source_type=str(payload.get("source_type", "")),

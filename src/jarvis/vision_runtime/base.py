@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -83,7 +83,7 @@ class ScreenCaptureResult(JarvisBaseModel):
     image_path: str | None = None
     window: WindowInfo | None = None
     region: ScreenRegion | None = None
-    captured_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    captured_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @field_serializer("image_bytes", when_used="json")
@@ -119,7 +119,7 @@ class OCRResult(JarvisBaseModel):
     latency_ms: float = 0.0
     fallback_used: bool = False
     blocks: list[OCRTextBlock] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -243,8 +243,8 @@ class VisionOperationReceipt(JarvisBaseModel):
     analysis_result: VisionAnalysisResult | None = None
     awareness_result: UIAwarenessResult | None = None
     data: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ScreenCaptureBackend(Protocol):

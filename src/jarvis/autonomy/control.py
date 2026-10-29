@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from jarvis.core.errors import AutonomyValidationError
@@ -42,7 +42,7 @@ class MissionControlService:
         reason: str | None = None,
         status: MissionStatus = MissionStatus.AWAITING_REVIEW,
     ) -> AutonomousMission:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         mission.state = mission.state.model_copy(
             update={
                 "status": status,
@@ -275,7 +275,7 @@ class MissionControlService:
         clear_pending: bool = False,
         clear_stop_reason: bool = False,
     ) -> AutonomousMission:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         state_update: dict[str, object] = {
             "status": status,
             "paused": paused,

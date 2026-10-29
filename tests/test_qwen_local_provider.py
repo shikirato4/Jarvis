@@ -153,6 +153,35 @@ def test_qwen_local_maps_only_verified_reasoning_off_switch() -> None:
     assert low_payload["chat_template_kwargs"] == {"enable_thinking": False}
 
 
+def test_qwen_local_disables_thinking_when_completion_budget_is_small() -> None:
+    """Cupo corto + thinking = respuesta vacia: se apaga solo el thinking."""
+
+    provider = QwenLocalProvider(_settings())
+    request = ModelRequest(
+        task_type="assistant",
+        messages=[ModelMessage(role="user", content="que hora es")],
+        max_tokens=160,
+        metadata={"reasoning_preference": "medium"},
+    )
+
+    payload = provider._request_payload(request, temperature=0.0, stream=False)  # noqa: SLF001
+    assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+
+    # El perfil "detailed" del chat pide 1200: tambien se protege.
+    detallado = request.model_copy(update={"max_tokens": 1200})
+    detallado_payload = provider._request_payload(  # noqa: SLF001
+        detallado, temperature=0.0, stream=False
+    )
+    assert detallado_payload["chat_template_kwargs"] == {"enable_thinking": False}
+
+    # Con cupo amplio el razonamiento sigue disponible.
+    amplio = request.model_copy(update={"max_tokens": 4096})
+    amplio_payload = provider._request_payload(  # noqa: SLF001
+        amplio, temperature=0.0, stream=False
+    )
+    assert "chat_template_kwargs" not in amplio_payload
+
+
 def test_qwen_detailed_profile_is_instructed_to_finish_without_repetition() -> None:
     provider = QwenLocalProvider(_settings())
     request = ModelRequest(

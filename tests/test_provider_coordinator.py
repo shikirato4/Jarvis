@@ -44,6 +44,9 @@ class FakeClock:
     def advance(self, seconds: float) -> None:
         self.now += seconds
 
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
 
 class FakeProvider:
     def __init__(
@@ -68,6 +71,7 @@ class FakeProvider:
         self.stream_calls = 0
         self.infer_error: Exception | None = None
         self.stream_error: Exception | None = None
+        self.stream_error_sequence: list[Exception] = []
         self.stream_prefix = name
         self.retry_after_seconds: float | None = None
         self.ensure_ready_calls = 0
@@ -110,6 +114,8 @@ class FakeProvider:
         self, request, *, model_name, temperature, timeout_seconds, cancel_check=None
     ) -> Iterator[StreamChunk]:
         self.stream_calls += 1
+        if self.stream_error_sequence:
+            raise self.stream_error_sequence.pop(0)
         if self.stream_error is not None:
             raise self.stream_error
         yield StreamChunk(text=self.stream_prefix)
@@ -321,8 +327,9 @@ def test_both_unavailable_provides_combined_diagnostic() -> None:
         coordinator.infer(ModelRequest(task_type="assistant", prompt="hola"))
 
     message = str(captured.value)
-    assert "nvidia_nim" in message
-    assert "nemotron_omni_local" in message
+    assert message.startswith("Ambas rutas de modelo fallaron:")
+    assert "nvidia_nim" not in message
+    assert "nemotron_omni_local" not in message
     assert (
         coordinator.selection_snapshot().provider_status.state
         is ProviderOperationalState.BOTH_UNAVAILABLE
@@ -458,7 +465,8 @@ def test_stream_failure_retries_local_only_before_content_and_external_effects()
     )
 
     assert "".join(chunk.text for chunk in chunks) == local.provider_name
-    assert cloud.stream_calls == 1
+    # One bounded cloud retry is attempted before dropping to local.
+    assert cloud.stream_calls == 2
     assert local.stream_calls == 1
     assert any(chunk.metadata.get("fallback_from") == "nvidia_nim" for chunk in chunks)
 
@@ -524,8 +532,7 @@ def test_stream_reports_combined_error_when_local_becomes_unavailable() -> None:
 
     assert chunks[-1].done is True
     assert chunks[-1].error is not None
-    assert "nvidia_nim" in chunks[-1].error
-    assert "nemotron_omni_local" in chunks[-1].error
+    assert "Ambas rutas de modelo fallaron" in chunks[-1].error
     assert chunks[-1].metadata["incomplete"] is True
 
 
@@ -539,3 +546,55 @@ def test_auto_inference_failure_falls_back_once_without_legacy_providers() -> No
     assert response.fallback_used is True
     assert cloud.infer_calls == 1
     assert local.infer_calls == 1
+
+
+# ------------------------------------------------ retry en la nube antes del fallback
+
+
+def _cloud_error(status: int = 429, retry_after: float | None = 2.0):
+    from jarvis.models_runtime.openai_compatible import OpenAICompatibleError
+
+    return OpenAICompatibleError(
+        "transient",
+        provider_name="nvidia_nim",
+        status_code=status,
+        retry_after_seconds=retry_after,
+    )
+
+
+def test_auto_retries_transient_cloud_error_before_local_fallback() -> None:
+    coordinator, cloud, local = _coordinator("auto")
+    cloud.stream_error_sequence = [_cloud_error()]
+
+    chunks = list(coordinator.stream(_request()))
+
+    assert cloud.stream_calls == 2, "debe reintentar la nube una vez"
+    assert local.stream_calls == 0, "el exito en el reintento evita el local"
+    assert chunks[0].text == "nvidia_nim"
+    assert chunks[-1].done is True
+
+
+def test_auto_falls_back_to_local_when_cloud_retry_exhausts() -> None:
+    coordinator, cloud, local = _coordinator("auto")
+    cloud.stream_error_sequence = [_cloud_error(), _cloud_error()]
+
+    chunks = list(coordinator.stream(_request()))
+
+    assert cloud.stream_calls == 2, "un reintento y basta"
+    assert local.stream_calls == 1, "luego cae al local"
+    assert chunks[-1].metadata.get("fallback_from") == "nvidia_nim"
+
+
+def test_cloud_retry_skipped_when_retry_after_exceeds_cap() -> None:
+    coordinator, cloud, local = _coordinator("auto")
+    cloud.stream_error_sequence = [_cloud_error(retry_after=30.0)]
+
+    chunks = list(coordinator.stream(_request()))
+
+    assert cloud.stream_calls == 1, "retry_after enorme: no reintentar"
+    assert local.stream_calls == 1
+    assert chunks[-1].metadata.get("fallback_from") == "nvidia_nim"
+
+
+def _request() -> ModelRequest:
+    return ModelRequest(task_type="assistant", prompt="hola")

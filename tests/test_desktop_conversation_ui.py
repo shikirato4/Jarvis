@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from concurrent.futures import Future
 import time
 from threading import Event
@@ -20,7 +20,7 @@ def _message(message_id: str, role: str, content: str, *, minute: int) -> Deskto
         message_id=message_id,
         role=role,
         content=content,
-        created_at=datetime(2026, 4, 8, 10, minute, 0, tzinfo=timezone.utc),
+        created_at=datetime(2026, 4, 8, 10, minute, 0, tzinfo=UTC),
     )
 
 

@@ -12,4 +12,4 @@ def test_desktop_theme_contains_core_selectors() -> None:
     assert "QFrame#ConversationSurface" in css
     assert "QLabel#ConversationSurfaceTitle" in css
     assert "QLabel#StatusBadge" in css
-    assert JARVIS_QSS == css
+    assert css == JARVIS_QSS

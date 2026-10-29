@@ -210,3 +210,93 @@ def test_thinking_projection_surfaces_real_textual_continuation_event() -> None:
 
     assert projection.lines == ("Continuando respuesta…",)
     assert "continuación textual acotada" in str(projection.safe_summary)
+
+
+def test_terminal_events_project_safe_lifecycle_without_output_text() -> None:
+    events = EventBus()
+    store = RuntimeActivityStore(events)
+    common = {"run_id": "terminal-run", "correlation_id": "terminal-corr", "execution_id": "exec-1"}
+
+    events.publish("terminal.session_started", {**common, "session_id": "session-1", "pid": 42})
+    events.publish("terminal.command_started", {**common, "session_id": "session-1", "status": "running"})
+    events.publish(
+        "terminal.output",
+        {**common, "stream": "stdout", "sequence": 1, "characters": 18, "text": "SECRET-COMMAND-OUTPUT"},
+    )
+    events.publish("terminal.command_completed", {**common, "status": "succeeded", "exit_code": 0})
+    events.publish("terminal.session_closed", {**common, "session_id": "session-1", "pid": 42})
+
+    snapshot = store.snapshot(run_id="terminal-run")
+    assert [event.event_name for event in snapshot.events] == [
+        "terminal.command_started",
+        "terminal.output",
+        "terminal.command_completed",
+    ]
+    assert snapshot.nodes[0].component == "terminal"
+    assert snapshot.nodes[0].state is RuntimeActivityState.SUCCESS
+    assert all(event.action == "terminal.run" for event in snapshot.events)
+    assert all(event.call_id == "exec-1" for event in snapshot.events)
+    assert "SECRET-COMMAND-OUTPUT" not in repr(snapshot)
+
+
+def test_terminal_events_without_run_id_are_not_assigned_to_agent_activity() -> None:
+    events = EventBus()
+    store = RuntimeActivityStore(events)
+    events.publish(
+        "terminal.command_started",
+        {"correlation_id": "standalone", "execution_id": "exec-standalone", "status": "running"},
+    )
+    assert store.snapshot().events == []
+
+
+def test_terminal_failure_timeout_and_cancel_states_are_distinct_events() -> None:
+    events = EventBus()
+    store = RuntimeActivityStore(events)
+    common = {"run_id": "terminal-states", "correlation_id": "corr", "execution_id": "exec"}
+    events.publish("terminal.command_failed", {**common, "error_code": "PROCESS_FAILED"})
+    events.publish("terminal.command_timed_out", {**common, "error_code": "TIMED_OUT"})
+    events.publish("terminal.command_cancelled", {**common, "error_code": "CANCELLED"})
+    snapshot = store.snapshot(run_id="terminal-states")
+    assert [event.event_name for event in snapshot.events] == [
+        "terminal.command_failed",
+        "terminal.command_timed_out",
+        "terminal.command_cancelled",
+    ]
+    assert [event.error_type for event in snapshot.events] == [
+        "PROCESS_FAILED", "TIMED_OUT", "CANCELLED",
+    ]
+    assert snapshot.nodes[0].state is RuntimeActivityState.CANCELLED
+
+
+def test_terminal_progress_is_concise_redacted_and_deduplicated() -> None:
+    events = EventBus()
+    store = RuntimeActivityStore(events)
+    common = {"run_id": "terminal-progress", "correlation_id": "corr", "execution_id": "exec"}
+    events.publish("terminal.command_started", common)
+    events.publish("terminal.command_started", common)
+    for sequence in range(1, 4):
+        events.publish(
+            "terminal.output",
+            {**common, "sequence": sequence, "characters": 12, "text": "secret stdout"},
+        )
+    projection = project_runtime_progress(store.snapshot(correlation_id="corr"))
+    assert projection.status == "active"
+    assert projection.lines == ("Ejecutando Terminal…",)
+    assert "secret stdout" not in repr(projection)
+
+
+def test_terminal_progress_distinguishes_timeout_from_failure_and_cancel() -> None:
+    for event_name, expected_status, expected_line in (
+        ("terminal.command_failed", "failed", "Terminal falló."),
+        ("terminal.command_timed_out", "failed", "Terminal agotó el tiempo."),
+        ("terminal.command_cancelled", "cancelled", "Terminal fue cancelada."),
+    ):
+        events = EventBus()
+        store = RuntimeActivityStore(events)
+        events.publish(
+            event_name,
+            {"run_id": event_name, "correlation_id": "corr", "execution_id": "exec"},
+        )
+        projection = project_runtime_progress(store.snapshot(correlation_id="corr"))
+        assert projection.status == expected_status
+        assert projection.lines == (expected_line,)

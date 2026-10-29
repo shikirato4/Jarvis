@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -72,13 +72,16 @@ class ModelResponse(JarvisBaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
     latency_ms: float
     fallback_used: bool = False
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     usage: ModelUsage = Field(default_factory=ModelUsage)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class StreamChunk(JarvisBaseModel):
     text: str = ""
+    # Live chain-of-thought for the local owner's display; it is never
+    # persisted, logged, or forwarded to third parties.
+    reasoning: str = ""
     tool_calls: list[ModelToolCall] = Field(default_factory=list)
     done: bool = False
     error: str | None = None
@@ -88,7 +91,7 @@ class StreamChunk(JarvisBaseModel):
 class ProviderHealth(JarvisBaseModel):
     provider_name: str
     healthy: bool
-    checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     details: dict[str, Any] = Field(default_factory=dict)
 
 

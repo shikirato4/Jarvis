@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import json
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 from jarvis.code_agent_runtime.security.auth_providers import AuthResult
@@ -49,7 +49,7 @@ class PinAuthProvider:
             return AuthResult(success=False, reason="master PIN is not configured")
         payload = self._load()
         lock = self._locked_until(payload)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if lock is not None and lock > now:
             return AuthResult(success=False, reason=f"PIN temporarily locked until {lock.isoformat()}", locked=True, remaining_attempts=0)
         if not secret:
@@ -81,7 +81,7 @@ class PinAuthProvider:
         remaining = max(self._max_attempts - failed, 0)
         locked = failed >= self._max_attempts
         if locked:
-            payload["locked_until"] = (datetime.now(timezone.utc) + timedelta(seconds=self._lockout_seconds)).isoformat()
+            payload["locked_until"] = (datetime.now(UTC) + timedelta(seconds=self._lockout_seconds)).isoformat()
         self._save(payload)
         return AuthResult(success=False, reason=reason if not locked else "too many failed PIN attempts; temporary lockout active", locked=locked, remaining_attempts=remaining)
 

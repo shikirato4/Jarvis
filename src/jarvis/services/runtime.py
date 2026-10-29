@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any
+from pathlib import Path
+import logging
 
 from jarvis.actions.router import ActionRouter
 from jarvis.action_executor import ActionExecutor
@@ -9,7 +11,7 @@ from jarvis.autonomy.base import MissionApprovalRequest, MissionControlActionReq
 from jarvis.autonomy.service import AutonomyService
 from jarvis.automation.service import AutomationDefinition, AutomationService
 from jarvis.config import Settings
-from jarvis.core.errors import ServiceUnavailableError
+from jarvis.core.errors import JarvisError, ServiceUnavailableError
 from jarvis.core.models import HealthStatus, RuntimeSnapshot, ServiceStatus
 from jarvis.core.modes import ExecutionMode, ModeManager
 from jarvis.core.services import RuntimeServiceContract
@@ -102,6 +104,7 @@ class JarvisRuntimeService(RuntimeServiceContract):
         ops_runtime_service=None,
         desktop_agent_runtime_service=None,
         image_runtime_service=None,
+        vram_guard=None,
     ) -> None:
         self._settings = settings
         self._mode_manager = mode_manager
@@ -136,6 +139,8 @@ class JarvisRuntimeService(RuntimeServiceContract):
         self._ops_runtime_service = ops_runtime_service
         self._desktop_agent_runtime_service = desktop_agent_runtime_service
         self._image_runtime_service = image_runtime_service
+        self._vram_guard = vram_guard
+        self._gemini_image_provider: Any = None
         self._started = False
 
     def start(self) -> None:
@@ -694,7 +699,39 @@ class JarvisRuntimeService(RuntimeServiceContract):
         if self._image_runtime_service is None:
             raise ServiceUnavailableError("image runtime is not available")
         parsed = ImageGenerationRequest.model_validate(request)
-        return self._image_runtime_service.generate_sync(parsed) if wait else self._image_runtime_service.submit(parsed)
+        gemini = self._gemini_image_provider
+        if gemini is not None and gemini.health_check().get("healthy"):
+            from datetime import UTC, datetime
+
+            from jarvis.image_runtime.models import ImageGenerationJob, ImageJobStatus
+
+            try:
+                output_dir = parsed.output_dir or self._image_runtime_service.output_dir
+                path = gemini.generate(parsed.prompt, output_dir=output_dir)
+                return ImageGenerationJob(
+                    prompt_original=parsed.prompt,
+                    prompt_positive=parsed.prompt,
+                    model_path=Path("gemini"),
+                    width=parsed.width,
+                    height=parsed.height,
+                    steps=0,
+                    cfg=parsed.cfg,
+                    status=ImageJobStatus.COMPLETED,
+                    output_paths=[path],
+                    completed_at=datetime.now(UTC),
+                    message="Imagen generada con Gemini (nube, sin VRAM).",
+                    metadata={"provider": "gemini"},
+                )
+            except JarvisError as exc:
+                logging.getLogger("jarvis.runtime").warning(
+                    "image_generate_gemini_failed",
+                    extra={"error": str(exc), "fallback": "local_image"},
+                )
+        guard = self._vram_guard
+        if guard is None:
+            return self._image_runtime_service.generate_sync(parsed) if wait else self._image_runtime_service.submit(parsed)
+        with guard.image_generation():
+            return self._image_runtime_service.generate_sync(parsed) if wait else self._image_runtime_service.submit(parsed)
 
     def image_cancel(self, job_id: str | None = None):
         self._ensure_started()

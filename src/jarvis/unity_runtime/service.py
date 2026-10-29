@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
@@ -122,7 +122,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def resolve_project(self, request: UnityProjectResolveRequest | dict) -> UnityProjectResolveReceipt:
         self._ensure_started()
         payload = UnityProjectResolveRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolver.resolve(payload)
         if project.status == project.status.RESOLVED:
             validate_project_allowed(project, policy=self._policy)
@@ -133,7 +133,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             warnings=project.warnings,
             metadata=payload.metadata,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.resolve_project", receipt.model_dump(mode="json"))
         return receipt
@@ -141,7 +141,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def create_project(self, request: UnityProjectCreateRequest | dict) -> UnityOperationReceipt:
         self._ensure_started()
         payload = UnityProjectCreateRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project_root = (Path(payload.target_root).expanduser().resolve(strict=False) / payload.name).resolve(strict=False)
         project = UnityProjectDescriptor(
             project_id=str(project_root),
@@ -171,7 +171,7 @@ class UnityRuntimeService(RuntimeServiceContract):
                 written_paths=[project.project_root, project.assets_path, project.packages_path, project.project_settings_path],
                 metadata=payload.metadata | {"template": payload.template, "policy_tags": advice.policy_tags},
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
             self._event_bus.publish("unity.create_project", receipt.model_dump(mode="json"))
             return receipt
@@ -189,7 +189,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             written_paths=[project.project_root, project.assets_path, project.packages_path, project.project_settings_path],
             metadata=payload.metadata | {"template": payload.template, "policy_tags": advice.policy_tags},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.create_project", receipt.model_dump(mode="json"))
         return receipt
@@ -197,7 +197,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def search_assets(self, request: UnityAssetSearchRequest | dict) -> UnityAssetSearchReceipt:
         self._ensure_started()
         payload = UnityAssetSearchRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolve_project_from_string(payload.project)
         assets = self._assets.search_assets(project, query=payload.query, asset_kind=payload.asset_kind, limit=payload.limit)
         receipt = UnityAssetSearchReceipt(
@@ -207,14 +207,14 @@ class UnityRuntimeService(RuntimeServiceContract):
             assets=assets,
             metadata=payload.metadata,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.search_assets", receipt.model_dump(mode="json"))
         return receipt
 
     def list_scenes(self, project: str) -> UnityOperationReceipt:
         self._ensure_started()
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         resolved = self._resolve_project_from_string(project)
         scenes = self._projects.list_scenes(resolved)
         receipt = UnityOperationReceipt(
@@ -226,7 +226,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             project=resolved,
             data={"scenes": [item.model_dump(mode="json") for item in scenes], "count": len(scenes)},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.list_scenes", receipt.model_dump(mode="json"))
         return receipt
@@ -234,7 +234,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def generate_script(self, request: UnityScriptGenerationRequest | dict) -> UnityOperationReceipt:
         self._ensure_started()
         payload = UnityScriptGenerationRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolve_project_from_string(payload.project)
         content = self._scripts.generate_script_content(payload)
         root = Path(project.project_root).resolve(strict=False)
@@ -267,7 +267,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             data={"content": content, "normalized_path": str(target)},
             metadata=payload.metadata | {"policy_tags": advice.policy_tags},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.generate_script", receipt.model_dump(mode="json"))
         return receipt
@@ -275,7 +275,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def write_script(self, request: UnityScriptWriteRequest | dict) -> UnityOperationReceipt:
         self._ensure_started()
         payload = UnityScriptWriteRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolve_project_from_string(payload.project)
         root = Path(project.project_root).resolve(strict=False)
         if payload.asset_path:
@@ -305,7 +305,7 @@ class UnityRuntimeService(RuntimeServiceContract):
                 data={"normalized_path": str(target)},
                 metadata=payload.metadata | {"policy_tags": advice.policy_tags},
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
         descriptor, written_paths, would_overwrite = self._scripts.write_script(project, payload, content=payload.content)
         refresh_data: dict[str, object] = {}
@@ -332,7 +332,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             data={"normalized_path": written_paths[0], "refresh": refresh_data},
             metadata=payload.metadata | {"policy_tags": advice.policy_tags},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.write_script", receipt.model_dump(mode="json"))
         return receipt
@@ -346,7 +346,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def editor_operation(self, request: UnityEditorOperationRequest | dict) -> UnityOperationReceipt:
         self._ensure_started()
         payload = UnityEditorOperationRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolve_project_from_string(payload.project)
         advice = control_advice_for_operation(
             operation_kind=payload.operation_kind,
@@ -405,7 +405,7 @@ class UnityRuntimeService(RuntimeServiceContract):
                     data={"prepared_command": command_request.model_dump(mode="json")},
                     metadata=payload.metadata | {"policy_tags": advice.policy_tags},
                     started_at=started_at,
-                    finished_at=datetime.now(timezone.utc),
+                    finished_at=datetime.now(UTC),
                 )
             bridge = self.bridge_call(
                 {
@@ -449,7 +449,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             data=data,
             metadata=payload.metadata | {"policy_tags": advice.policy_tags},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.editor_operation", receipt.model_dump(mode="json"))
         return receipt
@@ -496,7 +496,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def connect_bridge(self, request: UnityBridgeConnectRequest | dict) -> UnityOperationReceipt:
         self._ensure_started()
         payload = UnityBridgeConnectRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolve_project_from_string(payload.project)
         installation = self._resolve_installation(payload.installation_id)
         handle = self._begin_operation("unity.connect_bridge", payload.metadata)
@@ -525,7 +525,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             data={"session": session.model_dump(mode="json"), "health": self.bridge_health(project.project_root).model_dump(mode="json")},
             metadata=payload.metadata,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.bridge_connected" if success else "unity.bridge_failed", receipt.model_dump(mode="json"))
         if handle is not None:
@@ -538,7 +538,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def disconnect_bridge(self, request: UnityBridgeDisconnectRequest | dict) -> UnityOperationReceipt:
         self._ensure_started()
         payload = UnityBridgeDisconnectRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolve_project_from_string(payload.project)
         session = self._bridge.disconnect(project_root=project.project_root)
         receipt = UnityOperationReceipt(
@@ -551,7 +551,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             data={"session": session.model_dump(mode="json") if session else None},
             metadata=payload.metadata,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.bridge_disconnected", receipt.model_dump(mode="json"))
         return receipt
@@ -559,7 +559,7 @@ class UnityRuntimeService(RuntimeServiceContract):
     def launch_project(self, request: UnityLaunchRequestModel | dict) -> UnityOperationReceipt:
         self._ensure_started()
         payload = UnityLaunchRequestModel.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         project = self._resolve_project_from_string(payload.project)
         installation = self._resolve_installation(payload.installation_id)
         advice = control_advice_for_operation(operation_kind=UnityEditorOperationKind.LAUNCH_PROJECT, project=project, policy=self._policy)
@@ -578,7 +578,7 @@ class UnityRuntimeService(RuntimeServiceContract):
                 data={"prepared": True, "launch": prepared},
                 metadata=payload.metadata | {"policy_tags": advice.policy_tags},
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
             self._event_bus.publish("unity.launch_prepared", receipt.model_dump(mode="json"))
             self._last_launch_receipt = receipt.model_dump(mode="json")
@@ -611,7 +611,7 @@ class UnityRuntimeService(RuntimeServiceContract):
             data={"launch": launch_result.model_dump(mode="json"), "session": session.model_dump(mode="json") if session else None},
             metadata=payload.metadata | {"policy_tags": advice.policy_tags},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("unity.launched" if launch_result.success else "unity.launch_failed", receipt.model_dump(mode="json"))
         self._last_launch_receipt = receipt.model_dump(mode="json")

@@ -845,9 +845,11 @@ class DesktopIntentRouter:
 
     @staticmethod
     def _extract_permission_mode(folded: str) -> str | None:
+        if "full access" in folded or "acceso completo" in folded or "acceso total" in folded:
+            return "full_user"
         if "modo agente" not in folded and "agent mode" not in folded and "permission" not in folded:
             return None
-        for mode in ("lockdown", "safe", "normal", "pro"):
+        for mode in ("lockdown", "safe", "normal", "pro", "full_user"):
             if mode in folded:
                 return mode
         if "seguro" in folded:
@@ -887,7 +889,12 @@ class DesktopIntentRouter:
         prefixes = ("abre ", "open ", "busca ", "search ", "find ")
         for prefix in prefixes:
             if folded.startswith(prefix):
-                return prompt[len(prefix) :].strip()
+                remainder = prompt[len(prefix) :].strip()
+                remainder_folded = cls._fold(remainder)
+                for filler in ("por favor ", "porfa ", "please "):
+                    if remainder_folded.startswith(filler):
+                        return remainder[len(filler) :].strip()
+                return remainder
         return prompt.strip()
 
     @classmethod

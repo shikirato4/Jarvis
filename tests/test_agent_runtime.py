@@ -16,6 +16,7 @@ from jarvis.agent_runtime import (
     AgentController,
     AgentOutcomeCode,
     AgentRunRequest,
+    AgentRunResult,
     AgentRunStatus,
 )
 from jarvis.config import Settings
@@ -62,6 +63,71 @@ class _UnavailableAuditMemory:
 
 class _Models:
     pass
+
+
+class _SpyRouter:
+    """Minimal router double: records the metadata the executor forwards."""
+
+    def __init__(self, definition) -> None:
+        self._definition = definition
+        self.executed: list[dict] = []
+
+    @property
+    def registry(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(get=lambda name: self._definition)
+
+    def execute(self, action, arguments, *, correlation_id=None, metadata=None):
+        from types import SimpleNamespace
+        from jarvis.actions.models import ExecutionStatus
+        self.executed.append(
+            {"action": action, "arguments": dict(arguments or {}), "metadata": dict(metadata or {})}
+        )
+        return SimpleNamespace(
+            status=ExecutionStatus.SUCCESS, message="ok", data={}, artifacts=[]
+        )
+
+
+def test_open_target_with_application_requires_confirmation_and_never_self_approves() -> None:
+    """A model-proposed open_target must not launch or inject approval (audit P1.2)."""
+    from pydantic import BaseModel
+
+    class OpenTargetPayload(BaseModel):
+        application: str | None = None
+        path: str | None = None
+
+    definition = ActionDefinition(
+        name="system.open_target",
+        description="Open an application or target",
+        payload_model=OpenTargetPayload,
+        handler=lambda context, payload: ActionResult(message="opened"),
+        risk=ActionRisk.SENSITIVE,
+    )
+    spy = _SpyRouter(definition)
+    executor = ActionExecutor(spy, security_gate=TypedActionSecurityGate())  # type: ignore[arg-type]
+    arguments = {"application": "notepad", "path": "C:/Users/demo/evil.exe"}
+
+    first = executor.execute(
+        ActionRequest(run_id="r", call_id="c1", action="system.open_target", arguments=arguments)
+    )
+    assert first.status is ActionStatus.CONFIRMATION_REQUIRED
+    assert spy.executed == []
+
+    assert first.confirmation_id is not None
+    assert executor.approve_confirmation(first.confirmation_id) is True
+    second = executor.execute(
+        ActionRequest(
+            run_id="r",
+            call_id="c2",
+            action="system.open_target",
+            arguments=arguments,
+            confirmation_token=first.confirmation_id,
+        )
+    )
+    assert second.status is ActionStatus.SUCCESS
+    assert len(spy.executed) == 1
+    # Approval travels through the single-use confirmation token only.
+    assert spy.executed[0]["metadata"].get("approved") is not True
 
 
 def _executor(
@@ -826,7 +892,9 @@ def test_agent_controller_retries_then_fails_when_required_tool_is_not_selected(
 
     def infer(request: ModelRequest) -> ModelResponse:
         requests.append(request)
-        return _response(content="Puedes ejecutar el comando manualmente.")
+        return _response(
+            content='{"tool":"cancel_action","args":{"action_id":"check_gpu_usage"}}'
+        )
 
     base_request = ModelRequest(
         task_type="agent",
@@ -849,11 +917,32 @@ def test_agent_controller_retries_then_fails_when_required_tool_is_not_selected(
     assert result.status is AgentRunStatus.FAILED
     assert result.outcome_code is AgentOutcomeCode.INVALID_MODEL_OUTPUT
     assert result.error_type == "MissingRequiredToolCall"
-    assert result.final_answer == "Puedes ejecutar el comando manualmente."
+    assert result.final_answer == '{"tool":"cancel_action","args":{"action_id":"check_gpu_usage"}}'
+    visible = DesktopChatEngine._agent_result_text(  # noqa: SLF001
+        DesktopChatEngine.__new__(DesktopChatEngine), result
+    )
+    assert "requería una herramienta" in visible
+    assert "cancel_action" not in visible
+    assert "check_gpu_usage" not in visible
     event_names = {
         event["event_name"] for event in events.recent_events()
     }
     assert "agent_controller.tool_selection_retry" in event_names
+
+
+def test_agent_result_text_keeps_legitimate_successful_assistant_text() -> None:
+    result = AgentRunResult(
+        run_id="run-success",
+        status=AgentRunStatus.COMPLETED,
+        final_answer="La aplicación se abrió correctamente.",
+        outcome_code=AgentOutcomeCode.NORMAL_STOP,
+    )
+
+    visible = DesktopChatEngine._agent_result_text(  # noqa: SLF001
+        DesktopChatEngine.__new__(DesktopChatEngine), result
+    )
+
+    assert visible == "La aplicación se abrió correctamente."
 
 
 def test_truncated_structured_tool_call_retries_without_executing_partial_call() -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from jarvis.config import Settings
 from jarvis.core.errors import AutonomyRuntimeError, AutonomyValidationError
@@ -244,7 +244,7 @@ class AutonomyService:
                 "failures": mission.state.failures + (0 if verification.success else 1),
                 "waiting_for_confirmation": False,
                 "pending_approval_step_id": None,
-                "updated_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(UTC),
             }
         )
         self._save_mission(mission)
@@ -285,7 +285,7 @@ class AutonomyService:
         mission.reflection_history.append(reflection)
         if reflection.decision == RetryDecision.REPLAN and reflection.should_replan:
             mission.plan = self._planner.replan(mission, reason=reflection.message)
-            mission.state = mission.state.model_copy(update={"replans": mission.state.replans + 1, "status": MissionStatus.RUNNING, "updated_at": datetime.now(timezone.utc)})
+            mission.state = mission.state.model_copy(update={"replans": mission.state.replans + 1, "status": MissionStatus.RUNNING, "updated_at": datetime.now(UTC)})
             self._event_bus.publish(
                 "autonomy.replanned",
                 {
@@ -429,7 +429,7 @@ class AutonomyService:
         return None
 
     def _complete_mission(self, mission: AutonomousMission, reason: StopReason, message: str) -> AutonomousMission:
-        mission.state = mission.state.model_copy(update={"status": MissionStatus.COMPLETED, "stop_reason": reason, "updated_at": datetime.now(timezone.utc)})
+        mission.state = mission.state.model_copy(update={"status": MissionStatus.COMPLETED, "stop_reason": reason, "updated_at": datetime.now(UTC)})
         self._save_mission(mission)
         self._persistence.append_event(
             mission,
@@ -453,7 +453,7 @@ class AutonomyService:
 
     def _stop_mission(self, mission: AutonomousMission, reason: StopReason, message: str) -> AutonomousMission:
         status = MissionStatus.CANCELLED if reason == StopReason.CANCELLED else MissionStatus.STOPPED
-        mission.state = mission.state.model_copy(update={"status": status, "stop_reason": reason, "updated_at": datetime.now(timezone.utc), "last_error": message})
+        mission.state = mission.state.model_copy(update={"status": status, "stop_reason": reason, "updated_at": datetime.now(UTC), "last_error": message})
         self._save_mission(mission)
         self._persistence.append_event(
             mission,

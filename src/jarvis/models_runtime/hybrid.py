@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from uuid import uuid4
 
@@ -69,7 +69,7 @@ class ProviderStatus(JarvisBaseModel):
     latency_ms: float | None = None
     message: str | None = None
     retry_after_seconds: float | None = None
-    checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    checked_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ProviderSelection(JarvisBaseModel):

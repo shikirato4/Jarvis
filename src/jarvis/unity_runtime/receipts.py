@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from pydantic import Field
 
@@ -21,8 +21,8 @@ class UnityLaunchReceipt(JarvisBaseModel):
     session: UnityEditorSession | None = None
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, object] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class UnityBridgeOperationReceipt(JarvisBaseModel):
@@ -36,5 +36,5 @@ class UnityBridgeOperationReceipt(JarvisBaseModel):
     data: dict[str, object] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     metadata: dict[str, object] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

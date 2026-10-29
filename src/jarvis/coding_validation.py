@@ -50,11 +50,16 @@ def inspect_safety(code: str) -> tuple[bool, str | None]:
             root = (node.module or "").split(".")[0]
             if root in FORBIDDEN_MODULES or root not in ALLOWED_IMPORTS:
                 return False, "UNSAFE_GENERATED_CODE"
-        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES:
-            return False, "UNSAFE_GENERATED_CODE"
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"system", "popen", "run", "Popen"}:
+        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_NAMES or isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"system", "popen", "run", "Popen"}:
             return False, "UNSAFE_GENERATED_CODE"
     return True, None
+
+
+def _runtime_dir() -> Path:
+    """Disposable runs directory, created on demand (fresh checkouts lack it)."""
+    directory = Path.cwd() / "runtime"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 def execute_solution(code: str, tests: str, timeout_seconds: float = 2.0) -> dict[str, object]:
@@ -62,7 +67,7 @@ def execute_solution(code: str, tests: str, timeout_seconds: float = 2.0) -> dic
     safe, reason = inspect_safety(code)
     if not safe:
         return {"syntax": reason != "SYNTAX_ERROR", "unsafe": reason == "UNSAFE_GENERATED_CODE", "timeout": False, "passed": 0, "total": 0, "exception": reason}
-    with tempfile.TemporaryDirectory(prefix="jarvis-coding-", dir=Path.cwd() / "runtime") as directory:
+    with tempfile.TemporaryDirectory(prefix="jarvis-coding-", dir=_runtime_dir()) as directory:
         script = Path(directory) / "case.py"
         script.write_text(code + "\n" + tests + "\n", encoding="utf-8")
         try:

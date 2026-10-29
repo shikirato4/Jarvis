@@ -1,0 +1,123 @@
+[
+  {
+    "case": "es_texto",
+    "prompt": "Encuentra notas.txt y enséñame su contenido.",
+    "expected": [
+      "files.search",
+      "files.read_text"
+    ],
+    "selected": [
+      "interface.contextual_direct_write"
+    ],
+    "passed": false
+  },
+  {
+    "case": "en_text",
+    "prompt": "Locate notes.txt and display its contents.",
+    "expected": [
+      "files.search",
+      "files.read_text"
+    ],
+    "selected": [
+      "interface.contextual_direct_write"
+    ],
+    "passed": false
+  },
+  {
+    "case": "es_bytes",
+    "prompt": "Busca foto.png y calcula su tamaño en bytes.",
+    "expected": [
+      "files.search",
+      "files.stat"
+    ],
+    "selected": [
+      "files.stat",
+      "files.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_bytes",
+    "prompt": "Find photo.png and report the file size in bytes.",
+    "expected": [
+      "files.search",
+      "files.stat"
+    ],
+    "selected": [
+      "files.stat",
+      "files.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "es_os",
+    "prompt": "Comprueba qué sistema operativo y compilación tiene esta máquina.",
+    "expected": [
+      "windows.environment.inspect"
+    ],
+    "selected": [
+      "windows.environment.inspect"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_os",
+    "prompt": "Inspect this computer's Windows edition and build number.",
+    "expected": [
+      "windows.environment.inspect"
+    ],
+    "selected": [
+      "windows.environment.inspect"
+    ],
+    "passed": true
+  },
+  {
+    "case": "es_launch",
+    "prompt": "Arranca el Bloc de notas ahora.",
+    "expected": [
+      "windows.application.launch"
+    ],
+    "selected": [],
+    "passed": false
+  },
+  {
+    "case": "en_launch",
+    "prompt": "Launch Notepad now.",
+    "expected": [
+      "windows.application.launch"
+    ],
+    "selected": [
+      "system.launch_application",
+      "unity.launch_project",
+      "windows.application.launch"
+    ],
+    "passed": false
+  },
+  {
+    "case": "es_web",
+    "prompt": "Investiga en Internet las novedades de ExampleDB.",
+    "expected": [
+      "web.search"
+    ],
+    "selected": [
+      "web.search"
+    ],
+    "passed": true
+  },
+  {
+    "case": "en_web",
+    "prompt": "Search online for new ExampleDB releases.",
+    "expected": [
+      "web.search"
+    ],
+    "selected": [
+      "files.search",
+      "files.search_content",
+      "memory.search",
+      "system.search_resources",
+      "unity.search_assets",
+      "web.search"
+    ],
+    "passed": false
+  }
+]

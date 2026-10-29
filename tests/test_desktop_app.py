@@ -382,7 +382,9 @@ def test_desktop_streaming_context_survives_twenty_turns_tool_attachment_and_com
         system_backend_kind="in_memory",
         voice_enabled=False,
         embeddings_enabled=False,
-        conversation_context_max_tokens=1_500,
+        # 1_700: the capability manifest now carries per-family Spanish
+        # usage guides, so the composed system prompt legitimately grew.
+        conversation_context_max_tokens=1_700,
         conversation_context_safety_margin_tokens=128,
     )
     app, desktop = build_desktop_runtime(settings)

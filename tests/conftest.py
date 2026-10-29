@@ -26,6 +26,26 @@ def block_unmarked_external_network(
     if request.node.get_closest_marker("integration") or request.node.get_closest_marker("e2e"):
         return
 
+    # A developer's real .env must never turn a unit test into a live provider test.
+    for name in (
+        "BRAVE_SEARCH_API_KEY",
+        "JARVIS_BRAVE_SEARCH_API_KEY",
+        "YDC_API_KEY",
+        "JARVIS_YDC_API_KEY",
+        "EXA_API_KEY",
+        "JARVIS_EXA_API_KEY",
+        "NVIDIA_API_KEY",
+        "JARVIS_NVIDIA_API_KEY",
+    ):
+        monkeypatch.setenv(name, "")
+
+    # Nor must it stretch the request budgets that streaming tests pin down.
+    for name in (
+        "JARVIS_LOCAL_LLM_TIMEOUT_SECONDS",
+        "LOCAL_LLM_TIMEOUT_SECONDS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
     original_getaddrinfo = socket.getaddrinfo
     original_connect = socket.socket.connect
 
@@ -74,6 +94,11 @@ def jarvis_app(tmp_path: Path):
         web_search_enabled=False,
     )
     app = build_application(settings)
+    # Research unit tests exercise deterministic fallbacks, never installed or
+    # credential-backed model providers that happen to exist on the host.
+    app.research_runtime_service._pipeline._analyzer._models.infer_json = (  # noqa: SLF001
+        lambda **_kwargs: None
+    )
     app.start()
     try:
         yield app

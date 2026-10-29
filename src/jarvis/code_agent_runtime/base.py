@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import IntEnum, StrEnum
 from typing import Any
 
@@ -95,8 +95,8 @@ class CodeAgentReceipt(JarvisBaseModel):
     pin_verified: bool | None = None
     blocked_reason: str | None = None
     tool: str | None = None
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ProjectFileSummary(JarvisBaseModel):
@@ -160,4 +160,4 @@ class CodeTaskRequest(JarvisBaseModel):
 
 
 def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)

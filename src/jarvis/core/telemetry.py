@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import RLock
 from uuid import uuid4
 
@@ -59,8 +59,8 @@ class TelemetryRecorder:
             service_name=service_name,
             success=success,
             message=message,
-            started_at=datetime.now(timezone.utc),
-            finished_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
+            finished_at=datetime.now(UTC),
             metadata=metadata or {},
         )
         with self._lock:
@@ -76,7 +76,7 @@ class TelemetryRecorder:
                     "operation_name": operation_name,
                     "dependency_name": dependency_name,
                     "timeout_ms": timeout_ms,
-                    "recorded_at": datetime.now(timezone.utc),
+                    "recorded_at": datetime.now(UTC),
                 }
             )
             self._counters[f"{service_name}.timeouts"] += 1
@@ -89,7 +89,7 @@ class TelemetryRecorder:
                     "operation_name": operation_name,
                     "dependency_name": dependency_name,
                     "attempt": attempt,
-                    "recorded_at": datetime.now(timezone.utc),
+                    "recorded_at": datetime.now(UTC),
                 }
             )
             self._counters[f"{service_name}.retries"] += 1
@@ -101,7 +101,7 @@ class TelemetryRecorder:
                     "service_name": service_name,
                     "dependency_name": dependency_name,
                     "state": state,
-                    "recorded_at": datetime.now(timezone.utc),
+                    "recorded_at": datetime.now(UTC),
                 }
             )
             self._counters[f"{service_name}.breaker_trips"] += 1
@@ -157,7 +157,7 @@ class TelemetryRecorder:
     def trim_advanced(self, *, keep: int, max_age_seconds: float | None = None) -> dict[str, int]:
         with self._lock:
             if max_age_seconds is not None:
-                cutoff = datetime.now(timezone.utc).timestamp() - max_age_seconds
+                cutoff = datetime.now(UTC).timestamp() - max_age_seconds
                 while self._failures and self._failures[-1].recorded_at.timestamp() < cutoff:
                     self._failures.pop()
                 while self._slow_operations and self._slow_operations[-1].recorded_at.timestamp() < cutoff:

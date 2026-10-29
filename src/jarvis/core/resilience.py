@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import RLock
-from typing import Callable, TypeVar
+from typing import TypeVar
+from collections.abc import Callable
 
 from pydantic import Field
 
@@ -134,10 +135,10 @@ class ResilienceController:
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 breaker.failure_count += 1
-                breaker.last_failure_at = datetime.now(timezone.utc)
+                breaker.last_failure_at = datetime.now(UTC)
                 if breaker.failure_count >= effective.circuit_breaker.failure_threshold:
                     breaker.state = CircuitBreakerState.OPEN
-                    breaker.last_opened_at = datetime.now(timezone.utc)
+                    breaker.last_opened_at = datetime.now(UTC)
                     breaker.half_open_calls = 0
                     self._telemetry.record_breaker_trip(service_name=service_name, dependency_name=dependency_name, state=breaker.state.value)
                     if self._event_bus is not None:
@@ -190,7 +191,7 @@ class ResilienceController:
     def _refresh_breaker(self, breaker: _BreakerRecord, policy: ResiliencePolicy) -> None:
         if breaker.state != CircuitBreakerState.OPEN or breaker.last_opened_at is None:
             return
-        elapsed = (datetime.now(timezone.utc) - breaker.last_opened_at).total_seconds()
+        elapsed = (datetime.now(UTC) - breaker.last_opened_at).total_seconds()
         if elapsed >= policy.circuit_breaker.recovery_timeout_seconds:
             breaker.state = CircuitBreakerState.HALF_OPEN
             breaker.half_open_calls = 0

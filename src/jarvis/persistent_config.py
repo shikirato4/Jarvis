@@ -162,9 +162,7 @@ def _sanitize_payload(data: dict[str, Any]) -> dict[str, Any]:
         key = str(raw_key)
         if _looks_sensitive(key) or _looks_sensitive(value):
             continue
-        if isinstance(value, (str, int, float, bool)) or value is None:
-            safe[key] = value
-        elif isinstance(value, list) and all(
+        if isinstance(value, (str, int, float, bool)) or value is None or isinstance(value, list) and all(
             isinstance(item, (str, int, float, bool)) or item is None for item in value
         ):
             safe[key] = value
@@ -240,20 +238,12 @@ def _normalize_reasoning(value: object) -> str:
 
 
 def _safe_local_model(value: str) -> str:
-    from jarvis.models_runtime.qwen_identity import (
-        InvalidQwenIdentityError,
-        QwenIdentity,
-    )
+    from jarvis.models_runtime.model_identity import ConfiguredModelIdentity
 
-    for family in ("qwen3.5", "qwen3.8"):
-        try:
-            return QwenIdentity(
-                configured_model=value,
-                expected_model_family=family,
-            ).configured_model
-        except InvalidQwenIdentityError:
-            continue
-    return LOCAL_MODEL
+    try:
+        return ConfiguredModelIdentity(value).configured_model
+    except ValueError:
+        return LOCAL_MODEL
 
 
 def _normalize_mode(value: str) -> str:

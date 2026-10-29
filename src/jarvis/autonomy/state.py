@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from .base import AutonomousMission, MissionStatus, StopReason
 
@@ -11,7 +11,7 @@ class MissionStateManager:
         self._active_mission_id: str | None = None
 
     def save(self, mission: AutonomousMission) -> AutonomousMission:
-        mission.updated_at = datetime.now(timezone.utc)
+        mission.updated_at = datetime.now(UTC)
         self._missions[mission.mission_id] = mission
         if mission.state.status in {
             MissionStatus.RUNNING,
@@ -48,6 +48,6 @@ class MissionStateManager:
         mission = self._missions.get(mission_id)
         if mission is None:
             return None
-        mission.state = mission.state.model_copy(update={"status": MissionStatus.CANCELLED, "stop_reason": StopReason.CANCELLED, "updated_at": datetime.now(timezone.utc)})
+        mission.state = mission.state.model_copy(update={"status": MissionStatus.CANCELLED, "stop_reason": StopReason.CANCELLED, "updated_at": datetime.now(UTC)})
         self.save(mission)
         return mission

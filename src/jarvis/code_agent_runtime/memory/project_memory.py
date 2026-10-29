@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from shutil import copy2
 from uuid import uuid4
@@ -365,7 +365,7 @@ class ProjectMemory:
         return value
 
     def _corrupt_backup_path(self) -> Path:
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         return self._path.with_name(f"{self._path.name}.corrupt-{timestamp}.bak")
 
     def _walk(self, root: Path):
@@ -410,7 +410,7 @@ class ProjectMemory:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     def _activity(self, action: str, payload: dict) -> dict:
         return {"action": action, "at": self._now(), "payload": self._sanitize(payload)}

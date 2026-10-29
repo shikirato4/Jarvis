@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from transformers import AutoTokenizer
+import pytest
 
 from jarvis.agent_runtime.prompt_policy import (
     CAPABILITY_UNIVERSE,
@@ -105,8 +106,8 @@ def test_family_manifest_uses_all_tools_while_schema_context_is_selected() -> No
     )
 
     system = composed[0].content
-    assert "files: AVAILABLE_VIA_TOOL" in system
-    assert "terminal: AVAILABLE_VIA_TOOL" in system
+    assert "files:" in system and "operations" in system
+    assert "terminal:" in system
     assert "files.search (required=target)" in system
     selected = system.split(SCHEMA_MARKER, 1)[1]
     assert "terminal.run" not in selected
@@ -139,6 +140,90 @@ def test_large_registry_matches_related_schema_word_forms() -> None:
     )
 
 
+def test_multilingual_companion_retrieval_keeps_distinct_steps() -> None:
+    tools = [_tool(f"noise.operation_{index}") for index in range(40)]
+    tools.extend([
+        _tool("files.search", "Find a file by name."),
+        _tool("files.move", "Relocate an existing file."),
+        _tool("files.read_text", "Read text from an existing file."),
+    ])
+    semantics = {
+        "files.search": {"aliases": ("find file", "buscar archivo", "encuentra archivo"), "companions": ("files.move", "files.read_text")},
+        "files.move": {"aliases": ("move file", "relocate file", "mueve archivo", "trasladar archivo"), "companions": ()},
+        "files.read_text": {"aliases": ("read file", "leer archivo", "lee archivo"), "companions": ()},
+    }
+    policy = AgenticPromptPolicy(profile="compact")
+    for prompt, expected in (
+        ("Busca el archivo de prueba y luego muévelo.", {"files.search", "files.move"}),
+        ("Find the test file and then relocate it.", {"files.search", "files.move"}),
+        ("Encuentra el archivo y lee su contenido.", {"files.search", "files.read_text"}),
+    ):
+        selected = policy.select_relevant_tools(tools, prompt, semantic_metadata=semantics)
+        names = {item["function"]["name"] for item in selected}
+        assert expected <= names
+        assert not any(name.startswith("noise.") for name in names)
+
+
+def test_windows_environment_paraphrases_retrieve_inspection_schema() -> None:
+    tools = [_tool(f"noise.operation_{index}") for index in range(40)]
+    tools.extend([
+        _tool("windows.environment.inspect", "Inspect current OS edition, version and build."),
+        _tool("windows.window.list", "List visible windows."),
+    ])
+    semantics = {
+        "windows.environment.inspect": {"aliases": ("windows version", "operating system version", "versión de windows", "sistema operativo"), "companions": ()},
+    }
+    policy = AgenticPromptPolicy(profile="full")
+    for prompt in (
+        "Revisa qué versión de Windows estoy usando.",
+        "Comprueba la edición del sistema operativo de este equipo.",
+        "Check which Windows version this machine is running.",
+    ):
+        selected = policy.select_relevant_tools(tools, prompt, semantic_metadata=semantics)
+        names = [item["function"]["name"] for item in selected]
+        assert names[0] == "windows.environment.inspect"
+        assert "windows.window.list" not in names
+
+
+def test_absent_family_does_not_disclose_fabricated_action() -> None:
+    tools = [_tool(f"noise.operation_{index}") for index in range(40)]
+    tools.append(_tool("files.search", "Search for a file in a safe scope."))
+    selected = AgenticPromptPolicy().select_relevant_tools(
+        tools, "Open Notepad now."
+    )
+    assert not selected
+
+
+def test_unseen_related_operations_survive_primary_selection() -> None:
+    tools = [_tool(f"noise.operation_{index}") for index in range(40)]
+    tools.extend([
+        _tool("sensor.primary_status", "Read sensor status on the primary channel."),
+        _tool("sensor.backup_status", "Read sensor status on the backup channel."),
+    ])
+    selected = AgenticPromptPolicy().select_relevant_tools(
+        tools, "Read the sensor's primary status; use the backup after failure."
+    )
+    assert {item["function"]["name"] for item in selected} == {
+        "sensor.primary_status", "sensor.backup_status",
+    }
+
+
+def test_schema_budget_bounds_large_relevant_registry() -> None:
+    tools = [
+        _tool(f"orbital.align_{index}", "Align orbital antenna. " + "details " * 70)
+        for index in range(40)
+    ]
+    policy = AgenticPromptPolicy(profile="compact", max_schema_tokens=600)
+    selected = policy.select_relevant_tools(tools, "Align the orbital antenna.")
+    assert selected
+    assert len(selected) < len(tools)
+    estimated = sum(
+        (len(json.dumps(item, ensure_ascii=False).encode("utf-8")) + 3) // 4
+        for item in selected
+    )
+    assert estimated <= policy.schema_budget_tokens
+
+
 def test_static_contract_has_required_safety_and_truthfulness_invariants() -> None:
     static = f"{PERMANENT_CORE_CONTRACT}\n{PRE_LORA_AGENTIC_SCAFFOLD}".casefold()
 
@@ -149,6 +234,16 @@ def test_static_contract_has_required_safety_and_truthfulness_invariants() -> No
     assert "untrusted data" in static
     assert "models are replaceable providers" in static
     assert not any(name in static for name in ("qwen", "nemotron", "kimi"))
+
+
+def test_static_contract_requires_skill_non_refusal_and_primitive_composition() -> None:
+    static = f"{PERMANENT_CORE_CONTRACT}\n{PRE_LORA_AGENTIC_SCAFFOLD}".casefold()
+
+    assert "skill non-refusal rule" in static
+    assert "optional procedure" in static
+    assert "compose available primitives" in static
+    assert "capability discovery" in static
+    assert "missing dedicated skill" in static
 
 
 def test_full_charter_represents_exact_200_conceptual_capabilities() -> None:
@@ -170,6 +265,7 @@ def test_full_charter_represents_exact_200_conceptual_capabilities() -> None:
 
 
 def test_prompt_profiles_fit_production_token_budgets() -> None:
+    AutoTokenizer = pytest.importorskip("transformers").AutoTokenizer
     metadata = Path("training/agentic_lora/base_metadata")
     tokenizer = AutoTokenizer.from_pretrained(metadata, local_files_only=True)
     counts = {
@@ -183,3 +279,39 @@ def test_prompt_profiles_fit_production_token_budgets() -> None:
     assert counts[AgenticPromptProfile.COMPACT] <= 1_600
     assert 2_000 <= counts[AgenticPromptProfile.FULL] <= 3_200
     assert FULL_CHARTER_MARKER in AgenticPromptPolicy().static_prompt
+
+
+# ------------------- familia de capacidades con guia en espanol
+
+
+def _schema(name: str, description: str = "") -> dict:
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": {}},
+    }
+
+
+def test_capability_context_briefs_browser_usage_in_spanish() -> None:
+    tools = [
+        _schema("browser.open", "open a url"),
+        _schema("browser.type", "type text"),
+        _schema("browser.press_key", "press a key"),
+        _schema("image.generate", "generate an image"),
+        _schema("windows.workstation.lock", "lock the screen"),
+    ]
+    context = AgenticPromptPolicy.capability_context(tools)
+
+    assert "browser" in context
+    assert "browser.open" in context
+    assert "navegador" in context.casefold()
+    assert "browser.press_key" in context
+    assert "imagen" in context.casefold()
+    assert "pantalla" in context.casefold()
+
+
+def test_capability_context_keeps_fallback_for_unknown_families() -> None:
+    tools = [_schema("weirdfamily.thing", "unknown op")]
+    context = AgenticPromptPolicy.capability_context(tools)
+
+    assert "weirdfamily" in context
+    assert "AVAILABLE_VIA_TOOL" in context

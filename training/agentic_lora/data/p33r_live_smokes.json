@@ -1,0 +1,305 @@
+{
+  "cloud_used": false,
+  "cost_usd": 0,
+  "files_action": {
+    "auto_continuation_count": 0,
+    "auto_continuation_failed": false,
+    "completion_tokens": 159,
+    "continuation_stop_reason": null,
+    "controller_requests": [
+      {
+        "agent_phase": "agent_initial",
+        "internal_auto_continuation": false,
+        "max_tokens": null,
+        "tool_choice": "auto",
+        "tool_count": 10,
+        "tools": [
+          "web.search",
+          "files.create_file",
+          "files.list",
+          "files.resolve_path",
+          "operations.run_command",
+          "research.workspace_search",
+          "security.analyze",
+          "files.search",
+          "interface.click_mouse",
+          "interface.move_mouse"
+        ]
+      },
+      {
+        "agent_phase": "agent_final",
+        "internal_auto_continuation": false,
+        "max_tokens": null,
+        "tool_choice": "auto",
+        "tool_count": 10,
+        "tools": [
+          "web.search",
+          "files.create_file",
+          "files.list",
+          "files.resolve_path",
+          "operations.run_command",
+          "research.workspace_search",
+          "security.analyze",
+          "files.search",
+          "interface.click_mouse",
+          "interface.move_mouse"
+        ]
+      }
+    ],
+    "files_search_execution_count": 1,
+    "finish_reason": "stop",
+    "fixture_observed": true,
+    "grounded_final": true,
+    "latency_seconds": 19.939,
+    "model_request_count": 2,
+    "observation_verified": true,
+    "original_finish_reason": "stop",
+    "outcome_code": "NORMAL_STOP",
+    "passed": true,
+    "profile": "full",
+    "prompt_tokens": 6054,
+    "provider_requests": [
+      {
+        "agent_phase": "agent_initial",
+        "internal_auto_continuation": false,
+        "max_tokens": 646,
+        "tool_choice": "auto",
+        "tool_count": 10,
+        "tools": [
+          "web.search",
+          "files.create_file",
+          "files.list",
+          "files.resolve_path",
+          "operations.run_command",
+          "research.workspace_search",
+          "security.analyze",
+          "files.search",
+          "interface.click_mouse",
+          "interface.move_mouse"
+        ]
+      },
+      {
+        "agent_phase": "agent_final",
+        "internal_auto_continuation": false,
+        "max_tokens": 1510,
+        "tool_choice": "auto",
+        "tool_count": 10,
+        "tools": [
+          "web.search",
+          "files.create_file",
+          "files.list",
+          "files.resolve_path",
+          "operations.run_command",
+          "research.workspace_search",
+          "security.analyze",
+          "files.search",
+          "interface.click_mouse",
+          "interface.move_mouse"
+        ]
+      }
+    ],
+    "provider_text_length": 242,
+    "requested_max_tokens": 1510,
+    "schemas_supplied": 10,
+    "security_decisions": [
+      {
+        "action": "files.search",
+        "decision": "allowed",
+        "risk": "safe"
+      }
+    ],
+    "segment_completion_tokens": [
+      152,
+      159
+    ],
+    "segment_count": 2,
+    "segment_durations_seconds": [
+      9.752,
+      10.013
+    ],
+    "segment_finish_reasons": [
+      "tool_calls",
+      "stop"
+    ],
+    "selected_tool": "files.search",
+    "status": "completed"
+  },
+  "forced_long_response": {
+    "auto_continuation_count": 1,
+    "auto_continuation_failed": false,
+    "completion_tokens": 566,
+    "continuation_request_count": 1,
+    "continuation_stop_reason": null,
+    "continuation_tools_removed": true,
+    "controller_requests": [
+      {
+        "agent_phase": "agent_initial",
+        "internal_auto_continuation": false,
+        "max_tokens": null,
+        "tool_choice": "auto",
+        "tool_count": 12,
+        "tools": [
+          "terminal.cancel",
+          "terminal.close_session",
+          "terminal.open_visible",
+          "terminal.run",
+          "terminal.status",
+          "data.aggregate",
+          "data.anomalies",
+          "data.describe",
+          "files.delete",
+          "science.run_simulation",
+          "terminal.read_output",
+          "terminal.start_session"
+        ]
+      }
+    ],
+    "duplicated_start": false,
+    "ends_with_marker": true,
+    "finish_reason": "stop",
+    "latency_seconds": 43.953,
+    "model_request_count": 2,
+    "original_finish_reason": "length",
+    "outcome_code": "NORMAL_STOP",
+    "passed": true,
+    "profile": "full",
+    "prompt_tokens": 4652,
+    "provider_requests": [
+      {
+        "agent_phase": "agent_initial",
+        "internal_auto_continuation": false,
+        "max_tokens": 917,
+        "tool_choice": "auto",
+        "tool_count": 12,
+        "tools": [
+          "terminal.cancel",
+          "terminal.close_session",
+          "terminal.open_visible",
+          "terminal.run",
+          "terminal.status",
+          "data.aggregate",
+          "data.anomalies",
+          "data.describe",
+          "files.delete",
+          "science.run_simulation",
+          "terminal.read_output",
+          "terminal.start_session"
+        ]
+      },
+      {
+        "agent_phase": "agent_initial",
+        "internal_auto_continuation": true,
+        "max_tokens": 1024,
+        "tool_choice": null,
+        "tool_count": 0,
+        "tools": []
+      }
+    ],
+    "provider_text_length": 7325,
+    "raw_reasoning_exposed": false,
+    "requested_max_tokens": 1024,
+    "segment_completion_tokens": [
+      917,
+      566
+    ],
+    "segment_count": 2,
+    "segment_durations_seconds": [
+      24.929,
+      18.968
+    ],
+    "segment_finish_reasons": [
+      "length",
+      "stop"
+    ],
+    "status": "completed",
+    "tool_execution_count": 0,
+    "visible_words": 1128
+  },
+  "model": "Qwen3.5-9B-IQ4_XS",
+  "passed": true,
+  "phase": "P3.3R",
+  "runtime": {
+    "backend": "cuda",
+    "context_size": 8192,
+    "ownership": "jarvis",
+    "parallel": 1,
+    "readiness": true
+  },
+  "simple_information": {
+    "auto_continuation_count": 0,
+    "auto_continuation_failed": false,
+    "completion_tokens": 408,
+    "continuation_stop_reason": null,
+    "controller_requests": [
+      {
+        "agent_phase": "agent_initial",
+        "internal_auto_continuation": false,
+        "max_tokens": null,
+        "tool_choice": "auto",
+        "tool_count": 12,
+        "tools": [
+          "autonomy.plan_mission",
+          "autonomy.start_mission",
+          "autonomy.step_mission",
+          "autonomy.stop_mission",
+          "calculator.evaluate",
+          "data.aggregate",
+          "data.anomalies",
+          "data.describe",
+          "files.search",
+          "files.search_content",
+          "memory.search",
+          "research.report"
+        ]
+      }
+    ],
+    "finish_reason": "stop",
+    "latency_seconds": 9.383,
+    "model_request_count": 1,
+    "original_finish_reason": "stop",
+    "outcome_code": "NORMAL_STOP",
+    "passed": true,
+    "profile": "full",
+    "prompt_tokens": 5367,
+    "provider_requests": [
+      {
+        "agent_phase": "agent_initial",
+        "internal_auto_continuation": false,
+        "max_tokens": 1024,
+        "tool_choice": "auto",
+        "tool_count": 12,
+        "tools": [
+          "autonomy.plan_mission",
+          "autonomy.start_mission",
+          "autonomy.step_mission",
+          "autonomy.stop_mission",
+          "calculator.evaluate",
+          "data.aggregate",
+          "data.anomalies",
+          "data.describe",
+          "files.search",
+          "files.search_content",
+          "memory.search",
+          "research.report"
+        ]
+      }
+    ],
+    "provider_text_length": 1212,
+    "requested_max_tokens": 1024,
+    "segment_completion_tokens": [
+      408
+    ],
+    "segment_count": 1,
+    "segment_durations_seconds": [
+      9.294
+    ],
+    "segment_finish_reasons": [
+      "stop"
+    ],
+    "status": "completed",
+    "tool_free": true,
+    "visible_complete": true
+  },
+  "training_started": false,
+  "workspace_fixture": "P33R_SAFE_FIXTURE.txt"
+}

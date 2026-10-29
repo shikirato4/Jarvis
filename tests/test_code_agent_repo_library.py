@@ -97,9 +97,9 @@ def test_repo_library_search_by_keyword_and_skill_task(tmp_path: Path) -> None:
     assert pytest_results["results"]
     assert pytest_results["results"][0]["score"] > 0
     assert "matched keywords" in pytest_results["results"][0]["reason"]
-    assert any("python-agent" == item["repo_id"] for item in task_results["results"])
-    assert any("security-tools" == item["repo_id"] for item in security_results["results"])
-    assert any("react-ui" == item["repo_id"] for item in react_results["results"])
+    assert any(item["repo_id"] == "python-agent" for item in task_results["results"])
+    assert any(item["repo_id"] == "security-tools" for item in security_results["results"])
+    assert any(item["repo_id"] == "react-ui" for item in react_results["results"])
     assert {"frontend-react", "testing"}.issubset(set(react_results["skill_ids"]))
     assert {"cli", "testing"}.issubset(set(cli_results["skill_ids"]))
     assert {"git-review", "testing"}.issubset(set(git_results["skill_ids"]))

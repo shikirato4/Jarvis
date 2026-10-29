@@ -4,7 +4,7 @@ import json
 import os
 import socket
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -105,7 +105,7 @@ class _JsonSearchProvider:
             configuration_state="configured",
             error_code=response.error_code,
             http_status=response.http_status,
-            checked_at=datetime.now(timezone.utc),
+            checked_at=datetime.now(UTC),
             sends_private_context=False,
             max_results=self._max_results,
             timeout_seconds=self._timeout_seconds,
@@ -137,7 +137,7 @@ class _JsonSearchProvider:
             return _provider_http_error(self.provider, query, exc)
         except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
             return WebSearchResponse(status="invalid_response", provider=self.provider, query=query, error_code="invalid_response", message=f"{self.provider} returned an invalid response.")
-        except (TimeoutError, socket.timeout):
+        except TimeoutError:
             return WebSearchResponse(status="timeout", provider=self.provider, query=query, error_code="timeout", message=f"{self.provider} timed out.")
         except (URLError, OSError):
             return WebSearchResponse(status="network_error", provider=self.provider, query=query, error_code="network_error", message=f"Could not reach {self.provider}.")
@@ -146,7 +146,7 @@ class _JsonSearchProvider:
 class YouSearchProvider(_JsonSearchProvider):
     provider = "you"
     role = "general_primary"
-    API_URL = "https://api.you.com/v1/search"
+    API_URL = "https://ydc-index.io/v1/search"
 
     def __init__(self, *, api_key: str | None = None, settings: Settings | None = None, enabled: bool = True) -> None:
         config = settings or Settings()
@@ -224,7 +224,7 @@ class SearXNGSearchProvider(_JsonSearchProvider):
             results = parsed.get("results", []) if isinstance(parsed, dict) else []
         except HTTPError as exc:
             return _provider_http_error(self.provider, query, exc)
-        except (TimeoutError, socket.timeout):
+        except TimeoutError:
             return WebSearchResponse(status="timeout", provider=self.provider, query=query, error_code="timeout", message="SearXNG timed out.")
         except (URLError, OSError):
             return WebSearchResponse(status="network_error", provider=self.provider, query=query, error_code="network_error", message="SearXNG is offline or unreachable.")
@@ -376,7 +376,7 @@ class BraveSearchProvider:
                 error_code="invalid_response",
                 message="Brave Search returned an invalid response.",
             )
-        except (TimeoutError, socket.timeout):
+        except TimeoutError:
             return WebSearchResponse(
                 status="timeout",
                 provider=self.provider,
@@ -449,7 +449,7 @@ class BraveSearchProvider:
             env_file_found=_ENV_FILE.is_file(),
             error_code=response.error_code,
             http_status=response.http_status,
-            checked_at=datetime.now(timezone.utc),
+            checked_at=datetime.now(UTC),
             sends_private_context=False,
             max_results=self._max_results,
             timeout_seconds=self._timeout_seconds,

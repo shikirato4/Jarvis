@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import Event, RLock
 
 from jarvis.config import Settings
@@ -51,7 +51,7 @@ class UIAutomationService:
         self._lock = RLock()
 
     def active_window(self, *, correlation_id: str) -> UIOperationReceipt:
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         window = self._backend.get_active_window()
         return self._publish_success(
             correlation_id=correlation_id,
@@ -65,7 +65,7 @@ class UIAutomationService:
 
     def focus_window(self, request: FocusWindowRequest, *, correlation_id: str) -> UIOperationReceipt:
         candidate = self._find_window(request.target)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         elevated = validate_mode(
             self._mode_manager,
             self._settings,
@@ -96,7 +96,7 @@ class UIAutomationService:
 
     def close_window(self, request: CloseWindowRequest, *, correlation_id: str) -> UIOperationReceipt:
         target_window = self._find_window(request.target) if request.target else self._backend.get_active_window()
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         validate_mode(
             self._mode_manager,
             self._settings,
@@ -127,7 +127,7 @@ class UIAutomationService:
 
     def move_mouse(self, request: MoveMouseRequest, *, correlation_id: str) -> UIOperationReceipt:
         validate_mode(self._mode_manager, self._settings, operation_name="move_mouse")
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         position = self._backend.move_mouse(
             request.x,
             request.y,
@@ -145,7 +145,7 @@ class UIAutomationService:
         )
 
     def click(self, request: ClickRequest, *, correlation_id: str) -> UIOperationReceipt:
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         active_window = self._backend.get_active_window()
         elevated = validate_mode(
             self._mode_manager,
@@ -225,7 +225,7 @@ class UIAutomationService:
         return click_receipt
 
     def hotkey(self, request: ShortcutRequest, *, correlation_id: str) -> UIOperationReceipt:
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         active_window = self._backend.get_active_window()
         elevated = validate_mode(
             self._mode_manager,
@@ -298,7 +298,7 @@ class UIAutomationService:
                     "details": getattr(exc, "details", {}) or {},
                     "fallback_used": "structured_block",
                 },
-                started_at=datetime.now(timezone.utc),
+                started_at=datetime.now(UTC),
             )
             self._logger.info(
                 "write_text_fallback_used",
@@ -327,7 +327,7 @@ class UIAutomationService:
         typing_interval_ms: int | None = None,
     ) -> UIOperationReceipt:
         direct_write = request.mode == UIAutomationMode.DIRECT
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         block_size = max(len(block) for block in request.blocks)
         validate_text(self._settings, original_text or "".join(request.blocks), block_size=block_size)
         target_window = self._find_window(request.focus_target) if request.focus_target else self._backend.get_active_window()
@@ -415,7 +415,7 @@ class UIAutomationService:
                     chars_typed += 1
                     self._ensure_not_cancelled(correlation_id, cancellation)
                     if handle is not None and chars_typed % 40 == 0:
-                        handle.heartbeat(progress_message=f"typing block {index}/{len(request.blocks)}")
+                        handle.heartbeat(progress_message=f"typing block {index}/{len(request.blocks)}")  # noqa: B023  # progress callback consumed within the same block
 
                 self._backend.type_text(block, interval_seconds=interval_seconds, on_progress=_on_progress)
                 if index < len(request.blocks) and pause_ms > 0:
@@ -446,7 +446,7 @@ class UIAutomationService:
             self._clear_cancellation(correlation_id)
 
     def cancel(self, request: CancellationRequest) -> UIOperationReceipt:
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         with self._lock:
             token = self._cancellations.get(request.correlation_id)
             if token is None:
@@ -513,7 +513,7 @@ class UIAutomationService:
             security_decision="allowed",
             data=data,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._record_security_decision(
             correlation_id=correlation_id,
@@ -576,7 +576,7 @@ class UIAutomationService:
             security_decision=advice.decision,
             data=data | {"policy_tags": advice.policy_tags or [], "matched_application": advice.matched_application},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._record_security_decision(
             correlation_id=correlation_id,
@@ -614,7 +614,7 @@ class UIAutomationService:
             security_decision="blocked",
             data=data,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._logger.warning(
             "write_text_blocked",

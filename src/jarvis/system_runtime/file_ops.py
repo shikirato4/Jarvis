@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from uuid import uuid4
 
@@ -160,7 +160,7 @@ class SystemFileOperations:
 
     @staticmethod
     def _utcnow() -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     @staticmethod
     def _target_kind_for_path(path: Path) -> SystemTargetKind:

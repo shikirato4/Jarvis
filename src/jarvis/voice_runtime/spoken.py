@@ -66,13 +66,6 @@ _MATH_REPLACEMENTS = (
     (re.compile(r"\b=\b"), " igual a "),
     (re.compile(r"\b/\b"), " entre "),
 )
-_SYMBOL_REPLACEMENTS = (
-    ("->", " produce "),
-    ("=>", " produce "),
-    ("*", " por "),
-    ("/", " entre "),
-    ("+", " mas "),
-)
 _NUMBER_WORDS = {
     "0": "cero",
     "1": "uno",
@@ -184,8 +177,21 @@ def clean_tts_text(text: str) -> str:
     cleaned = cleaned.replace("|", ". ")
     cleaned = cleaned.replace("`", "")
     cleaned = _replace_windows_paths(cleaned)
+    # Math FIRST: consumes math stars ("x**2", "2*x", "2 * 3") before any
+    # emphasis stripping could garble them.
     cleaned = _convert_math_to_speech(cleaned)
+    # Then strip markdown emphasis. The old blanket star-to-"por"
+    # replacement used to read "**hola**" as "por por hola por por".
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"__(.+?)__", r"\1", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"\*(.+?)\*", r"\1", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(
+        r"(?<![A-Za-z0-9])_(.+?)_(?![A-Za-z0-9])", r"\1", cleaned, flags=re.DOTALL
+    )
     cleaned = _expand_technical_pronunciations(cleaned)
+    # snake_case identifiers read as separate words, not one garbled blob.
+    cleaned = re.sub(r"(?<=[A-Za-z0-9])_(?=[A-Za-z0-9])", " ", cleaned)
+    # Residual stray markers (unpaired stars/underscores) vanish entirely.
     cleaned = _BOLD_ITALIC_RE.sub("", cleaned)
     cleaned = cleaned.replace(":", ". ")
     cleaned = cleaned.replace(";", ". ")
@@ -352,6 +358,16 @@ def _split_sentence_to_chunks(sentence: str, *, max_chars: int) -> list[str]:
     return segments
 
 
+_SYMBOL_REPLACEMENTS = (
+    ("->", " produce "),
+    ("=>", " produce "),
+    ("+", " mas "),
+)
+# Multiplication star only between numeric operands ("2 * 3", "12*4");
+# standalone or emphasis stars are never spoken as "por".
+_MULTIPLICATION_RE = re.compile(r"(\d)\s*\*\s*(\d)")
+
+
 def _convert_math_to_speech(text: str) -> str:
     updated = text
     for pattern, replacement in _MATH_REPLACEMENTS:
@@ -363,6 +379,8 @@ def _convert_math_to_speech(text: str) -> str:
         flags=re.IGNORECASE,
     )
     updated = re.sub(r"\bx\b", "equis", updated, flags=re.IGNORECASE)
+    updated = _MULTIPLICATION_RE.sub(r"\1 por \2", updated)
+    updated = re.sub(r"(\d)\s*/\s*(\d)", r"\1 entre \2", updated)
     for source, target in _SYMBOL_REPLACEMENTS:
         updated = updated.replace(source, target)
     return updated

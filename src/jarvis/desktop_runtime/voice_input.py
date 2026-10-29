@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from threading import Lock, Thread
 from uuid import uuid4
 
 from jarvis.config import Settings
 from jarvis.voice_runtime.base import VoiceSessionMode, VoiceSessionRequest, VoiceSessionState
+from jarvis.voice_runtime.commands import VoiceCommandParser
 
 
 class DesktopVoiceInputController:
@@ -24,6 +26,18 @@ class DesktopVoiceInputController:
         self._active_correlation_id: str | None = None
         self._active_session_id: str | None = None
         self._processing_thread: Thread | None = None
+        self._last_dispatch_at: float | None = None
+        self._last_wake_hint_at: float | None = None
+        self._explicit_session: bool = False
+        self._wake_parser = (
+            VoiceCommandParser(
+                commands=(),
+                require_wake_word=True,
+                wake_word=settings.voice_wake_word,
+            )
+            if settings.voice_wake_word_enabled
+            else None
+        )
         self._voice_runtime.set_command_callback(self._handle_transcript)
 
     def status(self) -> dict[str, object]:
@@ -57,7 +71,12 @@ class DesktopVoiceInputController:
         return self.status()
 
     def start(self) -> dict[str, object]:
+        """User-triggered listening (button): transcripts pass the wake gate."""
+        return self._start_listening(explicit=True)
+
+    def _start_listening(self, *, explicit: bool) -> dict[str, object]:
         with self._lock:
+            self._explicit_session = explicit
             if not self._enabled or self._muted:
                 self._set_error_locked("Micrófono desactivado.")
                 return self.status()
@@ -165,6 +184,9 @@ class DesktopVoiceInputController:
                     if self._state not in {"PROCESSING", "ERROR"}:
                         self._active_correlation_id = None
                         self._state = "IDLE"
+                        # Silence timeout with no transcript: re-arm in a
+                        # helper thread to avoid holding the state lock.
+                        Thread(target=self._maybe_auto_restart, daemon=True).start()
                     return
             time.sleep(0.05)
 
@@ -173,12 +195,87 @@ class DesktopVoiceInputController:
         with self._lock:
             if correlation_id != self._active_correlation_id:
                 return
+        if self._wake_parser is not None and not self._explicit_session:
+            parse = self._wake_parser.parse(transcript)
+            if parse.wake_heard:
+                transcript = parse.rest
+                if not transcript:
+                    # Bare wake word: nothing to act on, keep listening.
+                    self._reset_after_ignore()
+                    return
+            elif not self._in_conversation_window():
+                # Ambient noise or unrelated speech: ignore, keep listening.
+                self._logger.info(
+                    "desktop_voice_wake_gate_ignored",
+                    extra={"correlation_id": correlation_id},
+                )
+                self._maybe_speak_wake_hint(transcript)
+                self._reset_after_ignore()
+                return
+        with self._lock:
             self._last_transcript = transcript
             self._state = "PROCESSING"
             self._error = None
+            self._last_dispatch_at = time.monotonic()
             worker = Thread(target=self._dispatch_transcript, args=(transcript, correlation_id, metadata), daemon=True)
             self._processing_thread = worker
         worker.start()
+
+    def _in_conversation_window(self) -> bool:
+        last = self._last_dispatch_at
+        return last is not None and (
+            (time.monotonic() - last)
+            <= self._settings.voice_conversation_window_seconds
+        )
+
+    def _reset_after_ignore(self) -> None:
+        with self._lock:
+            self._active_correlation_id = None
+            self._active_session_id = None
+            self._state = "IDLE"
+        self._maybe_auto_restart()
+
+    def _maybe_speak_wake_hint(self, transcript: str) -> None:
+        """Answer ignored-but-substantive speech so the user is not left cold.
+
+        Silence after "le hablé y no respondió" felt like a broken assistant:
+        if the ignored transcript carries 3+ real words, say the wake
+        protocol out loud (respecting a cooldown so chatty ambience does
+        not loop the hint).
+        """
+        if not self._settings.voice_wake_hint_enabled:
+            return
+        words = re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+", transcript)
+        if len(words) < 3:
+            return
+        now = time.monotonic()
+        cooldown = self._settings.voice_wake_hint_cooldown_seconds
+        with self._lock:
+            if (
+                self._last_wake_hint_at is not None
+                and (now - self._last_wake_hint_at) <= cooldown
+            ):
+                return
+            self._last_wake_hint_at = now
+        speak = getattr(self._voice_runtime, "speak", None)
+        if speak is None:
+            return
+        try:
+            speak(
+                "¿Me llamó, señor? Para ordenarme algo, comience con Jarvis.",
+                literal=True,
+            )
+        except Exception:  # noqa: BLE001 - hint is best-effort, never break listening
+            self._logger.exception("desktop_voice_wake_hint_failed")
+
+    def _maybe_auto_restart(self) -> None:
+        """Re-arm listening after an interaction when in continuous mode."""
+        if (
+            self._settings.voice_input_continuous
+            and self._enabled
+            and not self._muted
+        ):
+            self._start_listening(explicit=False)
 
     def _dispatch_transcript(self, text: str, correlation_id: str, metadata: dict[str, object]) -> None:
         try:
@@ -192,6 +289,8 @@ class DesktopVoiceInputController:
             with self._lock:
                 self._active_correlation_id = None
                 self._set_error_locked(str(exc))
+        finally:
+            self._maybe_auto_restart()
 
     def _set_error_locked(self, message: str) -> None:
         self._state = "ERROR"

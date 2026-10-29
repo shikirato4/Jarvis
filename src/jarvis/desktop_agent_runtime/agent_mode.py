@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class AgentMode(StrEnum):
@@ -44,6 +44,7 @@ class AgentPermissionMode(StrEnum):
     SAFE = "safe"
     NORMAL = "normal"
     PRO = "pro"
+    FULL_USER = "full_user"
 
 
 class AgentSafetyDecision(StrEnum):
@@ -265,7 +266,7 @@ class AgentSafetyGate:
                 "Accion de alto riesgo: requiere confirmacion fuerte y PIN si esta configurado.",
                 requires_pin=True,
             )
-        if risk == AgentRisk.MEDIUM and not confirmed:
+        if risk == AgentRisk.MEDIUM and not confirmed and permission_mode != AgentPermissionMode.FULL_USER:
             return AgentSafetyResult(AgentSafetyDecision.REQUIRE_CONFIRMATION, risk, "Accion sensible: requiere Confirm Action.")
         return AgentSafetyResult(AgentSafetyDecision.ALLOW, risk, "Accion permitida por Agent Mode.")
 

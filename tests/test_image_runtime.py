@@ -5,6 +5,7 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from jarvis.cli import app as cli_app
@@ -27,6 +28,10 @@ def _settings(tmp_path: Path) -> Settings:
         image_default_height=768,
         image_default_steps=25,
         image_timeout_seconds=1800,
+        # hermetico: sin esto hereda JARVIS_IMAGE_MODEL_KIND del .env del
+        # repo y en la maquina del usuario (con modelos de Qwen reales)
+        # los tests intentarian cargar el pipeline de 24GB.
+        image_model_kind="sdxl",
         embeddings_enabled=False,
         ui_backend_kind="in_memory",
         system_backend_kind="in_memory",
@@ -61,6 +66,7 @@ class FakeImageBackend:
 
 
 def test_image_dependency_status_does_not_import_heavy_torch(monkeypatch) -> None:
+    pytest.importorskip("torch", reason="status asserts the local torch installation")
     real_import = builtins.__import__
     imported: list[str] = []
 
@@ -213,11 +219,19 @@ def test_image_model_path_finds_checkout_when_workspace_is_parent(tmp_path: Path
 def test_default_image_model_path_is_not_bound_to_arbitrary_cwd(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     settings = Settings(_env_file=None, embeddings_enabled=False, ui_backend_kind="in_memory", system_backend_kind="in_memory")
-    assert settings.resolved_image_model_path.exists()
-    assert settings.resolved_image_model_path.name == "juggernautXL_v8Rundiffusion.safetensors"
+    resolved = settings.resolved_image_model_path
+    # The default resolves inside the checkout's models tree, never the
+    # arbitrary cwd; the checkpoint file itself is a developer-local asset
+    # and is not asserted to exist.
+    assert resolved.name == "juggernautXL_v8Rundiffusion.safetensors"
+    assert "models" in resolved.parts and "checkpoints" in resolved.parts
+    assert tmp_path not in resolved.parents
 
 
 def test_image_cli_status(monkeypatch, tmp_path: Path) -> None:
+    # hermetico: sin esto hereda el .env del repo (p.ej. IMAGE_MODEL_KIND
+    # del desarrollador) y el resultado depende de la maquina
+    monkeypatch.setenv("JARVIS_IMAGE_MODEL_KIND", "sdxl")
     monkeypatch.setenv("JARVIS_DATA_DIR", str(tmp_path / "runtime"))
     monkeypatch.setenv("JARVIS_WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("JARVIS_IMAGE_MODEL_PATH", str(tmp_path / "model.safetensors"))
@@ -244,7 +258,7 @@ def test_agent_mode_has_image_skills() -> None:
 
 def test_cuda_component_normalization_keeps_vae_upcast_policy() -> None:
     """Compute modules share FP16; VAE dtype is left to Diffusers policy."""
-    import torch
+    torch = pytest.importorskip("torch")
 
     class Pipe:
         unet = torch.nn.Linear(2, 2).float()
@@ -260,3 +274,98 @@ def test_cuda_component_normalization_keeps_vae_upcast_policy() -> None:
     assert next(pipe.text_encoder_2.parameters()).dtype is torch.float16
     # A force_upcast VAE may legitimately remain float32 for numerical safety.
     assert next(pipe.vae.parameters()).dtype is torch.float32
+
+
+def test_torch_device_prefers_cpu_offload_on_small_vram(monkeypatch) -> None:
+    """Con <10GB libres la carga usa cuda_offload (28x mas rapido en la
+    5070 de 8GB: el pipeline completo no cabe y .to(cuda) thrashea."""
+    pytest.importorskip("torch", reason="ci installs no image extras")
+    from jarvis.image_runtime import service as image_service
+
+    monkeypatch.setattr(image_service, "_free_cuda_vram_gb", lambda: 7.5)
+    monkeypatch.setattr(image_service, "_cuda_available", lambda: True)
+    device, dtype = image_service._torch_device_and_dtype()
+    assert device == "cuda_offload"
+    assert dtype is not None
+
+    monkeypatch.setattr(image_service, "_free_cuda_vram_gb", lambda: 16.0)
+    device, _ = image_service._torch_device_and_dtype()
+    assert device == "cuda"
+
+    monkeypatch.setattr(image_service, "_cuda_available", lambda: False)
+    device, dtype = image_service._torch_device_and_dtype()
+    assert device == "cpu"
+
+
+def test_backend_load_uses_model_cpu_offload_for_cuda_offload() -> None:
+    pytest.importorskip("diffusers", reason="ci installs no image extras")
+    calls: list[str] = []
+
+    class _FakePipe:
+        def enable_model_cpu_offload(self) -> None:
+            calls.append("cpu_offload")
+
+        def enable_attention_slicing(self) -> None:
+            calls.append("slicing")
+
+        def to(self, *args, **kwargs):  # noqa: ANN001
+            calls.append("to")
+            return self
+
+    from jarvis.image_runtime.service import DiffusersImageBackend
+    from unittest.mock import patch
+
+    with patch(
+        "diffusers.StableDiffusionXLPipeline.from_single_file", return_value=_FakePipe()
+    ):
+        DiffusersImageBackend().load(
+            Path("x.safetensors"), device="cuda_offload", torch_dtype="fp16"
+        )
+    assert "cpu_offload" in calls
+    assert "to" not in calls, "offload y .to juntos causan fallos Half/Float"
+
+
+def test_image_model_kind_defaults_to_qwen_and_falls_back_without_models(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """kind=qwen_turbo usa el backend Qwen; sin modelos en disco cae a SDXL."""
+    from jarvis.image_runtime.service import ImageGenerationService
+
+    # default del config: qwen_turbo (Qwen es EL motor de imagenes).
+    # _env_file=None + sin vars para no heredar el ambient.
+    monkeypatch.delenv("JARVIS_IMAGE_MODEL_KIND", raising=False)
+    monkeypatch.delenv("IMAGE_MODEL_KIND", raising=False)
+    settings = Settings(data_dir=tmp_path / "d", _env_file=None)
+    assert settings.image_model_kind == "qwen_turbo"
+
+    # con el dir de qwen presente (model_index.json) -> backend Qwen
+    qwen_dir = tmp_path / "qwen"
+    (qwen_dir / "sub").mkdir(parents=True)
+    (qwen_dir / "model_index.json").write_text("{}", encoding="utf-8")
+    svc = ImageGenerationService(
+        settings=Settings(
+            data_dir=tmp_path / "d2", image_model_kind="qwen_turbo", qwen_image_dir=qwen_dir
+        )
+    )
+    from jarvis.image_runtime.qwen_backend import QwenImageBackend
+
+    assert isinstance(svc._model._backend, QwenImageBackend)  # noqa: SLF001
+    assert svc._model.model_path == qwen_dir  # noqa: SLF001
+
+    # sin el dir -> SIN fallback: backend Qwen y error honesto al cargar
+    # (el usuario decidio que solo Qwen es el motor; nada de SDXL oculto)
+    svc2 = ImageGenerationService(
+        settings=Settings(
+            data_dir=tmp_path / "d3", image_model_kind="qwen_turbo", qwen_image_dir=tmp_path / "nohay"
+        )
+    )
+    assert isinstance(svc2._model._backend, QwenImageBackend)  # noqa: SLF001
+    from jarvis.image_runtime.qwen_backend import QwenImageBackend as _QB
+
+    try:
+        _QB().load(tmp_path / "nohay", device="cpu", torch_dtype=None)
+        raised = False
+    except FileNotFoundError as exc:
+        raised = True
+        assert "huggingface-cli download" in str(exc)
+    assert raised, "debe fallar con instrucciones de descarga"

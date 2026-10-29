@@ -43,6 +43,9 @@ def _settings(tmp_path) -> Settings:
         voice_tts_provider_default="in_memory",
         voice_input_provider_default="in_memory",
         voice_input_timeout_seconds=1.0,
+        # These tests exercise the explicit button flow; continuous
+        # auto-rearming has its own dedicated tests.
+        voice_input_continuous=False,
     )
 
 

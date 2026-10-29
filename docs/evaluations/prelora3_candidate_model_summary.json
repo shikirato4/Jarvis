@@ -1,0 +1,20 @@
+{
+  "compact": {
+    "cases": 14,
+    "exact_trajectory": 0.9285714285714286,
+    "first_tool": 1.0,
+    "retrieval_recall": 1.0,
+    "runtime_failures": 0,
+    "prompt_tokens": 2307.4285714285716,
+    "latency_ms": 8050.787857142857
+  },
+  "full": {
+    "cases": 14,
+    "exact_trajectory": 0.9285714285714286,
+    "first_tool": 1.0,
+    "retrieval_recall": 1.0,
+    "runtime_failures": 0,
+    "prompt_tokens": 7668.785714285715,
+    "latency_ms": 7930.723571428572
+  }
+}

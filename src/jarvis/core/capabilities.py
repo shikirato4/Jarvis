@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from jarvis.actions.models import ActionStep
 from jarvis.core.modes import ExecutionMode
@@ -73,7 +74,7 @@ class CapabilityRegistry:
             return best_intent
         return default_intent
 
-    def build_plan(self, intent: str, request: "OrchestrationRequest") -> list[ActionStep]:
+    def build_plan(self, intent: str, request: OrchestrationRequest) -> list[ActionStep]:
         capability = self.get(intent)
         if capability is None:
             raise KeyError(intent)

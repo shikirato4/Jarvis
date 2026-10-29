@@ -40,6 +40,26 @@ _DETAILED_MARKERS = (
     "mega prompt",
     "documenta todo",
     "paso a paso",
+    "extensamente",
+    "informe completo",
+    "reporte completo",
+)
+
+_EXPLICIT_EXTENDED_MARKERS = (
+    "extensamente",
+    "informe completo",
+    "reporte completo",
+    "investiga exhaustivamente",
+    "explica exhaustivamente",
+    "long-form",
+)
+
+_EXPLICIT_BRIEF_MARKERS = (
+    "brevemente",
+    "respuesta breve",
+    "en pocas palabras",
+    "briefly",
+    "short answer",
 )
 
 _PROJECT_MARKERS = (
@@ -191,7 +211,25 @@ def select_chat_generation_profile(text: str, settings: Any, *, web_used: bool =
         lowered.count(",") >= 2 or ";" in lowered or "\n-" in lowered
     )
     temperature = float(getattr(settings, "chat_temperature", 0.4))
-    if web_used:
+    explicit_words = bool(
+        re.search(
+            r"\b(?:aproximadamente|aprox\.?|unas?|alrededor de|about|approximately)?\s*"
+            r"[1-9]\d{0,3}(?:[.,]\d{3})?\s*(?:palabras|words)\b",
+            lowered,
+        )
+    )
+    explicitly_extended = explicit_words or any(
+        marker in lowered for marker in _EXPLICIT_EXTENDED_MARKERS
+    )
+    if any(marker in lowered for marker in _EXPLICIT_BRIEF_MARKERS):
+        return ChatGenerationProfile(
+            name="fast",
+            context_profile="minimal",
+            max_tokens=int(getattr(settings, "chat_fast_max_tokens", 160)),
+            temperature=temperature,
+            timeout_seconds=float(getattr(settings, "llm_fast_timeout_seconds", 20.0)),
+        )
+    if web_used and not explicitly_extended:
         return ChatGenerationProfile(
             name="default",
             context_profile="web",
@@ -199,15 +237,7 @@ def select_chat_generation_profile(text: str, settings: Any, *, web_used: bool =
             temperature=temperature,
             timeout_seconds=float(getattr(settings, "web_synthesis_timeout_seconds", 75.0)),
         )
-    if is_coding or any(marker in lowered for marker in _PROJECT_MARKERS):
-        return ChatGenerationProfile(
-            name="detailed",
-            context_profile="project",
-            max_tokens=int(getattr(settings, "chat_detailed_max_tokens", 700)),
-            temperature=temperature,
-            timeout_seconds=float(getattr(settings, "llm_detailed_timeout_seconds", 120.0)),
-        )
-    if is_extended_long_form_request(lowered):
+    if explicitly_extended or is_extended_long_form_request(lowered):
         return ChatGenerationProfile(
             name="extended",
             context_profile="extended",
@@ -216,6 +246,14 @@ def select_chat_generation_profile(text: str, settings: Any, *, web_used: bool =
             timeout_seconds=float(
                 getattr(settings, "llm_detailed_timeout_seconds", 120.0)
             ),
+        )
+    if is_coding or any(marker in lowered for marker in _PROJECT_MARKERS):
+        return ChatGenerationProfile(
+            name="detailed",
+            context_profile="project",
+            max_tokens=int(getattr(settings, "chat_detailed_max_tokens", 700)),
+            temperature=temperature,
+            timeout_seconds=float(getattr(settings, "llm_detailed_timeout_seconds", 120.0)),
         )
     if (
         any(marker in lowered for marker in _DETAILED_MARKERS)

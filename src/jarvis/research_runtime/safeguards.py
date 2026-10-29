@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from .models import ResearchBudget, ResearchTask
 
@@ -18,7 +18,7 @@ def budget_exceeded(task: ResearchTask, *, model_calls: int, started_at: datetim
         return "max_steps_exceeded"
     if model_calls > task.budget.max_model_calls:
         return "max_model_calls_exceeded"
-    if (datetime.now(timezone.utc) - started_at).total_seconds() > task.budget.max_duration_seconds:
+    if (datetime.now(UTC) - started_at).total_seconds() > task.budget.max_duration_seconds:
         return "max_duration_exceeded"
     if len(task.sources) > task.budget.max_sources:
         return "max_sources_exceeded"

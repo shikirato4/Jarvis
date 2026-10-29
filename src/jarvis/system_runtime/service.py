@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from uuid import uuid4
 
@@ -81,7 +81,7 @@ class SystemRuntimeService(RuntimeServiceContract):
     def search(self, request: SystemSearchRequest | dict) -> SystemSearchReceipt:
         self._ensure_started()
         payload = SystemSearchRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         handle = self._begin_operation("system.search", payload.metadata, timeout_ms=self._settings.system_operation_timeout_ms)
         try:
             matches = self._search.search(payload.resource)
@@ -97,7 +97,7 @@ class SystemRuntimeService(RuntimeServiceContract):
             matches=matches,
             metadata=payload.metadata,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("system.search", receipt.model_dump(mode="json"))
         return receipt
@@ -105,7 +105,7 @@ class SystemRuntimeService(RuntimeServiceContract):
     def resolve(self, request: SystemResolveRequest | dict) -> SystemResolveReceipt:
         self._ensure_started()
         payload = SystemResolveRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         handle = self._begin_operation("system.resolve", payload.metadata, timeout_ms=self._settings.system_operation_timeout_ms)
         try:
             target = self._resolver.resolve(payload)
@@ -124,7 +124,7 @@ class SystemRuntimeService(RuntimeServiceContract):
             warnings=target.warnings,
             metadata=payload.metadata,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("system.resolve", receipt.model_dump(mode="json"))
         return receipt
@@ -132,7 +132,7 @@ class SystemRuntimeService(RuntimeServiceContract):
     def open(self, request: SystemOpenRequest | dict, *, correlation_id: str | None = None) -> SystemOperationReceipt:
         self._ensure_started()
         payload = SystemOpenRequest.model_validate(request)
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         handle = self._begin_operation("system.open", payload.metadata, timeout_ms=self._settings.system_operation_timeout_ms, correlation_id=correlation_id)
         target = self._resolve_open_target(payload)
         target = self._harden_resolved_target(target)
@@ -146,7 +146,11 @@ class SystemRuntimeService(RuntimeServiceContract):
         target.sensitivity = advice.sensitivity
         target.warnings.extend(item for item in advice.warnings if item not in target.warnings)
         validate_allowed_target(target, policy=self._safety_policy, open_policy=self._open_policy)
-        if advice.requires_confirmation and not payload.metadata.get("approved", False):
+        protected_tags = {"sensitive_root", "blocked_extension", "external_volume", "blocked_scheme"}
+        protected_target = bool(protected_tags.intersection(advice.policy_tags))
+        if advice.requires_confirmation and (
+            not payload.metadata.get("approved", False) or protected_target
+        ):
             receipt = SystemOperationReceipt(
                 correlation_id=correlation_id or str(uuid4()),
                 operation_name="system.open",
@@ -161,7 +165,7 @@ class SystemRuntimeService(RuntimeServiceContract):
                 data={"policy_tags": advice.policy_tags},
                 metadata=payload.metadata,
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
             self._event_bus.publish("system.confirmation_required", receipt.model_dump(mode="json"))
             if handle is not None:
@@ -190,7 +194,7 @@ class SystemRuntimeService(RuntimeServiceContract):
             data=launch_data,
             metadata=payload.metadata | {"policy_tags": advice.policy_tags},
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish("system.opened", receipt.model_dump(mode="json"))
         if handle is not None:

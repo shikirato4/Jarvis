@@ -17,6 +17,8 @@ models/**/*.ckpt
 models/**/*.bin
 models/**/*.pt
 models/**/*.pth
+models/**/*.gguf
+*.gguf
 .cache/
 *.log
 *.tmp
@@ -27,3 +29,9 @@ models/**/*.pth
 /build/
 /dist/
 /runtimes/llama-cpp-cuda/
+models/qwen_image_turbo/
+.env.bak*
+# Modelos base y artefactos de entrenamiento (no versionar)
+models/llm/
+unsloth_compiled_cache/
+scripts/llamacpp_tools/

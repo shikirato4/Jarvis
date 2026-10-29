@@ -15,11 +15,11 @@ class JarvisModule(Protocol):
     name: str
     description: str
 
-    def register_actions(self, registry: "ActionRegistry") -> None: ...
+    def register_actions(self, registry: ActionRegistry) -> None: ...
 
-    def register_tools(self, registry: "ToolRegistry") -> None: ...
+    def register_tools(self, registry: ToolRegistry) -> None: ...
 
-    def register_capabilities(self, registry: "CapabilityRegistry") -> None: ...
+    def register_capabilities(self, registry: CapabilityRegistry) -> None: ...
 
     def start(self) -> None: ...
 
@@ -45,17 +45,17 @@ class ModuleRegistry:
             raise ConfigurationError(f"module '{module.name}' is already registered")
         self._modules.append(module)
 
-    def register_actions(self, registry: "ActionRegistry") -> None:
+    def register_actions(self, registry: ActionRegistry) -> None:
         for module in self._modules:
             module.register_actions(registry)
 
-    def register_tools(self, registry: "ToolRegistry") -> None:
+    def register_tools(self, registry: ToolRegistry) -> None:
         for module in self._modules:
             registrar = getattr(module, "register_tools", None)
             if callable(registrar):
                 registrar(registry)
 
-    def register_capabilities(self, registry: "CapabilityRegistry") -> None:
+    def register_capabilities(self, registry: CapabilityRegistry) -> None:
         for module in self._modules:
             registrar = getattr(module, "register_capabilities", None)
             if callable(registrar):

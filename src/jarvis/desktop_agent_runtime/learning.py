@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from uuid import uuid4
 
@@ -23,7 +23,7 @@ class LearningArtifact:
     reusable_context: str = ""
     repo_name: str | None = None
     blocked_sections: list[str] = field(default_factory=list)
-    date: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    date: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     id: str = field(default_factory=lambda: f"artifact-{uuid4().hex[:10]}")
 
     def to_dict(self) -> dict[str, Any]:

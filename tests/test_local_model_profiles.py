@@ -7,10 +7,12 @@ import pytest
 from jarvis.config import Settings
 from jarvis.models_runtime.local_profiles import (
     BASELINE_PROFILE_ID,
+    CONFIGURED_PROFILE_ID,
     QWEN35_PROFILE_ID,
     LocalModelProfile,
     LocalModelProfileConfigurationError,
     baseline_local_model_profile,
+    configured_local_model_profile,
     resolve_local_model_profile,
     registered_local_model_profiles,
 )
@@ -84,7 +86,83 @@ def test_unknown_profile_fails_closed(tmp_path: Path) -> None:
         resolve_local_model_profile(settings)
 
 
-def test_qwen35_candidate_is_registered_as_default(tmp_path: Path) -> None:
+def test_configured_directory_with_single_gguf_is_selected(tmp_path: Path) -> None:
+    """A shared folder holding exactly one model keeps working as configured."""
+    models = tmp_path / "models"
+    models.mkdir()
+    artifact = models / "solo.gguf"
+    artifact.write_bytes(b"")
+
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_model_path=models,
+    )
+
+    profile = resolve_local_model_profile(settings)
+
+    assert profile.id == CONFIGURED_PROFILE_ID
+    assert profile.gguf_path == artifact
+    assert profile.expected_model_family == "configured"
+
+
+def test_resolution_degrades_to_registered_default_without_artifacts(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A missing models folder degrades to the shipped profile with a warning."""
+    settings = Settings(_env_file=None, workspace_root=tmp_path)
+
+    with caplog.at_level("WARNING", logger="jarvis.models_runtime.local_profiles"):
+        profile = resolve_local_model_profile(settings)
+
+    assert profile.id == QWEN35_PROFILE_ID
+    assert [record for record in caplog.records if record.levelname == "WARNING"]
+
+
+def test_configured_directory_without_gguf_fails_closed(tmp_path: Path) -> None:
+    """An explicit but empty models folder is a user error, reported cleanly."""
+    empty = tmp_path / "empty_models"
+    empty.mkdir()
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_profile_id=CONFIGURED_PROFILE_ID,
+        local_runtime_model_path=empty,
+    )
+
+    with pytest.raises(LocalModelProfileConfigurationError, match="GGUF"):
+        configured_local_model_profile(settings)
+
+
+def test_ambiguous_configured_directory_fails_closed(tmp_path: Path) -> None:
+    """Two models in the shared folder stay ambiguous instead of guessing."""
+    models = tmp_path / "models"
+    models.mkdir()
+    (models / "a.gguf").write_bytes(b"")
+    (models / "b.gguf").write_bytes(b"")
+
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_model_path=models,
+    )
+
+    with pytest.raises(LocalModelProfileConfigurationError, match="varios"):
+        configured_local_model_profile(settings)
+
+
+def test_qwen35_candidate_is_registered_as_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Hermetico: sin sidecar mmproj en un workspace temporal el perfil no
+    # puede declararse capaz de vision. Sin parchear el descubrimiento, el
+    # test leeria el models/llm del repo y fallaria en cuanto existan
+    # sidecars locales (que ya existen para la vision de este equipo).
+    import jarvis.models_runtime.local_profiles as local_profiles_module
+
+    monkeypatch.setattr(
+        local_profiles_module, "_discover_mmproj", lambda *_args, **_kwargs: None
+    )
     settings = Settings(_env_file=None, workspace_root=tmp_path)
     candidate = next(
         profile
@@ -145,6 +223,63 @@ def test_qwen35_context_override_is_isolated_from_baseline(tmp_path: Path) -> No
     assert candidate.context_size == 16_384
     assert baseline.id == BASELINE_PROFILE_ID
     assert baseline.context_size == 4096
+
+
+def test_shared_folder_discovers_one_level_deep_and_ignores_adapters(
+    tmp_path: Path,
+) -> None:
+    """models/llm/<modelo>/*.gguf se descubre; el LoRA no cuenta como base."""
+
+    base = tmp_path / "models" / "llm"
+    modelo = base / "qwen3.5-9b"
+    modelo.mkdir(parents=True)
+    (modelo / "Qwen3.5-9B-IQ4_XS.gguf").write_bytes(b"gguf")
+    lora_dir = base / "qlora-jarvis-adapter-gguf"
+    lora_dir.mkdir()
+    (lora_dir / "jarvis-lora.gguf").write_bytes(b"gguf")
+    (modelo / "mmproj.gguf").write_bytes(b"gguf")
+
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_model_path=str(base),
+    )
+
+    perfil = configured_local_model_profile(settings)
+    assert perfil.gguf_path.name == "Qwen3.5-9B-IQ4_XS.gguf"
+
+
+def test_configured_lora_adapter_reaches_profiles_and_validates_suffix(
+    tmp_path: Path,
+) -> None:
+    """El adapter del fine-tune viaja por settings y exige formato GGUF."""
+
+    adapter = tmp_path / "jarvis-lora.gguf"
+    adapter.write_bytes(b"gguf")
+    settings = Settings(
+        _env_file=None,
+        workspace_root=tmp_path,
+        local_runtime_profile_id=QWEN35_PROFILE_ID,
+        local_runtime_lora_path=adapter,
+    )
+
+    perfil = resolve_local_model_profile(settings)
+    assert perfil.lora_path == adapter
+    assert (
+        baseline_local_model_profile(settings).lora_path == adapter
+    ), "el baseline tambien honra el adapter configurado"
+
+    with pytest.raises(LocalModelProfileConfigurationError, match="lora_path"):
+        LocalModelProfile(
+            id="candidate",
+            display_name="Candidate",
+            model_alias="Qwen3.5-9B-Q4",
+            gguf_path=tmp_path / "candidate.gguf",
+            expected_model_family="qwen3.5",
+            context_size=8192,
+            parallel=1,
+            lora_path=tmp_path / "adapter.bin",
+        )
 
 
 def test_explicit_registered_profile_resolves_without_becoming_default(tmp_path: Path) -> None:
@@ -233,7 +368,7 @@ def test_qwen35_terminal_action_retains_terminal_tools(tmp_path: Path, prompt: s
         "¿Qué comando sirve para ver la versión de Python?",
     ],
 )
-def test_qwen35_terminal_information_does_not_retain_terminal_tools(
+def test_qwen35_terminal_information_preserves_policy_selected_tools(
     tmp_path: Path, prompt: str
 ) -> None:
     settings = Settings(
@@ -253,4 +388,4 @@ def test_qwen35_terminal_information_does_not_retain_terminal_tools(
 
     payload = provider._request_payload(request, temperature=0, stream=False)
     names = [tool["function"]["name"] for tool in payload["tools"]]
-    assert not any(name.startswith("terminal__") for name in names)
+    assert any(name.startswith("terminal__") for name in names)

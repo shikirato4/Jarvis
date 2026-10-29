@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from threading import Event
 from typing import Any, Protocol
@@ -47,7 +47,7 @@ class AudioChunk(JarvisBaseModel):
     sample_width_bytes: int = 2
     duration_seconds: float = 0.0
     source_name: str | None = None
-    captured_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
+    captured_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = PydanticField(default_factory=dict)
 
 
@@ -99,7 +99,7 @@ class TranscriptionResult(JarvisBaseModel):
     confidence: float | None = None
     fallback_used: bool = False
     segments: list[STTTranscriptSegment] = PydanticField(default_factory=list)
-    created_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = PydanticField(default_factory=dict)
 
 
@@ -128,7 +128,7 @@ class SynthesisResult(JarvisBaseModel):
     latency_ms: float = 0.0
     duration_seconds: float | None = None
     fallback_used: bool = False
-    created_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = PydanticField(default_factory=dict)
 
 
@@ -145,7 +145,7 @@ class AudioEvent(JarvisBaseModel):
     event_type: AudioEventType
     confidence: float = 1.0
     correlation_id: str | None = None
-    created_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = PydanticField(default_factory=dict)
 
 
@@ -174,8 +174,8 @@ class VoiceSession(JarvisBaseModel):
     transcripts: list[str] = PydanticField(default_factory=list)
     events: list[AudioEvent] = PydanticField(default_factory=list)
     last_error: str | None = None
-    started_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
     ended_at: datetime | None = None
     metadata: dict[str, Any] = PydanticField(default_factory=dict)
 
@@ -199,8 +199,8 @@ class VoiceOperationReceipt(JarvisBaseModel):
     session_id: str | None = None
     latency_ms: float | None = None
     data: dict[str, Any] = PydanticField(default_factory=dict)
-    started_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = PydanticField(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = PydanticField(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(slots=True)

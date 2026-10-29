@@ -5,10 +5,11 @@ import subprocess
 import threading
 import time
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -16,7 +17,7 @@ import httpx
 from jarvis.config import Settings
 
 from .local_profiles import LocalModelProfile, resolve_local_model_profile
-from .qwen_identity import QwenIdentity
+from .model_identity import ConfiguredModelIdentity
 
 
 class LocalRuntimeState(str, Enum):
@@ -110,7 +111,7 @@ class _Probe:
 
 
 class LocalModelRuntimeManager:
-    """Own the lifecycle of the configured llama.cpp Qwen server.
+    """Own the lifecycle of the configured llama.cpp local model server.
 
     Provider selection remains outside this class. Callers use ``ensure_ready``
     only after the existing coordinator has selected LOCAL.
@@ -129,13 +130,12 @@ class LocalModelRuntimeManager:
     ) -> None:
         self._settings = settings
         self._profile = profile or resolve_local_model_profile(settings)
-        self._identity = QwenIdentity(
+        self._identity = ConfiguredModelIdentity(
             self._profile.model_alias,
             self._profile.model_aliases,
-            self._profile.expected_model_family,
         )
         self._client = client or httpx.Client(
-            verify=False,
+            verify=False,  # noqa: S501  # local llama-server endpoint (localhost/self-signed), not public TLS
             trust_env=False,
             timeout=settings.local_llm_healthcheck_timeout_seconds,
         )
@@ -254,7 +254,7 @@ class LocalModelRuntimeManager:
         started_at = self._clock()
         try:
             ready = self._start_sequence(started_at)
-        except _StopRequested:
+        except _StopRequested as exc:
             with self._condition:
                 self._status = replace(
                     self._status,
@@ -265,7 +265,7 @@ class LocalModelRuntimeManager:
                     readiness=False,
                 )
                 self._condition.notify_all()
-            raise LocalModelRuntimeError("Inicio del runtime local cancelado.")
+            raise LocalModelRuntimeError("Inicio del runtime local cancelado.") from exc
         except LocalModelRuntimeError as exc:
             with self._condition:
                 self._status = replace(
@@ -568,7 +568,7 @@ class LocalModelRuntimeManager:
                 parallel=self._profile.parallel,
                 ownership=LocalRuntimeOwnership.JARVIS,
                 pid=process.pid,
-                start_time=datetime.now(timezone.utc).isoformat(),
+                start_time=datetime.now(UTC).isoformat(),
                 process_state="running_loading_model",
                 readiness=False,
                 fallback_reason=fallback_reason,
@@ -676,7 +676,7 @@ class LocalModelRuntimeManager:
                 True,
                 False,
                 detail=(
-                    "model identity mismatch; expected "
+                    "model identity mismatch; expected configured model "
                     f"{self._profile.model_alias}, advertised {models or 'none'}"
                 ),
             )
@@ -707,8 +707,34 @@ class LocalModelRuntimeManager:
             "--port",
             str(parsed.port),
             "--flash-attn",
-            "off",
+            self._flash_attn_mode(),
+            # --jinja makes llama-server apply the model's embedded chat
+            # template: without it the OpenAI-compatible endpoint cannot
+            # render tools into the prompt nor parse the model's tool
+            # calls, so the local model can never act (only chat).
+            "--jinja",
         ]
+        if self._profile.mmproj_path is not None:
+            mmproj_path = self._resolved_path(self._profile.mmproj_path)
+            if not mmproj_path.is_file():
+                raise LocalRuntimeConfigurationError(
+                    f"Proyector multimodal configurado no existe: {mmproj_path}."
+                )
+            command.extend(("--mmproj", str(mmproj_path)))
+        kv_type = str(getattr(self._settings, "local_runtime_kv_cache_type", "f16"))
+        if kv_type != "f16":
+            # El KV de este modelo cuesta 128KB/token: en q8_0 la misma
+            # VRAM rinde el doble de ventana sin perdida apreciable.
+            command.extend(("--cache-type-k", kv_type, "--cache-type-v", kv_type))
+        if self._profile.lora_path is not None:
+            # Adapter del fine-tune: se aplica en el servidor sobre el GGUF
+            # base, asi que apagarlo es solo quitar la variable del .env.
+            lora_path = self._resolved_path(self._profile.lora_path)
+            if not lora_path.is_file():
+                raise LocalRuntimeConfigurationError(
+                    f"Adapter LoRA configurado no existe: {lora_path}."
+                )
+            command.extend(("--lora", str(lora_path)))
         for flag, value in self._profile.llama_cpp_args:
             command.append(flag)
             if value is not None:
@@ -722,6 +748,16 @@ class LocalModelRuntimeManager:
                 f"GGUF local configurado no existe o no es válido: {path}."
             )
         return path
+
+    def _flash_attn_mode(self) -> str:
+        """KV cuantizado exige flash-attn; en f16 el arranque sigue en off.
+
+        El off historico existe por estabilidad de la vision multimodal:
+        solo se enciende cuando el KV cuantizado lo necesita de verdad.
+        """
+
+        kv_type = str(getattr(self._settings, "local_runtime_kv_cache_type", "f16"))
+        return "on" if kv_type != "f16" else "off"
 
     def _binary_for(self, backend: LocalRuntimeBackend) -> Path:
         configured = (

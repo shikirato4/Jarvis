@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import RLock
 from typing import TYPE_CHECKING, Any
 
@@ -48,7 +48,7 @@ class RuntimeStateManager:
         self._recent_recoveries: deque[RecoveryRecord] = deque(maxlen=history_limit)
         self._ops_snapshots: deque[OperationalSnapshot] = deque(maxlen=history_limit)
 
-    def bind(self, event_bus: "EventBus") -> None:
+    def bind(self, event_bus: EventBus) -> None:
         event_bus.subscribe("tool.executed", self._on_tool_executed)
         event_bus.subscribe("tool.failed", self._on_tool_failed)
         event_bus.subscribe("model.executed", self._on_model_executed)
@@ -107,7 +107,7 @@ class RuntimeStateManager:
             if record is None:
                 return
             record.status = TaskLifecycleStatus.COMPLETED
-            record.finished_at = datetime.now(timezone.utc)
+            record.finished_at = datetime.now(UTC)
             record.output_summary = output_summary
             self._recent_tasks.appendleft(record)
 
@@ -117,7 +117,7 @@ class RuntimeStateManager:
             if record is None:
                 return
             record.status = TaskLifecycleStatus.FAILED
-            record.finished_at = datetime.now(timezone.utc)
+            record.finished_at = datetime.now(UTC)
             record.error = error
             self._recent_tasks.appendleft(record)
 
@@ -164,7 +164,7 @@ class RuntimeStateManager:
     def trim_history(self, *, receipt_limit: int, snapshot_limit: int, max_age_seconds: float | None = None) -> dict[str, int]:
         with self._lock:
             if max_age_seconds is not None:
-                cutoff = datetime.now(timezone.utc).timestamp() - max_age_seconds
+                cutoff = datetime.now(UTC).timestamp() - max_age_seconds
                 for queue in (
                     self._recent_tasks,
                     self._recent_tools,

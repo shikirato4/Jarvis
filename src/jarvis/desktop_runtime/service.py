@@ -52,6 +52,34 @@ from jarvis.services import (
 from jarvis.web_search import SearchMode, build_web_search_provider, decide_search_mode
 
 
+_LIVE_REASONING_MAX_CHARS = 1500
+
+
+def _live_thought(
+    status: str,
+    reasoning_text: str,
+    *,
+    elapsed_seconds: float | None = None,
+    summary: str | None = None,
+) -> dict:
+    """Thought metadata for the owner's live reasoning display.
+
+    The raw chain-of-thought is shown to the local owner in the ThoughtPanel
+    (capped to the most recent tail); it is never spoken aloud and the
+    provider-level redaction still strips it from logs and third-party
+    payloads.
+    """
+    thought: dict[str, object] = {"status": status}
+    if elapsed_seconds is not None:
+        thought["elapsed_seconds"] = elapsed_seconds
+    text = (reasoning_text or "").strip()
+    if text:
+        thought["live_text"] = text[-_LIVE_REASONING_MAX_CHARS:]
+    if summary:
+        thought["summary"] = summary
+    return thought
+
+
 class DesktopRuntimeService:
     _PANEL_CACHE_TTL_SECONDS = 60.0
     _DEV_RUNTIME_CACHE_TTL_SECONDS = 1.0
@@ -166,6 +194,7 @@ class DesktopRuntimeService:
             (
                 "agent_controller.",
                 "action_executor.",
+                "terminal.",
                 "model.auto_continuation_",
             )
         ):
@@ -922,7 +951,7 @@ class DesktopRuntimeService:
             role="assistant",
             # Provider selection is activity/status metadata, never assistant
             # conversation content.  In LOCAL this stale placeholder used to
-            # expose the ONLINE Nemotron label before the first model delta.
+            # Do not expose provider identity before the first model delta.
             content="",
             metadata={
                 "source": source,
@@ -1201,6 +1230,7 @@ class DesktopRuntimeService:
                 chunks = 0
                 terminal_seen = False
                 reasoning_seen = False
+                reasoning_text = ""
                 reasoning_started_at: float | None = None
                 reasoning_finished_at: float | None = None
                 first_token_ms: float | None = None
@@ -1243,6 +1273,24 @@ class DesktopRuntimeService:
                         )
                         return self._stream_response(
                             assistant_message, message, raw_result
+                        )
+                    if chunk.reasoning:
+                        # Live chain-of-thought for the owner's ThoughtPanel;
+                        # never spoken aloud and stripped before persistence.
+                        if not reasoning_seen:
+                            reasoning_started_at = perf_counter()
+                        reasoning_seen = True
+                        reasoning_text += chunk.reasoning
+                        raw_result["reasoning_detected"] = True
+                        self._replace_conversation_message(
+                            assistant_message.message_id,
+                            full_text or "Pensando…",
+                            metadata={
+                                "streaming": True,
+                                "status": "thinking" if not full_text else "streaming",
+                                "reasoning_active": True,
+                                "thought": _live_thought("active", reasoning_text),
+                            },
                         )
                     if chunk.metadata.get("reasoning_active") and not reasoning_seen:
                         reasoning_seen = True
@@ -1288,7 +1336,11 @@ class DesktopRuntimeService:
                                     ],
                                 },
                                 **(
-                                    {"thought": {"status": "active"}}
+                                    {
+                                        "thought": _live_thought(
+                                            "active", reasoning_text
+                                        )
+                                    }
                                     if reasoning_seen
                                     else {}
                                 ),
@@ -1480,7 +1532,7 @@ class DesktopRuntimeService:
                 )
             if raw_result.get("status") == "interrupted":
                 interruption = (
-                    "La generación local de Qwen se interrumpió antes de finalizar."
+                    "La generación local se interrumpió antes de finalizar."
                     if self.llm_status()["selected_mode"] == "local"
                     else "La generación se interrumpió antes de finalizar."
                 )
@@ -1502,15 +1554,14 @@ class DesktopRuntimeService:
                 )
                 raw_result["reasoning_duration_source"] = "response_preparation"
             raw_result["safe_reasoning_summary"] = safe_summary
-            thought_metadata["thought"] = {
-                "status": (
-                    "completed"
-                    if raw_result.get("status") in {"completed", "truncated"}
-                    else "failed"
-                ),
-                "elapsed_seconds": raw_result.get("reasoning_duration_seconds"),
-                "summary": safe_summary,
-            }
+            thought_metadata["thought"] = _live_thought(
+                "completed"
+                if raw_result.get("status") in {"completed", "truncated"}
+                else "failed",
+                reasoning_text,
+                elapsed_seconds=raw_result.get("reasoning_duration_seconds"),
+                summary=safe_summary,
+            )
             thinking_lines = ["Analizando la solicitud…"]
             if raw_result.get("auto_continuation_count"):
                 thinking_lines.append("Continuando respuesta…")
@@ -1695,7 +1746,25 @@ class DesktopRuntimeService:
             any(word in folded for word in ("calcula", "calcular", "calculate"))
             and "calculator.evaluate" in available
         )
-        return dns_action or file_search or calculation
+        browser_action = (
+            any(word in folded for word in ("abre", "abrir", "entra", "visita", "navega", "muestra"))
+            and any(
+                word in folded
+                for word in (
+                    "navegador", "browser", "youtube", "google", "sitio", "pagina",
+                    "página", "web", "http", "www", "url", "internet",
+                )
+            )
+            and "browser.open" in available
+        )
+        live_mode = (
+            any(
+                phrase in folded
+                for phrase in ("modo live", "modo en vivo", "en tiempo real", "conversacion natural", "conversación natural")
+            )
+            and "voice.live.start" in available
+        )
+        return dns_action or file_search or calculation or browser_action or live_mode
 
     @staticmethod
     def _has_operational_language(text: str) -> bool:
@@ -2358,7 +2427,7 @@ class DesktopRuntimeService:
                 "gemini": "blocked",
                 "nvidia_nim": "enabled_by_selected_mode",
                 "local_llm": local_model_policy_description(),
-                "online_search": "Brave + assigned Nemotron provider",
+                "online_search": "Brave + configured model",
             },
             "last_result": dict(self._last_dev_result),
         }
@@ -2464,7 +2533,7 @@ class DesktopRuntimeService:
                     "gemini": "blocked",
                     "nvidia_nim": "enabled_by_selected_mode",
                     "local_llm": local_model_policy_description(),
-                    "online_search": "Brave + assigned Nemotron provider",
+                "online_search": "Brave + configured model",
                 },
                 "warnings": env.warnings,
             }
@@ -2561,6 +2630,11 @@ class DesktopRuntimeService:
         }
         if metadata:
             enriched_metadata.update(metadata)
+        # Courteous filler while the model thinks; fixed text only — the
+        # model's reasoning is never spoken aloud.
+        thinking_phrase = (self._jarvis.settings.voice_thinking_phrase or "").strip()
+        if thinking_phrase:
+            self._voice.speak_literal(thinking_phrase)
         self.send_chat(
             text,
             source="voice",

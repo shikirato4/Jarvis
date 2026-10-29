@@ -20,7 +20,7 @@ _BROAD_TERMS = (
 
 
 class ChangePlanner:
-    def __init__(self, executor: "CodeAgentExecutor") -> None:
+    def __init__(self, executor: CodeAgentExecutor) -> None:
         self._executor = executor
 
     def plan(self, task: str, targets: list[ResolvedTarget], *, skills: list[str], context_used: list[str]) -> GeneratedChangePlan:

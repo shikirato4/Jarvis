@@ -89,18 +89,18 @@ def classify_provider_failure(error: BaseException | str) -> ProviderFailure:
     if "timeout" in lowered or "timed out" in lowered:
         return ProviderFailure(
             "provider_timeout",
-            "El proveedor Nemotron agotó el tiempo de espera.",
+            "La ruta de modelo agotó el tiempo de espera.",
         )
     if is_local_qwen and ("connection refused" in lowered or "unavailable" in lowered or "failed" in lowered):
         return ProviderFailure(
             "local_unavailable",
-            "El runtime local de Qwen no está disponible.",
+            "El runtime local no está disponible.",
         )
     if is_local_qwen:
-        return ProviderFailure("local_unavailable", "El proveedor local Qwen no pudo completar la solicitud.")
+        return ProviderFailure("local_unavailable", "El proveedor local no pudo completar la solicitud.")
     return ProviderFailure(
         "provider_unavailable",
-        "El proveedor Nemotron no pudo completar la solicitud.",
+        "La ruta de modelo no pudo completar la solicitud.",
     )
 
 

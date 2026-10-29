@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import Any
 
@@ -88,7 +88,7 @@ class WritingGeneratedBlock(JarvisBaseModel):
     word_count: int
     confidence: float = 0.0
     style_notes: list[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class WritingOperationReceipt(JarvisBaseModel):
@@ -104,8 +104,8 @@ class WritingOperationReceipt(JarvisBaseModel):
     verification_summary: dict[str, Any] = Field(default_factory=dict)
     fallback_used: bool = False
     data: dict[str, Any] = Field(default_factory=dict)
-    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    finished_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    finished_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class WritingTask(JarvisBaseModel):
@@ -123,8 +123,8 @@ class WritingTask(JarvisBaseModel):
     verification_history: list[dict[str, Any]] = Field(default_factory=list)
     budget: WritingBudget = Field(default_factory=WritingBudget)
     mission_id: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = Field(default_factory=dict)
     last_error: str | None = None
 

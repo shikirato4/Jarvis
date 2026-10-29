@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from hashlib import sha1
 from pathlib import Path
 from typing import Any
@@ -82,7 +82,7 @@ class PatchBuilder:
             risk_level=int(risk),
             skills=skills,
             context_used=["explicit_patch_operation"],
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             requires_confirmation=risk >= RiskLevel.SENSITIVE,
             requires_pin=risk >= RiskLevel.CRITICAL,
             warnings=warnings,
@@ -139,8 +139,8 @@ class PatchBuilder:
 
     @staticmethod
     def _patch_id(task: str, changes: list[PatchFileChange]) -> str:
-        raw = f"{datetime.now(timezone.utc).isoformat()}:{task}:{','.join(change.path for change in changes)}"
-        return f"patch-{sha1(raw.encode('utf-8')).hexdigest()[:12]}"
+        raw = f"{datetime.now(UTC).isoformat()}:{task}:{','.join(change.path for change in changes)}"
+        return f"patch-{sha1(raw.encode('utf-8')).hexdigest()[:12]}"  # noqa: S324  # content fingerprint id, not crypto
 
     @staticmethod
     def _blocked(message: str, targets: list[str]) -> dict[str, Any]:

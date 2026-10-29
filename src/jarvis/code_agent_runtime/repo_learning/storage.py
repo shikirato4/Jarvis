@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from shutil import copy2
 from typing import Any
@@ -33,7 +33,7 @@ class LearningStorage:
     def save_entries(self, entries: list[LearningEntry]) -> dict[str, Any]:
         payload = {
             "schema_version": 1,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "entry_count": len(entries),
             "entries": [entry.to_dict() for entry in entries],
             "warnings": [],
@@ -52,7 +52,7 @@ class LearningStorage:
     def _recover_corrupt(self) -> dict[str, Any]:
         payload = self._default()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        backup_path = self._path.with_name(f"{self._path.name}.corrupt-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.bak")
+        backup_path = self._path.with_name(f"{self._path.name}.corrupt-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}.bak")
         if self._path.exists():
             try:
                 copy2(self._path, backup_path)

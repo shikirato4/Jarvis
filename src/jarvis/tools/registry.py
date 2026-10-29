@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from datetime import datetime, UTC
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
@@ -26,13 +27,13 @@ ToolHandler = Callable[["ToolContext", BaseModel], ToolResult]
 
 @dataclass(slots=True)
 class ToolContext:
-    settings: "Settings"
-    memory: "MemoryService"
-    action_router: "ActionRouter"
-    models: "ModelService"
-    event_bus: "EventBus"
+    settings: Settings
+    memory: MemoryService
+    action_router: ActionRouter
+    models: ModelService
+    event_bus: EventBus
     logger: logging.Logger
-    action_executor: "ActionExecutor | None" = None
+    action_executor: ActionExecutor | None = None
     correlation_id: str = field(default_factory=lambda: str(uuid4()))
     dry_run: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -50,13 +51,13 @@ class ToolDefinition:
 class ToolRegistry:
     def __init__(
         self,
-        settings: "Settings",
-        memory: "MemoryService",
-        action_router: "ActionRouter",
-        models: "ModelService",
-        event_bus: "EventBus",
+        settings: Settings,
+        memory: MemoryService,
+        action_router: ActionRouter,
+        models: ModelService,
+        event_bus: EventBus,
         logger: logging.Logger | None = None,
-        action_executor: "ActionExecutor | None" = None,
+        action_executor: ActionExecutor | None = None,
     ) -> None:
         self._settings = settings
         self._memory = memory
@@ -91,7 +92,7 @@ class ToolRegistry:
         if definition is None:
             raise ToolNotFoundError(f"tool '{tool_name}' is not registered")
 
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         correlation_id = correlation_id or str(uuid4())
         context = ToolContext(
             settings=self._settings,
@@ -126,7 +127,7 @@ class ToolRegistry:
                 data=result.data,
                 artifacts=result.artifacts,
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
             self._event_bus.publish("tool.executed", receipt.model_dump(mode="json"))
             return receipt
@@ -137,7 +138,7 @@ class ToolRegistry:
                 status=ToolExecutionStatus.FAILED,
                 message=str(exc),
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
             self._event_bus.publish("tool.failed", receipt.model_dump(mode="json"))
             raise ToolExecutionError(str(exc)) from exc

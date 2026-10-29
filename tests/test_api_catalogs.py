@@ -66,7 +66,7 @@ def test_stream_events_emit_real_chunks_and_terminal_state() -> None:
     class _Runtime:
         def stream_model(self, request):
             assert request.stream is False
-            yield StreamChunk(text="Hola ")
+            yield StreamChunk(text="Hola ", reasoning="Planifico el saludo.")
             yield StreamChunk(text="mundo", done=True, metadata={"chunks": 2})
 
     jarvis = type("Jarvis", (), {"runtime_service": _Runtime()})()
@@ -76,8 +76,8 @@ def test_stream_events_emit_real_chunks_and_terminal_state() -> None:
     payloads = [json.loads(item.removeprefix("data: ").strip()) for item in events]
 
     assert payloads == [
-        {"text": "Hola ", "done": False, "error": None, "metadata": {}},
-        {"text": "mundo", "done": True, "error": None, "metadata": {"chunks": 2}},
+        {"text": "Hola ", "reasoning": "Planifico el saludo.", "done": False, "error": None, "metadata": {}},
+        {"text": "mundo", "reasoning": "", "done": True, "error": None, "metadata": {"chunks": 2}},
     ]
 
 

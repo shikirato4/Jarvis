@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
+from collections.abc import Callable
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -24,10 +25,10 @@ RollbackHandler = Callable[["ActionContext", ActionResult], None]
 
 @dataclass(slots=True)
 class ActionContext:
-    settings: "Settings"
-    memory: "MemoryService"
-    models: "ModelService"
-    event_bus: "EventBus"
+    settings: Settings
+    memory: MemoryService
+    models: ModelService
+    event_bus: EventBus
     logger: logging.Logger
     correlation_id: str = field(default_factory=lambda: str(uuid4()))
     dry_run: bool = False
@@ -47,6 +48,8 @@ class ActionDefinition:
     idempotent: bool = True
     supports_cancellation: bool = False
     adapter: str = "internal_api"
+    semantic_aliases: tuple[str, ...] = ()
+    companion_names: tuple[str, ...] = ()
 
 
 class ActionRegistry:
@@ -60,6 +63,10 @@ class ActionRegistry:
 
     def get(self, action_name: str) -> ActionDefinition | None:
         return self._definitions.get(action_name)
+
+    def unregister(self, action_name: str) -> bool:
+        """Remove an executable capability from future discovery and dispatch."""
+        return self._definitions.pop(action_name, None) is not None
 
     def list_actions(self) -> list[ActionDefinition]:
         return sorted(self._definitions.values(), key=lambda item: item.name)

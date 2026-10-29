@@ -3,8 +3,9 @@ from __future__ import annotations
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterator
+from datetime import datetime, timedelta, UTC
+from typing import Any
+from collections.abc import Callable, Iterator
 from uuid import uuid4
 
 from jarvis.core.errors import JarvisError, ServiceUnavailableError
@@ -12,7 +13,7 @@ from jarvis.core.models import ActiveOperationRecord, AdmissionDecision, Operati
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 @dataclass(slots=True)
@@ -45,7 +46,7 @@ class CancellationToken:
 
 
 class OperationHandle:
-    def __init__(self, registry: "OperationRegistry", record: ActiveOperationRecord, token: CancellationToken) -> None:
+    def __init__(self, registry: OperationRegistry, record: ActiveOperationRecord, token: CancellationToken) -> None:
         self._registry = registry
         self.record = record
         self.token = token

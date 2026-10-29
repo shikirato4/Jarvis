@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
@@ -43,7 +43,7 @@ class ModeManager:
         self._current_mode = ExecutionMode(default_mode)
         self._previous_mode: ExecutionMode | None = None
         self._sticky = True
-        self._changed_at = datetime.now(timezone.utc)
+        self._changed_at = datetime.now(UTC)
         self._reason = "bootstrap"
 
     def current_mode(self) -> ExecutionMode:
@@ -59,11 +59,11 @@ class ModeManager:
         self._previous_mode = self._current_mode
         self._current_mode = target_mode
         self._sticky = sticky
-        self._changed_at = datetime.now(timezone.utc)
+        self._changed_at = datetime.now(UTC)
         self._reason = reason
         return self._current_mode
 
-    def snapshot(self) -> "ModeSnapshot":
+    def snapshot(self) -> ModeSnapshot:
         from .models import ModeSnapshot
 
         return ModeSnapshot(

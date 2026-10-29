@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import StrEnum
 
 from pydantic import Field
@@ -50,7 +50,7 @@ class UnityEditorSession(JarvisBaseModel):
         endpoint: str | None = None,
         auto_connect: bool = False,
         metadata: dict[str, object] | None = None,
-    ) -> "UnityEditorSession":
+    ) -> UnityEditorSession:
         return cls(
             session_id=session_id,
             project_root=project_root,
@@ -65,8 +65,8 @@ class UnityEditorSession(JarvisBaseModel):
             metadata=metadata or {},
         )
 
-    def mark_launched(self, *, editor_pid: int | None = None, launched_at: datetime | None = None) -> "UnityEditorSession":
-        launched_at = launched_at or datetime.now(timezone.utc)
+    def mark_launched(self, *, editor_pid: int | None = None, launched_at: datetime | None = None) -> UnityEditorSession:
+        launched_at = launched_at or datetime.now(UTC)
         return self.model_copy(
             update={
                 "editor_pid": editor_pid,
@@ -81,8 +81,8 @@ class UnityEditorSession(JarvisBaseModel):
         endpoint: str | None = None,
         connected_at: datetime | None = None,
         last_health_at: datetime | None = None,
-    ) -> "UnityEditorSession":
-        connected_at = connected_at or datetime.now(timezone.utc)
+    ) -> UnityEditorSession:
+        connected_at = connected_at or datetime.now(UTC)
         return self.model_copy(
             update={
                 "endpoint": endpoint or self.endpoint,
@@ -94,7 +94,7 @@ class UnityEditorSession(JarvisBaseModel):
             }
         )
 
-    def mark_disconnected(self, *, reason: str | None = None) -> "UnityEditorSession":
+    def mark_disconnected(self, *, reason: str | None = None) -> UnityEditorSession:
         errors = list(self.recent_errors)
         if reason:
             errors.append(reason)
@@ -107,7 +107,7 @@ class UnityEditorSession(JarvisBaseModel):
             }
         )
 
-    def mark_degraded(self, *, reason: str | None = None) -> "UnityEditorSession":
+    def mark_degraded(self, *, reason: str | None = None) -> UnityEditorSession:
         errors = list(self.recent_errors)
         if reason:
             errors.append(reason)
@@ -117,6 +117,6 @@ class UnityEditorSession(JarvisBaseModel):
                 "status": UnityEditorSessionStatus.DEGRADED,
                 "last_error": reason,
                 "recent_errors": errors[-10:],
-                "last_health_at": datetime.now(timezone.utc),
+                "last_health_at": datetime.now(UTC),
             }
         )

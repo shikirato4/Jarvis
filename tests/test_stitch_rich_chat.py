@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import os
+from datetime import datetime, UTC
 from types import SimpleNamespace
 
 import pytest
@@ -43,6 +44,29 @@ def test_prepare_rich_markdown_renders_inline_math_but_preserves_code() -> None:
     assert "$E=mc^2$" not in rendered.markdown
     assert r"\(x_i\)" not in rendered.markdown
     assert "`$not_math$`" in rendered.markdown
+
+
+def test_code_control_anchors_on_its_code_block_not_the_message_top() -> None:
+    app = _app()
+    content = (
+        "Párrafo uno arriba del bloque.\n\n"
+        "Párrafo dos con suficiente texto para empujar el código hacia abajo "
+        "del documento renderizado y dejar clara la posición esperada.\n\n"
+        "```python\n"
+        "def saludo():\n"
+        "    print('hola')\n"
+        "```\n\n"
+        "Párrafo final debajo del código."
+    )
+    browser = RichMessageBrowser(content)
+    browser.set_content_width(420)
+    app.processEvents()
+
+    control = browser.findChildren(CopyableCodeControl)[0]
+    # The copy control must sit on its rendered code block — not glued to
+    # the message top over the prose (the old multi-line find() fallback).
+    assert control.y() > 24, f"control stuck at message top: y={control.y()}"
+    browser.close()
 
 
 def test_fenced_code_has_language_copy_control_and_exact_clipboard_source() -> None:
@@ -105,7 +129,7 @@ def test_explicit_plain_copyable_text_preserves_all_content() -> None:
     widget = ChatMessageWidget(
         "assistant",
         "Texto introductorio sin card.",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
         metadata={
             "copyable_blocks": [{"kind": "text", "label": "Prompt", "text": source}]
         },
@@ -150,7 +174,7 @@ def test_streaming_updates_existing_assistant_widget_incrementally() -> None:
     timeline = ChatTimelineWidget()
     timeline.resize(900, 360)
     timeline.show()
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
 
     def message(content: str):
         return SimpleNamespace(
@@ -189,7 +213,7 @@ def test_same_text_finalization_forces_authoritative_rich_render() -> None:
 
     app = _app()
     timeline = ChatTimelineWidget()
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
 
     def message(streaming: bool):
         return SimpleNamespace(
@@ -229,7 +253,7 @@ def test_markdown_splits_and_adaptive_drain_lose_or_duplicate_no_text() -> None:
     widget = ChatMessageWidget(
         "assistant",
         "",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
         metadata={"streaming": True, "status": "streaming"},
     )
     split_points = [1, 3, 8, 17, 29, 43, 61, 79, len(final)]
@@ -265,7 +289,7 @@ def test_visual_drain_adapts_to_slow_and_bursty_backlogs() -> None:
     widget = ChatMessageWidget(
         "assistant",
         "",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
         metadata={"streaming": True, "status": "streaming"},
     )
 
@@ -312,7 +336,7 @@ def test_stream_finalization_preserves_composer_and_thought_state() -> None:
     widget = ChatMessageWidget(
         "assistant",
         "",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
         metadata={
             "streaming": True,
             "status": "thinking",
@@ -369,7 +393,7 @@ def test_thought_is_compact_disclosure_above_assistant_response() -> None:
     widget = ChatMessageWidget(
         "assistant",
         "Respuesta visible",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
         metadata={
             "thought": {
                 "status": "completed",
@@ -399,7 +423,7 @@ def test_streaming_thought_metadata_survives_reused_widget_and_final_render() ->
     timeline = ChatTimelineWidget()
     timeline.resize(640, 240)
     timeline.show()
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
 
     def message(content: str, metadata: dict) -> SimpleNamespace:
         return SimpleNamespace(
@@ -425,7 +449,10 @@ def test_streaming_thought_metadata_survives_reused_widget_and_final_render() ->
     app.processEvents()
     original = timeline.message_widgets()[0]
     assert isinstance(original._thought, ThoughtPanel)  # noqa: SLF001
-    assert original._thought._header.text().startswith("› Thinking…")  # noqa: SLF001
+    # Live thinking auto-expands (⌄) so the owner watches the model work;
+    # it folds back to › once the answer completes.
+    assert original._thought._header.text().startswith("⌄ Thinking…")  # noqa: SLF001
+    assert original._thought._details.isVisible() is True  # noqa: SLF001
 
     timeline.set_messages(
         [
@@ -458,7 +485,7 @@ def test_timeline_does_not_steal_scroll_during_streaming_and_offers_jump() -> No
     timeline = ChatTimelineWidget()
     timeline.resize(640, 180)
     timeline.show()
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
     messages = [
         SimpleNamespace(
             message_id=f"m-{index}",
@@ -503,6 +530,10 @@ def test_timeline_does_not_steal_scroll_during_streaming_and_offers_jump() -> No
     timeline.close()
 
 
+@pytest.mark.skipif(
+    os.environ.get("QT_QPA_PLATFORM") == "offscreen",
+    reason="asserts pixel-exact scrollbar geometry; offscreen metrics differ from real displays",
+)
 def test_timeline_new_turn_anchor_reveals_correct_user_message_once() -> None:
     from jarvis.desktop_runtime.widgets import ChatTimelineWidget
 
@@ -510,7 +541,7 @@ def test_timeline_new_turn_anchor_reveals_correct_user_message_once() -> None:
     timeline = ChatTimelineWidget()
     timeline.resize(640, 180)
     timeline.show()
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
     history = [
         SimpleNamespace(
             message_id=f"old-{index}",
@@ -560,7 +591,7 @@ def test_assistant_message_is_borderless_rich_surface_with_dynamic_math() -> Non
     widget = ChatMessageWidget(
         "assistant",
         "# Informe\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```python\nprint('ok')\n```\n\n$$\\sqrt{x^2}$$",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
     )
 
     assert widget.objectName() == "AssistantMessageSurface"
@@ -576,7 +607,7 @@ def test_user_message_remains_a_subtle_bubble() -> None:
     widget = ChatMessageWidget(
         "user",
         "Hola **JARVIS**",
-        datetime.now(timezone.utc),
+        datetime.now(UTC),
     )
 
     assert widget.objectName() == "UserMessageBubble"
@@ -745,7 +776,7 @@ def test_stitch_composer_remains_inside_window_with_long_history(tmp_path) -> No
     )
     window = JarvisDesktopWindow(desktop)
     try:
-        created = datetime.now(timezone.utc)
+        created = datetime.now(UTC)
         timeline = window._conversation._timeline  # noqa: SLF001
         timeline.set_messages(
             [
@@ -816,7 +847,7 @@ def test_jump_latest_is_compact_and_targets_last_message() -> None:
     timeline = ChatTimelineWidget()
     timeline.resize(900, 360)
     timeline.show()
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
     timeline.set_messages(
         [
             SimpleNamespace(
@@ -866,7 +897,7 @@ def test_timeline_uses_distinct_stitch_alignment_for_user_and_assistant() -> Non
     timeline = ChatTimelineWidget()
     timeline.resize(900, 500)
     timeline.show()
-    created = datetime.now(timezone.utc)
+    created = datetime.now(UTC)
     timeline.set_messages(
         [
             SimpleNamespace(

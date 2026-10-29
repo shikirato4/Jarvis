@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,4 +14,4 @@ class JarvisBaseModel(BaseModel):
 
 
 class TimestampedModel(JarvisBaseModel):
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

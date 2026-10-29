@@ -141,7 +141,10 @@ if QWidget is not None:
                 painter.setBrush(QColor("#0b1d22"))
                 painter.drawEllipse(center, 25, 25)
                 painter.setPen(QColor("#d8ffff"))
-                label = node.component.replace("_", " ").upper()
+                label = {
+                    "nemotron": "MODEL",
+                    "model_provider": "MODEL",
+                }.get(node.component, node.component.replace("_", " ").upper())
                 painter.drawText(
                     QRectF(center.x() - 75, center.y() + 29, 150, 34),
                     Qt.AlignHCenter | Qt.AlignTop,

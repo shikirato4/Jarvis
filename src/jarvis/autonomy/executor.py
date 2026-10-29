@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from jarvis.core.errors import JarvisError
 from jarvis.vision_runtime.base import UIAwarenessRequest, VisionAnalysisRequest
@@ -31,7 +31,7 @@ class MissionExecutor:
         )
 
     def execute(self, mission, step: MissionStep) -> MissionStepResult:
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         receipts: list[dict[str, object]] = []
         data: dict[str, object] = {}
         handle = None
@@ -123,7 +123,7 @@ class MissionExecutor:
                 receipts=receipts,
                 data={"error": str(exc)},
                 started_at=started,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
         if handle is not None:
             self._operations.complete(handle.operation_id, metadata={"mission_id": mission.mission_id, "step_id": step.step_id})
@@ -135,5 +135,5 @@ class MissionExecutor:
             receipts=receipts,
             data=data,
             started_at=started,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )

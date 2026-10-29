@@ -73,12 +73,12 @@ def test_csv_analysis_filter_sort_aggregate_and_anomalies() -> None:
     table = analyzer.load_bytes(
         "ventas.csv",
         (
-            "category;value;date;note\n"
-            "A;10;2026-01-01;ok\n"
-            "A;12;2026-01-02;\n"
-            "B;11;2026-01-03;ok\n"
-            "B;1000;2026-01-04;outlier\n"
-        ).encode("utf-8"),
+            b"category;value;date;note\n"
+            b"A;10;2026-01-01;ok\n"
+            b"A;12;2026-01-02;\n"
+            b"B;11;2026-01-03;ok\n"
+            b"B;1000;2026-01-04;outlier\n"
+        ),
     )
 
     description = analyzer.describe(table.table_id)

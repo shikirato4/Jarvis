@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from .agent_mode import AgentAction, AgentMode, AgentPermissionMode, AgentRisk, AgentSafetyGate
 
@@ -126,7 +127,7 @@ def builtin_agent_skills() -> list[AgentSkill]:
         AgentSkill("verify_file_exists", "Verificar existencia de archivo o carpeta.", "files", "low", action_type="search_file"),
         AgentSkill("safe_download_preview", "Preparar descarga sin ejecutarla.", "downloads", "medium", requires_confirmation=True, action_type="download_file"),
         AgentSkill("safe_install_preview", "Preparar instalacion con confirmacion fuerte.", "downloads", "high", requires_confirmation=True, action_type="open_installer"),
-        AgentSkill("generate_local_image", "Generar imagen local con JuggernautXL sin Fooocus.", "image", "low", action_type="generate_local_image"),
+        AgentSkill("generate_local_image", "Generar imagen local con Qwen-Image-2.1-Turbo.", "image", "low", action_type="generate_local_image"),
         AgentSkill("improve_image_prompt", "Mejorar prompt visual sin ejecutar generacion.", "image", "low", action_type="inspect_screen"),
         AgentSkill("open_image_output_folder", "Abrir carpeta local de outputs de imagen.", "image", "low", action_type="open_folder"),
         AgentSkill("cancel_image_generation", "Cancelar generacion de imagen en curso.", "image", "low", action_type="agent_action"),

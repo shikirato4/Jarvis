@@ -4,7 +4,7 @@ from pathlib import Path
 import logging
 from typing import Any, Literal
 
-from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic import AliasChoices, BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from jarvis.core.modes import ExecutionMode
@@ -13,6 +13,31 @@ from jarvis.runtime_paths import resolve_user_data_path, user_logs_dir
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_ENV_FILE = _REPO_ROOT / ".env"
+
+
+class LLMModelTarget(BaseModel):
+    """One explicitly configured model role; unspecified capabilities stay unknown."""
+
+    provider: Literal["qwen", "ollama", "llama_cpp", "vllm", "openai_compatible"]
+    model: str = Field(min_length=1)
+    base_url: str | None = None
+    context_window_tokens: int | None = Field(default=None, gt=0)
+    capabilities: dict[str, Literal["supported", "unsupported", "unknown"]] = Field(
+        default_factory=dict
+    )
+    fallbacks: tuple[str, ...] = ()
+
+    @field_validator("capabilities")
+    @classmethod
+    def validate_capabilities(cls, value: dict[str, str]) -> dict[str, str]:
+        valid = {
+            "text_generation", "streaming", "tool_calling", "structured_output",
+            "reasoning", "vision", "embeddings",
+        }
+        unknown = set(value) - valid
+        if unknown:
+            raise ValueError(f"unknown LLM capabilities: {', '.join(sorted(unknown))}")
+        return value
 
 
 class Settings(BaseSettings):
@@ -105,6 +130,13 @@ class Settings(BaseSettings):
     )
     nvidia_timeout_seconds: float = 90.0
     nvidia_healthcheck_timeout_seconds: float = 5.0
+    # None = auto-detect by model family (reasoning, glm-5, deepseek, r1).
+    nvidia_reasoning_budget: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "NVIDIA_REASONING_BUDGET", "JARVIS_NVIDIA_REASONING_BUDGET"
+        ),
+    )
     nvidia_reasoning_min_completion_tokens: int = Field(
         default=512,
         gt=0,
@@ -181,12 +213,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LOCAL_LLM_BASE_URL", "JARVIS_LOCAL_LLM_BASE_URL", "local_llm_base_url"),
     )
     local_llm_model: str = Field(
-        # This is the promoted local profile's advertised model identifier.
         default="Qwen3.5-9B-IQ4_XS",
         validation_alias=AliasChoices("LOCAL_LLM_MODEL", "JARVIS_LOCAL_LLM_MODEL", "local_llm_model"),
     )
     local_llm_model_aliases: tuple[str, ...] = Field(
-        default=("Qwen3.5-9B-IQ4_XS",),
+        default=(),
         validation_alias=AliasChoices(
             "LOCAL_LLM_MODEL_ALIASES",
             "JARVIS_LOCAL_LLM_MODEL_ALIASES",
@@ -196,8 +227,36 @@ class Settings(BaseSettings):
     local_llm_timeout_seconds: float = 120.0
     local_llm_healthcheck_timeout_seconds: float = 5.0
     local_runtime_autostart: bool = True
-    local_runtime_model_path: Path = Path(
-        "models/llm/qwen3.5-9b/Qwen3.5-9B-IQ4_XS.gguf"
+    # May point to a GGUF file for an explicit override, or to the shared
+    # models/llm directory for filename-independent model discovery.
+    local_runtime_model_path: Path = Path("models/llm")
+    local_runtime_mmproj_path: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LOCAL_RUNTIME_MMPROJ_PATH",
+            "JARVIS_LOCAL_RUNTIME_MMPROJ_PATH",
+            "local_runtime_mmproj_path",
+        ),
+    )
+    local_llm_backend: Literal[
+        "qwen", "ollama", "llama_cpp", "vllm", "openai_compatible"
+    ] = Field(
+        default="qwen",
+        validation_alias=AliasChoices(
+            "LOCAL_LLM_BACKEND", "JARVIS_LOCAL_LLM_BACKEND", "local_llm_backend"
+        ),
+    )
+    local_llm_capabilities: tuple[str, ...] = Field(
+        default=(),
+        validation_alias=AliasChoices(
+            "LOCAL_LLM_CAPABILITIES",
+            "JARVIS_LOCAL_LLM_CAPABILITIES",
+            "local_llm_capabilities",
+        ),
+    )
+    llm_models: dict[str, LLMModelTarget] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("LLM_MODELS", "JARVIS_LLM_MODELS", "llm_models"),
     )
     local_runtime_cuda_binary: Path = Path(
         "runtimes/llama-cpp-cuda/llama-server.exe"
@@ -210,7 +269,7 @@ class Settings(BaseSettings):
     local_runtime_context_size: int = Field(default=8192, gt=0)
     local_runtime_parallel: int = Field(default=1, gt=0)
     local_runtime_profile_id: str = Field(
-        default="qwen35-9b-iq4-xs",
+        default="configured-local-gguf",
         validation_alias=AliasChoices(
             "LOCAL_RUNTIME_PROFILE_ID",
             "JARVIS_LOCAL_RUNTIME_PROFILE_ID",
@@ -224,6 +283,37 @@ class Settings(BaseSettings):
             "LOCAL_RUNTIME_CONTEXT_OVERRIDE",
             "JARVIS_LOCAL_RUNTIME_CONTEXT_OVERRIDE",
             "local_runtime_context_override",
+        ),
+    )
+
+    @property
+    def local_runtime_effective_context_size(self) -> int:
+        """Ventana real del runtime local (el override manda sobre el default).
+
+        El servidor arranca con este valor, asi que el presupuesto del cliente
+        debe medir lo mismo: si el cliente cree que solo hay 8192 cuando el
+        servidor sirve 12288, recorta contexto antes de acercarse al limite.
+        """
+        return self.local_runtime_context_override or self.local_runtime_context_size
+
+    # Adapter LoRA (GGUF) del fine-tune: vacio = JARVIS corre con el base.
+    local_runtime_lora_path: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LOCAL_RUNTIME_LORA_PATH",
+            "JARVIS_LOCAL_RUNTIME_LORA_PATH",
+            "local_runtime_lora_path",
+        ),
+    )
+    # KV cache cuantizado: el KV de Qwen3.5 cuesta 128KB/token, asi que en
+    # q8_0 la misma VRAM alcanza para el doble de ventana (llama.cpp exige
+    # flash-attn para KV cuantizado; se enciende solo cuando aplica).
+    local_runtime_kv_cache_type: Literal["f16", "q8_0", "q4_0"] = Field(
+        default="f16",
+        validation_alias=AliasChoices(
+            "LOCAL_RUNTIME_KV_CACHE_TYPE",
+            "JARVIS_LOCAL_RUNTIME_KV_CACHE_TYPE",
+            "local_runtime_kv_cache_type",
         ),
     )
     local_runtime_ready_timeout_seconds: float = Field(default=120.0, gt=0)
@@ -330,6 +420,152 @@ class Settings(BaseSettings):
     voice_coqui_speaker_wav: Path | None = None
     voice_coqui_speaker_name: str | None = None
     voice_coqui_tos_agreed: bool = False
+    # Optional cloud TTS; the provider registers only when both are set.
+    elevenlabs_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "ELEVENLABS_API_KEY", "JARVIS_ELEVENLABS_API_KEY", "elevenlabs_api_key"
+        ),
+    )
+    elevenlabs_voice_id: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "ELEVENLABS_VOICE_ID", "JARVIS_ELEVENLABS_VOICE_ID", "elevenlabs_voice_id"
+        ),
+    )
+    elevenlabs_model: str = Field(
+        default="eleven_multilingual_v2",
+        validation_alias=AliasChoices(
+            "ELEVENLABS_MODEL", "JARVIS_ELEVENLABS_MODEL", "elevenlabs_model"
+        ),
+    )
+    # Free neural cloud TTS via Microsoft Edge's Read-Aloud endpoint.
+    voice_edge_tts_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "VOICE_EDGE_TTS_ENABLED", "JARVIS_VOICE_EDGE_TTS_ENABLED"
+        ),
+    )
+    voice_edge_tts_voice: str = Field(
+        default="es-MX-JorgeNeural",
+        validation_alias=AliasChoices(
+            "VOICE_EDGE_TTS_VOICE", "JARVIS_VOICE_EDGE_TTS_VOICE"
+        ),
+    )
+    # Real embedded browser (Playwright/Chromium). Headed by default so
+    # the user SEES JARVIS operate; disable to remove all browser actions.
+    browser_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("BROWSER_ENABLED", "JARVIS_BROWSER_ENABLED"),
+    )
+    browser_headless: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BROWSER_HEADLESS", "JARVIS_BROWSER_HEADLESS"),
+    )
+    browser_read_max_chars: int = Field(
+        default=6000,
+        validation_alias=AliasChoices(
+            "BROWSER_READ_MAX_CHARS", "JARVIS_BROWSER_READ_MAX_CHARS"
+        ),
+    )
+    browser_timeout_seconds: float = Field(
+        default=20.0,
+        validation_alias=AliasChoices(
+            "BROWSER_TIMEOUT_SECONDS", "JARVIS_BROWSER_TIMEOUT_SECONDS"
+        ),
+    )
+    # Persistent profile: logins/cookies/localStorage survive restarts so
+    # the user logs into Google/YouTube ONCE.
+    browser_profile_persist: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "BROWSER_PROFILE_PERSIST", "JARVIS_BROWSER_PROFILE_PERSIST"
+        ),
+    )
+    # VRAM dance: unload the local LLM while the local image model
+    # generates, then unload the image model and restore the LLM.
+    vram_swap_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("VRAM_SWAP_ENABLED", "JARVIS_VRAM_SWAP_ENABLED"),
+    )
+    # Local image model selector: "qwen_turbo" (Qwen-Image-2.1-Turbo, EL
+    # motor de imagenes) or "sdxl" (legado). Sin modelos de Qwen en disco
+    # la generacion falla con instrucciones de descarga (sin fallback).
+    image_model_kind: str = Field(
+        default="qwen_turbo",
+        validation_alias=AliasChoices("IMAGE_MODEL_KIND", "JARVIS_IMAGE_MODEL_KIND"),
+    )
+    qwen_image_dir: Path = Field(
+        default=Path("models/qwen_image_turbo"),
+        validation_alias=AliasChoices("QWEN_IMAGE_DIR", "JARVIS_QWEN_IMAGE_DIR"),
+    )
+    # Guardian de caras prohibidas: banea la cara frente a la webcam y
+    # bloquea la sesion cuando esa cara reaparece.
+    face_guard_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_ENABLED", "JARVIS_FACE_GUARD_ENABLED"
+        ),
+    )
+    face_guard_models_dir: Path = Field(
+        default=Path("models/face"),
+        validation_alias=AliasChoices(
+            "FACE_GUARD_MODELS_DIR", "JARVIS_FACE_GUARD_MODELS_DIR"
+        ),
+    )
+    face_guard_match_threshold: float = Field(
+        default=0.363,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_MATCH_THRESHOLD", "JARVIS_FACE_GUARD_MATCH_THRESHOLD"
+        ),
+    )
+    face_guard_consecutive_hits: int = Field(
+        default=3,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_CONSECUTIVE_HITS", "JARVIS_FACE_GUARD_CONSECUTIVE_HITS"
+        ),
+    )
+    face_guard_interval_seconds: float = Field(
+        default=4.0,
+        validation_alias=AliasChoices(
+            "FACE_GUARD_INTERVAL_SECONDS", "JARVIS_FACE_GUARD_INTERVAL_SECONDS"
+        ),
+    )
+    # Gemini (AI Studio, free tier, no card): image generation in the
+    # cloud — zero VRAM — and later the Live API for realtime voice.
+    gemini_api_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "GEMINI_API_KEY", "JARVIS_GEMINI_API_KEY", "gemini_api_key"
+        ),
+    )
+    gemini_image_model: str = Field(
+        default="gemini-2.5-flash-image",
+        validation_alias=AliasChoices(
+            "GEMINI_IMAGE_MODEL", "JARVIS_GEMINI_IMAGE_MODEL"
+        ),
+    )
+    # Gemini Live: conversacion de voz en tiempo real (WebSocket).
+    gemini_live_model: str = Field(
+        default="gemini-3.8-live",
+        validation_alias=AliasChoices(
+            "GEMINI_LIVE_MODEL", "JARVIS_GEMINI_LIVE_MODEL"
+        ),
+    )
+    gemini_live_voice: str = Field(
+        default="Charon",
+        validation_alias=AliasChoices(
+            "GEMINI_LIVE_VOICE", "JARVIS_GEMINI_LIVE_VOICE"
+        ),
+    )
+    gemini_live_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "GEMINI_LIVE_ENABLED", "JARVIS_GEMINI_LIVE_ENABLED"
+        ),
+    )
+    skills_enabled: bool = True
+    skills_dir: Path = Path("skills")
     voice_clone_enabled: bool = True
     voice_clone_backend_default: str = ""
     voice_clone_profile_default: str = "jarvis_premium"
@@ -343,6 +579,14 @@ class Settings(BaseSettings):
     voice_style_preset: str = "cinematic"
     voice_pause_style: str = "balanced"
     voice_speaking_rate: float = 0.90
+    # Spoken once while a voice-originated request is being processed; it is
+    # fixed courtesy text and never carries model reasoning. Empty disables.
+    voice_thinking_phrase: str = Field(
+        default="Un momento, señor.",
+        validation_alias=AliasChoices(
+            "VOICE_THINKING_PHRASE", "JARVIS_VOICE_THINKING_PHRASE"
+        ),
+    )
     voice_formality_level: int = 5
     voice_tts_rate: int = 168
     voice_cleanup_enabled: bool = True
@@ -353,6 +597,47 @@ class Settings(BaseSettings):
     voice_input_provider_default: str = "faster_whisper"
     voice_input_language: str = "es"
     voice_input_timeout_seconds: float = 4.0
+    # Active listening: transcripts must open with the wake word (tolerant
+    # to transcription noise); within the conversation window after a
+    # dispatch the wake word is not required.
+    voice_wake_word_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "VOICE_WAKE_WORD_ENABLED", "JARVIS_VOICE_WAKE_WORD_ENABLED"
+        ),
+    )
+    voice_wake_word: str = Field(
+        default="jarvis",
+        validation_alias=AliasChoices("VOICE_WAKE_WORD", "JARVIS_VOICE_WAKE_WORD"),
+    )
+    # When the wake gate ignores substantive speech, say the protocol out
+    # loud instead of going silent ("a veces no responde" reports).
+    voice_wake_hint_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "VOICE_WAKE_HINT_ENABLED", "JARVIS_VOICE_WAKE_HINT_ENABLED"
+        ),
+    )
+    voice_wake_hint_cooldown_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices(
+            "VOICE_WAKE_HINT_COOLDOWN_SECONDS",
+            "JARVIS_VOICE_WAKE_HINT_COOLDOWN_SECONDS",
+        ),
+    )
+    voice_input_continuous: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "VOICE_INPUT_CONTINUOUS", "JARVIS_VOICE_INPUT_CONTINUOUS"
+        ),
+    )
+    voice_conversation_window_seconds: float = Field(
+        default=25.0,
+        validation_alias=AliasChoices(
+            "VOICE_CONVERSATION_WINDOW_SECONDS",
+            "JARVIS_VOICE_CONVERSATION_WINDOW_SECONDS",
+        ),
+    )
     voice_input_silence_threshold: float = 0.02
     voice_push_to_talk_default: bool = False
     voice_wakeword_enabled: bool = False
@@ -407,6 +692,8 @@ class Settings(BaseSettings):
     agent_max_repeated_action_signature: int = Field(default=2, gt=0)
     pre_lora_agentic_scaffold_enabled: bool = True
     pre_lora_agentic_profile: Literal["off", "compact", "full"] = "full"
+    pre_lora_max_relevant_tools: int = Field(default=24, ge=1, le=64)
+    pre_lora_max_schema_tokens: int = Field(default=2_400, ge=256, le=8_192)
     neural_router_shadow_enabled: bool = True
     neural_router_routing_enabled: bool = True
     neural_router_min_confidence: float = Field(default=0.10, ge=0.0, le=1.0)
@@ -496,16 +783,18 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 60.0
     llm_fast_timeout_seconds: float = 20.0
     llm_detailed_timeout_seconds: float = 120.0
-    web_synthesis_timeout_seconds: float = 75.0
+    web_synthesis_timeout_seconds: float = 600.0
     web_synthesis_max_sources: int = 3
     web_synthesis_snippet_chars: int = 500
     research_visible_sources: int = 5
     research_synthesis_max_tokens: int = 900
     research_short_max_tokens: int = 220
     research_final_answer_max_tokens: int = Field(default=1_200, ge=256, le=8_192)
-    research_deep_final_max_tokens: int = Field(default=1_800, ge=512, le=12_000)
-    research_final_output_reserve_tokens: int = Field(default=1_800, ge=256, le=12_000)
+    research_deep_final_max_tokens: int = Field(default=3_200, ge=512, le=12_000)
+    research_final_output_reserve_tokens: int = Field(default=3_200, ge=256, le=12_000)
     research_max_synthesis_attempts: int = Field(default=3, ge=1, le=3)
+    research_max_section_repairs: int = Field(default=2, ge=0, le=2)
+    research_max_gap_searches: int = Field(default=2, ge=0, le=2)
     research_max_output_continuations: int = Field(default=2, ge=0, le=2)
     unity_allowed_bridge_commands: tuple[str, ...] = ()
     unity_blocked_bridge_commands: tuple[str, ...] = ()
@@ -522,7 +811,7 @@ class Settings(BaseSettings):
     research_max_concurrent_tasks: int = 3
     # Synthesis may legitimately exceed the generic UI watchdog when using a
     # remote model; keep it bounded but avoid cancelling healthy live research.
-    research_watchdog_timeout_ms: int = 120_000
+    research_watchdog_timeout_ms: int = 600_000
     research_require_citations: bool = True
     indexing_runtime_enabled: bool = True
     indexing_auto_sync_on_start: bool = False
@@ -744,6 +1033,13 @@ class Settings(BaseSettings):
             extra={"configured": str(configured), "candidates": [str(path) for path in candidates], "selected": str(selected)},
         )
         return selected
+
+    @property
+    def resolved_skills_dir(self) -> Path:
+        configured = self.skills_dir
+        if configured.is_absolute():
+            return configured
+        return self.resolved_workspace_root / configured
 
     @property
     def resolved_logs_dir(self) -> Path:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import Lock, Thread
 from uuid import uuid4
 
@@ -163,7 +163,7 @@ class VoiceRuntimeService:
     def transcribe_file(self, file_path: str, *, correlation_id: str | None = None) -> VoiceOperationReceipt:
         validate_microphone_access(self._mode_manager)
         correlation_id = correlation_id or str(uuid4())
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         backend = self._input_registry.get("wav_file")
         if backend is None:
             raise VoiceRuntimeError("wav_file backend is not registered")
@@ -194,7 +194,7 @@ class VoiceRuntimeService:
     def speak(self, text: str, *, correlation_id: str | None = None, literal: bool = False) -> VoiceOperationReceipt:
         validate_playback_access(self._mode_manager)
         correlation_id = correlation_id or str(uuid4())
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         if not self._voice_enabled:
             return self._publish_success(
                 correlation_id=correlation_id,
@@ -293,7 +293,7 @@ class VoiceRuntimeService:
         correlation_id = request.correlation_id or str(uuid4())
         request = request.model_copy(update={"correlation_id": correlation_id})
         session_id = str(uuid4())
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         self._sessions.start(session_id, correlation_id=correlation_id, mode=request.mode, metadata=request.metadata)
         token = CancellationToken(correlation_id)
         self._cancellations[correlation_id] = token
@@ -319,7 +319,7 @@ class VoiceRuntimeService:
         return self._publish_success(
             correlation_id=session.correlation_id,
             operation_name="voice.listen.stop",
-            started_at=datetime.now(timezone.utc),
+            started_at=datetime.now(UTC),
             session_id=session.session_id,
             data={"state": VoiceSessionState.STOPPED.value},
         )
@@ -336,7 +336,7 @@ class VoiceRuntimeService:
             self._current_playback_handle.stop()
         if self._cancel_callback is not None:
             self._cancel_callback(correlation_id)
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         return self._publish_success(
             correlation_id=correlation_id,
             operation_name="voice.cancel",
@@ -908,7 +908,7 @@ class VoiceRuntimeService:
             latency_ms=latency_ms,
             data=data,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(UTC),
         )
         self._event_bus.publish(
             "voice.executed",

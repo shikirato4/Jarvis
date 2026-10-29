@@ -108,6 +108,28 @@ def test_generation_profile_uses_explanatory_structure_not_only_prompt_length() 
     assert long_form.name == "detailed"
 
 
+def test_requested_brief_and_extensive_depth_select_different_profiles() -> None:
+    settings = _settings()
+
+    brief = select_chat_generation_profile(
+        "Explica brevemente qué es la computación cuántica.", settings
+    )
+    extensive = select_chat_generation_profile(
+        "Explícame extensamente cómo funciona la computación cuántica, desde sus "
+        "fundamentos hasta sus aplicaciones, desarrollando cada concepto con ejemplos.",
+        settings,
+    )
+    explicit = select_chat_generation_profile(
+        "Redacta un informe de aproximadamente 2,000 palabras sobre astronomía.",
+        settings,
+        web_used=True,
+    )
+
+    assert brief.name == "fast"
+    assert extensive.name == "extended"
+    assert explicit.name == "extended"
+
+
 def test_extended_long_form_classification_is_selective_and_language_independent() -> None:
     settings = _settings()
     spanish = (
@@ -691,6 +713,81 @@ def test_no_overlap_keeps_both_segments_byte_for_byte() -> None:
 
     assert combined == "```py\nprint('ok')\n```"
     assert removed == 0
+
+
+def test_continuation_merge_repairs_ellipsis_partial_word_overlap() -> None:
+    combined, removed = merge_continuation_text(
+        "La elección es crítica para la valide",
+        "...para la validez de los resultados.",
+    )
+
+    assert combined == "La elección es crítica para la validez de los resultados."
+    assert removed > 0
+
+    exponential, exponential_removed = merge_continuation_text(
+        "La capacidad ha crecido expon",
+        "...exponencialmente durante la última década.",
+    )
+    assert exponential == (
+        "La capacidad ha crecido exponencialmente durante la última década."
+    )
+    assert exponential_removed > 0
+
+
+def test_continuation_merge_repairs_ellipsis_repeated_trailing_clause() -> None:
+    combined, removed = merge_continuation_text(
+        "La IA no solo es un conjunto de algoritmos, sino un paradigma",
+        "...no solo es un conjunto de algoritmos, sino un paradigma que redefine la observación.",
+    )
+
+    assert combined == (
+        "La IA no solo es un conjunto de algoritmos, sino un paradigma "
+        "que redefine la observación."
+    )
+    assert removed > 0
+
+
+def test_continuation_merge_repairs_restarted_clause_without_ellipsis() -> None:
+    combined, removed = merge_continuation_text(
+        "La inteligencia artificial (IA) ha dejado de ser una herramienta auxiliar para "
+        "convertirse en un componente central y estructural",
+        "La inteligencia artificial ha dejado de ser una herramienta auxiliar para "
+        "convertirse en un componente central y estructural, actuando como núcleo científico.",
+    )
+
+    assert combined == (
+        "La inteligencia artificial (IA) ha dejado de ser una herramienta auxiliar para "
+        "convertirse en un componente central y estructural, actuando como núcleo científico."
+    )
+    assert removed > 0
+
+
+def test_continuation_merge_collapses_short_word_and_restores_missing_space() -> None:
+    repeated, repeated_removed = merge_continuation_text(
+        "Es necesario asegurar que",
+        "que las técnicas funcionen.",
+    )
+    joined, joined_removed = merge_continuation_text(
+        "requiere validación",
+        "humanas antes de confirmar.",
+    )
+    conjunction, conjunction_removed = merge_continuation_text(
+        "según la información",
+        "y el objetivo del análisis.",
+    )
+    short_words, short_words_removed = merge_continuation_text(
+        "los humanos no",
+        "ni siquiera pueden procesarlo.",
+    )
+
+    assert repeated == "Es necesario asegurar que las técnicas funcionen."
+    assert repeated_removed == len("que")
+    assert joined == "requiere validación humanas antes de confirmar."
+    assert joined_removed == 0
+    assert conjunction == "según la información y el objetivo del análisis."
+    assert conjunction_removed == 0
+    assert short_words == "los humanos no ni siquiera pueden procesarlo."
+    assert short_words_removed == 0
 
 
 def test_stream_continuations_remain_one_logical_stream() -> None:

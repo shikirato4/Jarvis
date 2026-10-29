@@ -48,6 +48,13 @@ def build_web_search_action(provider: WebSearchProvider) -> ActionDefinition:
         tags=("web", "search", "research"),
         idempotent=True,
         adapter="official_api",
+        semantic_aliases=(
+            "research current information", "investigar versión actual",
+            "investiga", "busca fuentes", "buscar fuentes",
+            "busca en internet", "novedades actuales",
+            "search web", "latest release", "current version",
+            "look up online", "consultar en web", "lanzamiento reciente",
+        ),
     )
 
 

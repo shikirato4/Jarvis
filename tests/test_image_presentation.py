@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from jarvis.desktop_runtime.base import DesktopChatMessage
 from jarvis.image_runtime.presentation import (
@@ -14,7 +14,7 @@ def _message(job_id: str) -> DesktopChatMessage:
         message_id="assistant-image",
         role="assistant",
         content="Generación en cola…",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         metadata={"image_job_id": job_id},
     )
 

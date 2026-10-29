@@ -5,9 +5,9 @@ from typing import Any
 
 
 _REAL_CAPABILITIES = (
-    "Chat híbrido con Nemotron 3 Nano Omni: NVIDIA API o endpoint NVFP4 local según el modo elegido.",
+    "Chat híbrido: ruta remota o endpoint local según el modo elegido.",
     "Streaming de respuestas en la app desktop.",
-    "Selector persistente AUTO, NVIDIA API y LOCAL con proveedor visible y fallback diagnosticado.",
+    "Selector persistente AUTO, NVIDIA API y LOCAL con Nemotron 3 Nano Omni (NVFP4) como referencia remota y fallback diagnosticado.",
     "Adjuntos multimodales desde el botón +: imágenes, audio, video, documentos, texto y código.",
     "Busqueda web con Brave Search y fuentes visibles.",
     "Research asistido por Brave para temas actuales.",
@@ -17,7 +17,7 @@ _REAL_CAPABILITIES = (
     "Parches revisables con confirmacion antes de aplicar.",
     "Git local seguro y GitHub/repo learning como referencia.",
     "Agent Mode real en Guided Control: observa, planea, pide confirmacion, ejecuta y verifica acciones aprobadas.",
-    "Generacion local de imagenes con JuggernautXL SDXL via Diffusers directo; Fooocus no requerido.",
+    "Generacion local de imagenes con Qwen-Image-2.1-Turbo (texto legible e infografias) via Diffusers.",
     "Voz/TTS local con salida preparada para no leer codigo largo.",
     "Doctor, benchmark, estado híbrido y diagnóstico verificable de NVFP4.",
     "Politica de seguridad: herramientas locales con permisos, secretos protegidos y contexto remoto mínimo.",
@@ -26,7 +26,7 @@ _REAL_CAPABILITIES = (
 _NOT_ENABLED = (
     "Control completo sin supervision no esta habilitado; Agent Mode usa Guided Control y Stop Agent.",
     "No compro, pago, envio mensajes externos ni ejecuto acciones sensibles sin confirmacion.",
-    "OpenAI y Gemini no son proveedores principales configurados; NVIDIA NIM es el proveedor remoto.",
+    "OpenAI y Gemini no son proveedores principales configurados; la ruta remota depende de la configuración activa.",
     "El checkpoint NVFP4 exacto requiere hardware/backend compatible o un endpoint local alojado en otra máquina.",
     "No clono ni ejecuto repos sospechosos o malware.",
 )
@@ -102,11 +102,11 @@ def get_capabilities_summary(
 
 def get_capabilities_for_context_tab() -> str:
     return (
-        "Jarvis usa Nemotron 3 Nano Omni mediante NVIDIA API o el checkpoint NVFP4 exacto en un endpoint "
-        "OpenAI-compatible local. AUTO prefiere NVIDIA y usa el proveedor local solo ante un fallo seguro; "
-        "NVIDIA API y LOCAL son estrictos. Brave Search aporta fuentes web; memoria, herramientas, permisos y "
+        "Jarvis usa la ruta de modelo configurada mediante el proveedor remoto o un endpoint OpenAI-compatible "
+        "local. AUTO prefiere la ruta remota y usa la local sólo ante un fallo seguro; las rutas explícitas son "
+        "estrictas. Brave Search aporta fuentes web; memoria, herramientas, permisos y "
         "estado permanecen locales. Conserva Code Agent, Git seguro, repo learning, adjuntos multimodales, "
-        "generacion local de imagenes con JuggernautXL via Diffusers sin Fooocus y voz/TTS. "
+        "generacion local de imagenes con Qwen-Image-2.1-Turbo via Diffusers y voz/TTS. "
         "Agent Mode real esta disponible con confirmacion para acciones sensibles y Stop Agent."
     )
 
@@ -115,13 +115,14 @@ def get_capabilities_for_prompt(context_profile: str) -> str:
     profile = (context_profile or "minimal").casefold()
     if profile == "minimal":
         return (
-            "Identidad: Jarvis. Modelo principal: Nemotron 3 Nano Omni mediante el proveedor asignado "
-            "por AUTO, NVIDIA API o LOCAL. Herramientas y permisos siempre locales."
+            "Identidad: Jarvis. Modelo principal y ruta de ejecución se seleccionan mediante AUTO o una ruta explícita. "
+            "Herramientas y permisos siempre locales."
         )
     if profile == "web":
         return (
-            "Jarvis puede usar Brave Search como fuente web y el proveedor Nemotron asignado para redactar. "
-            "No debe inventar datos fuera de las fuentes ni mandar secretos a internet."
+            "Jarvis puede investigar en la web con el buscador configurado y citar fuentes. "
+            "Puede leer paginas con web.fetch_page y OPERAR sitios reales con el navegador "
+            "(browser.open/click/type). No debe inventar datos fuera de las fuentes ni mandar secretos a internet."
         )
     if profile == "project":
         return (
@@ -130,7 +131,7 @@ def get_capabilities_for_prompt(context_profile: str) -> str:
         )
     if profile in {"capability", "detailed"}:
         return get_capabilities_for_context_tab()
-    return "Jarvis con Nemotron híbrido, seguridad activa y contexto adaptativo."
+    return "Jarvis con modelo híbrido, seguridad activa y contexto adaptativo."
 
 
 def _format_items(items: tuple[str, ...]) -> list[str]:

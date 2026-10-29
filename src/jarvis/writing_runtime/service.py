@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from jarvis.autonomy.base import MissionRequest
@@ -132,7 +132,7 @@ class WritingRuntimeService(RuntimeServiceContract):
             target_window=payload.target_window,
             metadata=payload.metadata,
         )
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self._repository.upsert_task(task)
 
         return self._run_once(task)
@@ -189,7 +189,7 @@ class WritingRuntimeService(RuntimeServiceContract):
         if task.mission_id and self._autonomy is not None:
             self._autonomy.stop_mission(task.mission_id)
         task.status = WritingTaskStatus.CANCELLED
-        task.updated_at = datetime.now(timezone.utc)
+        task.updated_at = datetime.now(UTC)
         self._repository.upsert_task(task)
         if self._operations is not None:
             self._operations.cancel_by_metadata("task_id", task_id, reason="writing task cancelled")
@@ -204,7 +204,7 @@ class WritingRuntimeService(RuntimeServiceContract):
 
     def _run_once(self, task: WritingTask) -> WritingOperationReceipt:
         correlation_id = f"writing-{task.task_id}"
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         handle = None
         phase = "context"
         try:
@@ -220,7 +220,7 @@ class WritingRuntimeService(RuntimeServiceContract):
                 )
                 if handle.record.status.value == "deferred":
                     task.status = WritingTaskStatus.PENDING
-                    task.updated_at = datetime.now(timezone.utc)
+                    task.updated_at = datetime.now(UTC)
                     self._repository.upsert_task(task)
                     return WritingOperationReceipt(
                         correlation_id=correlation_id,
@@ -230,7 +230,7 @@ class WritingRuntimeService(RuntimeServiceContract):
                         message="writing task deferred by backpressure controls",
                         data={"deferred": True},
                         started_at=started_at,
-                        finished_at=datetime.now(timezone.utc),
+                        finished_at=datetime.now(UTC),
                     )
             context = self._run_phase(
                 task=task,
@@ -285,7 +285,7 @@ class WritingRuntimeService(RuntimeServiceContract):
                 receipt = None
                 written_text = None
             task.status = WritingTaskStatus.COMPLETED
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(UTC)
             self._repository.upsert_task(task)
             self._persist_context(task)
             self._event_bus.publish(
@@ -321,14 +321,14 @@ class WritingRuntimeService(RuntimeServiceContract):
                     },
                 },
                 started_at=started_at,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
             )
         except Exception as exc:
             if handle is not None:
                 self._operations.fail(handle.operation_id, error=str(exc), metadata={"task_id": task.task_id})
             task.status = WritingTaskStatus.FAILED if task.status != WritingTaskStatus.CANCELLED else task.status
             task.last_error = str(exc)
-            task.updated_at = datetime.now(timezone.utc)
+            task.updated_at = datetime.now(UTC)
             self._repository.upsert_task(task)
             raise self._phase_error(phase, exc) from exc
 

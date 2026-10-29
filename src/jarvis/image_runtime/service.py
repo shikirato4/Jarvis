@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 import importlib.util
 import inspect
 import logging
@@ -35,6 +35,20 @@ class DiffusersImageBackend:
             torch_dtype=torch_dtype,
             use_safetensors=True,
         )
+        if device == "cuda_offload":
+            # Offload path: components hop between CPU and GPU per phase.
+            # Do NOT combine with .to(cuda) - that mixes dtypes and leads
+            # to Half/Float matmul failures.
+            pipe.enable_model_cpu_offload()
+            if hasattr(pipe, "enable_attention_slicing"):
+                pipe.enable_attention_slicing()
+            vae = getattr(pipe, "vae", None)
+            if vae is not None:
+                if hasattr(vae, "enable_tiling"):
+                    vae.enable_tiling()
+                if hasattr(vae, "enable_slicing"):
+                    vae.enable_slicing()
+            return pipe
         if device == "cuda":
             # Keep the denoising path consistently in half precision.  In
             # particular, do not combine ``to(cuda)`` with CPU offload: the
@@ -106,7 +120,7 @@ class DiffusersImageBackend:
         if cancel_event.is_set():
             return ImageGenerationResult(success=False, message="Generacion cancelada.", error="cancelled")
         paths: list[Path] = []
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
         for index, image in enumerate(getattr(result, "images", []) or [], start=1):
             path = output_dir / f"jarvis-image-{timestamp}-{index}.png"
             image.save(path)
@@ -228,8 +242,22 @@ class ImageGenerationService:
     def __init__(self, *, settings, backend: ImageBackend | None = None, logger: logging.Logger | None = None, event_bus=None) -> None:
         self._settings = settings
         self._logger = logger or logging.getLogger("jarvis.image_runtime")
+        kind = str(getattr(settings, "image_model_kind", "qwen_turbo") or "qwen_turbo").casefold()
+        model_path: Path | None = None
+        if kind == "qwen_turbo":
+            qwen_dir = Path(getattr(settings, "qwen_image_dir", "models/qwen_image_turbo"))
+            if not qwen_dir.is_absolute():
+                qwen_dir = Path.cwd() / qwen_dir
+            model_path = qwen_dir
+            if backend is None:
+                from jarvis.image_runtime.qwen_backend import QwenImageBackend
+
+                backend = QwenImageBackend()
+        if kind != "qwen_turbo":
+            model_path = getattr(settings, "resolved_image_model_path", None) or _DEFAULT_MODEL_PATH
+        assert model_path is not None  # invariant: uno de los dos ramos lo asigna
         self._model = ImageModelManager(
-            model_path=getattr(settings, "resolved_image_model_path", None) or _DEFAULT_MODEL_PATH,
+            model_path=model_path,
             keep_loaded=bool(getattr(settings, "image_keep_model_loaded", True)),
             backend=backend,
             logger=self._logger,
@@ -268,7 +296,7 @@ class ImageGenerationService:
         return {
             "enabled": bool(getattr(self._settings, "image_enabled", True)),
             "backend": getattr(self._settings, "image_backend", "diffusers"),
-            "model": "JuggernautXL SDXL",
+            "model": "Qwen-Image-2.1-Turbo" if getattr(self._settings, "image_model_kind", "qwen_turbo") == "qwen_turbo" else "JuggernautXL SDXL",
             "model_status": self._model.status.value,
             "model_path": str(self._model.model_path),
             "model_path_exists": self._model.model_path.exists(),
@@ -324,7 +352,7 @@ class ImageGenerationService:
             job = self._jobs[target]
             if job.status == ImageJobStatus.PENDING:
                 job.status = ImageJobStatus.CANCELLED
-                job.completed_at = datetime.now(timezone.utc)
+                job.completed_at = datetime.now(UTC)
                 job.message = "Generacion cancelada."
                 job.progress = None
                 self._publish_job(job, "cancelled")
@@ -393,7 +421,7 @@ class ImageGenerationService:
             job.progress = None
             self._model._cleanup_cuda()  # noqa: SLF001
         finally:
-            job.completed_at = datetime.now(timezone.utc)
+            job.completed_at = datetime.now(UTC)
             if self._model.keep_loaded and self._model.status != ImageModelStatus.ERROR:
                 self._model.mark_ready_after_generation()
             elif not self._model.keep_loaded:
@@ -405,7 +433,7 @@ class ImageGenerationService:
         job.status = ImageJobStatus.CANCELLED
         job.message = "Generacion cancelada."
         job.progress = None
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         self._publish_job(job, "cancelled")
         return job
 
@@ -455,11 +483,47 @@ def _torch_device_and_dtype() -> tuple[str, object | None]:
     try:
         import torch
 
-        if torch.cuda.is_available():
+        if _cuda_available():
+            # Small-VRAM GPUs (the 8 GB laptop 5070) cannot hold the whole
+            # SDXL fp16 pipeline plus activations: .to(cuda) thrashes to
+            # system RAM (measured 78.8 s/step at 1024). cpu_offload swaps
+            # components per phase: measured 2.8 s/step on the same card.
+            if _free_cuda_vram_gb() < 10.0:
+                return "cuda_offload", torch.float16
             return "cuda", torch.float16
     except Exception:  # noqa: BLE001
         pass
     return "cpu", None
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:  # noqa: BLE001 - probe is advisory
+        return False
+
+
+def _free_cuda_vram_gb() -> float:
+    try:
+        import shutil
+        import subprocess
+
+        nvidia_smi = shutil.which("nvidia-smi")
+        if nvidia_smi is None:
+            return 0.0
+        output = subprocess.run(
+            [nvidia_smi, "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+        if not output:
+            return 0.0
+        return float(output.splitlines()[0]) / 1024
+    except Exception:  # noqa: BLE001 - probe is advisory
+        return 0.0
 
 
 def _module_dtype(module: object) -> object | None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Callable, Literal
+from typing import Any, Literal
+from collections.abc import Callable
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -101,6 +102,14 @@ class FilesModule:
         self.runtime = runtime
 
     def register_actions(self, registry: ActionRegistry) -> None:
+        semantics = {
+            "files.search": (("find", "locate file", "locate document", "track down", "busca", "buscar archivo", "encontrar archivo", "encuentra archivo", "localizar fichero", "localiza archivo", "localiza documento", "halla", "ubica"), ("files.read_text", "files.stat", "files.copy", "files.move")),
+            "files.read_text": (("read file", "read content", "inspect content", "review content", "show content", "show", "what it says", "leer archivo", "lee archivo", "léelo", "consulta contenido", "revisa contenido", "lo que dice", "muéstrame contenido", "muéstrame"), ()),
+            "files.stat": (("inspect file metadata", "measure file size", "size", "inspect properties", "bytes", "occupies bytes", "medir tamaño archivo", "tamaño", "pesa archivo", "peso", "inspeccionar metadatos", "consultar propiedades", "averigua peso"), ()),
+            "files.copy": (("copy file", "duplicate file", "copiar archivo", "duplicar archivo"), ("files.stat",)),
+            "files.move": (("move file", "relocate file", "mover archivo", "trasladar archivo", "mueve archivo"), ("files.stat",)),
+            "files.open": (("open file", "open folder", "abrir archivo", "abre archivo", "abrir carpeta"), ()),
+        }
         definitions: tuple[tuple[str, str, type[BaseModel], Callable[..., dict[str, Any]], ActionRisk], ...] = (
             ("files.resolve_path", "Resolve a Windows file or folder path, workspace path, or known folder such as Downloads/Descargas.", ResolvePayload, lambda p: {"path": str(self.runtime.resolve_path(p.path, base=p.base))}, ActionRisk.SAFE),
             ("files.list", "List files and folders (archivos y carpetas) with bounded pagination and metadata.", ListPayload, lambda p: self.runtime.list_directory(**p.model_dump()), ActionRisk.SAFE),
@@ -119,7 +128,8 @@ class FilesModule:
             ("files.reveal", "Reveal an existing file or folder in Windows Explorer without UI automation.", PathPayload, lambda p: self.runtime.reveal(p.path), ActionRisk.SAFE),
         )
         for name, description, payload, operation, risk in definitions:
-            registry.register(ActionDefinition(name=name, description=description, payload_model=payload, handler=self._action_handler(operation), tags=("files", "filesystem", "windows"), risk=risk, idempotent=False, supports_cancellation=name == "files.search"))
+            aliases, companions = semantics.get(name, ((), ()))
+            registry.register(ActionDefinition(name=name, description=description, payload_model=payload, handler=self._action_handler(operation), tags=("files", "filesystem", "windows"), risk=risk, idempotent=False, supports_cancellation=name == "files.search", semantic_aliases=aliases, companion_names=companions))
 
     def register_tools(self, registry: ToolRegistry) -> None:
         for definition in registry_actions(self.runtime):

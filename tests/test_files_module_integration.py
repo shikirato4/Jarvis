@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from jarvis.action_executor import ActionRequest, ActionStatus
 from jarvis.bootstrap import build_application
 from jarvis.config import Settings
@@ -62,4 +64,73 @@ def test_tool_invocation_uses_secured_executor(tmp_path: Path) -> None:
     assert receipt.status.value == "success"
     assert receipt.data["verified"] is True
     assert (tmp_path / "tools-dir").is_dir()
+    app.stop()
+
+
+@pytest.mark.parametrize("operation", ["read_text", "stat", "copy", "move"])
+def test_isolated_multistep_files_trajectory(tmp_path: Path, operation: str) -> None:
+    app = _application(tmp_path)
+    source = tmp_path / "trajectory-fixture.txt"
+    source.write_text("observed fixture content", encoding="utf-8")
+    search = app.action_executor.execute(ActionRequest(
+        run_id="trajectory", call_id="search", action="files.search",
+        arguments={"pattern": source.name, "scope": str(tmp_path)},
+    ))
+    assert search.status is ActionStatus.SUCCESS
+    observed_path = next(
+        item["path"] for item in search.data["items"]
+        if Path(item["path"]).name == source.name
+    )
+    assert Path(observed_path).resolve() == source.resolve()
+
+    destination = tmp_path / f"{operation}-verified.txt"
+    action = f"files.{operation}"
+    arguments = (
+        {"source": observed_path, "destination": str(destination)}
+        if operation in {"copy", "move"} else {"path": observed_path}
+    )
+    request = ActionRequest(
+        run_id="trajectory", call_id=operation, action=action, arguments=arguments,
+    )
+    observation = app.action_executor.execute(request)
+    if operation in {"copy", "move"}:
+        assert observation.status is ActionStatus.CONFIRMATION_REQUIRED
+        assert app.action_executor.approve_confirmation(observation.confirmation_id)
+        observation = app.action_executor.execute(request.model_copy(update={
+            "confirmation_token": observation.confirmation_id,
+        }))
+    assert observation.status is ActionStatus.SUCCESS
+    if operation == "read_text":
+        assert "observed fixture content" in str(observation.data)
+    elif operation == "stat":
+        assert observation.data["metadata"]["size"] == source.stat().st_size
+    else:
+        assert destination.read_text(encoding="utf-8") == "observed fixture content"
+        assert source.exists() is (operation == "copy")
+    app.stop()
+
+
+def test_file_observations_do_not_turn_missing_or_invalid_targets_into_success(
+    tmp_path: Path,
+) -> None:
+    app = _application(tmp_path)
+    missing = app.action_executor.execute(ActionRequest(
+        run_id="missing", call_id="search", action="files.search",
+        arguments={"pattern": "not-present-*.txt", "scope": str(tmp_path)},
+    ))
+    assert missing.status is ActionStatus.SUCCESS
+    assert missing.data["items"] == []
+
+    invalid = app.action_executor.execute(ActionRequest(
+        run_id="invalid", call_id="read", action="files.read_text",
+        arguments={"path": 42},
+    ))
+    assert invalid.status is ActionStatus.FAILED
+    assert invalid.error_type == "ActionValidationError"
+
+    stale = app.action_executor.execute(ActionRequest(
+        run_id="stale", call_id="read", action="files.read_text",
+        arguments={"path": str(tmp_path / "disappeared.txt")},
+    ))
+    assert stale.status is ActionStatus.FAILED
     app.stop()
