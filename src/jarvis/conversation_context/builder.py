@@ -26,6 +26,11 @@ EventSink = Callable[[str, dict[str, Any]], None]
 class ConversationContextBuilder:
     """Build provider-neutral model context without persisting private content."""
 
+    # Una observacion por debajo de este piso ya no se recorta mas.
+    _TOOL_TRUNCATION_FLOOR_TOKENS = 64
+    # Marca visible: el modelo (y el operador) deben saber que se recorto.
+    _TOOL_TRUNCATION_MARKER = "\n…[observación recortada por presupuesto de contexto]…\n"
+
     def __init__(
         self,
         *,
@@ -177,6 +182,11 @@ class ConversationContextBuilder:
         omitted_history_messages = 0
         omitted_attachments = 0
         omitted_memories = 0
+        # Copia mutable: las observaciones de herramientas se pueden recortar
+        # (no borrar, el protocolo exige que cada tool_call tenga respuesta).
+        working_tool_messages = [
+            message.model_copy(deep=True) for message in tool_messages
+        ]
 
         def assemble() -> list[ModelMessage]:
             selected_history = [
@@ -194,7 +204,7 @@ class ConversationContextBuilder:
                         memories=omitted_memories,
                     )
                 )
-            result.extend(tool_messages)
+            result.extend(working_tool_messages)
             result.extend(
                 self._fragment_message(fragment) for fragment in selected_attachments
             )
@@ -251,6 +261,9 @@ class ConversationContextBuilder:
                 omitted_attachments += 1
                 context_compacted = True
                 context_truncated = True
+            elif self._shrink_longest_tool_observation(working_tool_messages):
+                context_compacted = True
+                context_truncated = True
             else:
                 self._raise_overflow(
                     request=request,
@@ -270,6 +283,40 @@ class ConversationContextBuilder:
             context_compacted,
             context_truncated,
         )
+
+    def _shrink_longest_tool_observation(
+        self, tool_messages: list[ModelMessage]
+    ) -> bool:
+        """Recorta a la mitad la observacion de herramienta mas larga.
+
+        Los tool results no se pueden borrar sin romper el protocolo (cada
+        tool_call exige su respuesta), pero si recortar su contenido: una
+        pagina web o un archivo volcado no deben empujar el contexto hasta el
+        fallo duro. Devuelve True si recorto algo.
+        """
+        candidatos = [
+            (index, message)
+            for index, message in enumerate(tool_messages)
+            if isinstance(message.content, str)
+            and message.content
+            and not self._is_critical_message(message)
+            and self._estimator.estimate_message(message)
+            > self._TOOL_TRUNCATION_FLOOR_TOKENS
+        ]
+        if not candidatos:
+            return False
+        index, message = max(
+            candidatos, key=lambda item: self._estimator.estimate_message(item[1])
+        )
+        contenido = message.content
+        assert isinstance(contenido, str)
+        conservar = max(int(len(contenido) * 0.5), 2)
+        cabeza = contenido[: int(conservar * 0.65)]
+        cola = contenido[-int(conservar * 0.35) :]
+        tool_messages[index] = message.model_copy(
+            update={"content": f"{cabeza}{self._TOOL_TRUNCATION_MARKER}{cola}"}
+        )
+        return True
 
     def _raise_overflow(
         self,

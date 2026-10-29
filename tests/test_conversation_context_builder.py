@@ -272,6 +272,75 @@ def test_protected_context_overflow_is_explicit_and_private() -> None:
     assert "estimated_tokens=" in str(raised.value)
 
 
+def test_oversized_tool_observation_is_truncated_instead_of_failing() -> None:
+    """Una observacion gigante se recorta: no debe cortar la respuesta."""
+
+    builder = ConversationContextBuilder()
+    relleno = "contenido de la pagina web " * 900
+
+    built = builder.build(
+        ConversationContextRequest(
+            system_message=ModelMessage(role="system", content="policy"),
+            tool_observations=[
+                ModelMessage(
+                    role="assistant",
+                    tool_calls=[
+                        ModelToolCall(
+                            id="call-1",
+                            name="browser.open",
+                            arguments={"url": "https://ejemplo.test"},
+                        )
+                    ],
+                ),
+                ModelMessage(
+                    role="tool",
+                    content=relleno,
+                    name="browser.open",
+                    tool_call_id="call-1",
+                ),
+            ],
+            current_message=ModelMessage(role="user", content="resume la pagina"),
+            max_context_tokens=512,
+            reserve_output_tokens=64,
+            safety_margin_tokens=32,
+        )
+    )
+
+    herramientas = [message for message in built.messages if message.role == "tool"]
+    assert len(herramientas) == 1, "el tool result no puede desaparecer"
+    recortado = herramientas[0].content or ""
+    assert isinstance(recortado, str)
+    assert len(recortado) < len(relleno)
+    assert ConversationContextBuilder._TOOL_TRUNCATION_MARKER in recortado
+    assert built.stats.context_truncated is True
+
+
+def test_critical_tool_observation_still_raises_overflow() -> None:
+    """Si la observacion es critica no se recorta: el limite sigue explicito."""
+
+    builder = ConversationContextBuilder()
+
+    with pytest.raises(ContextOverflowError):
+        builder.build(
+            ConversationContextRequest(
+                system_message=ModelMessage(role="system", content="policy"),
+                tool_observations=[
+                    ModelMessage(
+                        role="tool",
+                        content="observacion critica " * 900,
+                        name="browser.open",
+                        tool_call_id="call-1",
+                        metadata={"context_critical": True},
+                    )
+                ],
+                current_message=ModelMessage(role="user", content="resume"),
+                max_context_tokens=512,
+                reserve_output_tokens=64,
+                safety_margin_tokens=32,
+            )
+        )
+
+
 def test_omitted_large_attachment_sets_explicit_truncation_event() -> None:
     events: list[tuple[str, dict[str, object]]] = []
     builder = ConversationContextBuilder(

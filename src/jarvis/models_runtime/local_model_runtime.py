@@ -707,7 +707,7 @@ class LocalModelRuntimeManager:
             "--port",
             str(parsed.port),
             "--flash-attn",
-            "off",
+            self._flash_attn_mode(),
             # --jinja makes llama-server apply the model's embedded chat
             # template: without it the OpenAI-compatible endpoint cannot
             # render tools into the prompt nor parse the model's tool
@@ -721,6 +721,20 @@ class LocalModelRuntimeManager:
                     f"Proyector multimodal configurado no existe: {mmproj_path}."
                 )
             command.extend(("--mmproj", str(mmproj_path)))
+        kv_type = str(getattr(self._settings, "local_runtime_kv_cache_type", "f16"))
+        if kv_type != "f16":
+            # El KV de este modelo cuesta 128KB/token: en q8_0 la misma
+            # VRAM rinde el doble de ventana sin perdida apreciable.
+            command.extend(("--cache-type-k", kv_type, "--cache-type-v", kv_type))
+        if self._profile.lora_path is not None:
+            # Adapter del fine-tune: se aplica en el servidor sobre el GGUF
+            # base, asi que apagarlo es solo quitar la variable del .env.
+            lora_path = self._resolved_path(self._profile.lora_path)
+            if not lora_path.is_file():
+                raise LocalRuntimeConfigurationError(
+                    f"Adapter LoRA configurado no existe: {lora_path}."
+                )
+            command.extend(("--lora", str(lora_path)))
         for flag, value in self._profile.llama_cpp_args:
             command.append(flag)
             if value is not None:
@@ -734,6 +748,16 @@ class LocalModelRuntimeManager:
                 f"GGUF local configurado no existe o no es válido: {path}."
             )
         return path
+
+    def _flash_attn_mode(self) -> str:
+        """KV cuantizado exige flash-attn; en f16 el arranque sigue en off.
+
+        El off historico existe por estabilidad de la vision multimodal:
+        solo se enciende cuando el KV cuantizado lo necesita de verdad.
+        """
+
+        kv_type = str(getattr(self._settings, "local_runtime_kv_cache_type", "f16"))
+        return "on" if kv_type != "f16" else "off"
 
     def _binary_for(self, backend: LocalRuntimeBackend) -> Path:
         configured = (

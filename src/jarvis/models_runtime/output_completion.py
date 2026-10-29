@@ -49,7 +49,14 @@ class OutputCompletionPolicy:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._context_tokens = max(
-            int(getattr(settings, "local_runtime_context_size", 8192)), 512
+            int(
+                getattr(
+                    settings,
+                    "local_runtime_effective_context_size",
+                    getattr(settings, "local_runtime_context_size", 8192),
+                )
+            ),
+            512,
         )
 
     def prepare_request(self, request: ModelRequest) -> ModelRequest:

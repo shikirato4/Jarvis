@@ -116,7 +116,14 @@ def main() -> None:
         print(f"[modo] sin responses_only: {exc}")
 
     print("[entrenamiento] iniciando…")
-    trainer.train()
+    # reanudar desde el ultimo checkpoint si existe (permite pausar/liberar VRAM)
+    checkpoints = sorted(
+        (p for p in Path(SALIDA).glob("checkpoint-*") if p.is_dir()),
+        key=lambda p: int(p.name.rsplit("-", 1)[-1]) if p.name.rsplit("-", 1)[-1].isdigit() else 0,
+    )
+    reanudar = str(checkpoints[-1]) if checkpoints else None
+    print(f"[resume] {reanudar}" if reanudar else "[resume] entrenamiento nuevo")
+    trainer.train(resume_from_checkpoint=reanudar)
 
     model.save_pretrained(str(SALIDA))
     tokenizer.save_pretrained(str(SALIDA))

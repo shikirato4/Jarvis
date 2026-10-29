@@ -174,6 +174,51 @@ def test_cuda_is_preferred_and_launch_uses_validated_stable_flags(tmp_path) -> N
     assert "--batch-size" not in command
 
 
+def test_configured_adapter_is_passed_to_llama_server_as_lora(tmp_path) -> None:
+    """El adapter GGUF llega al arranque como --lora (y se puede apagar)."""
+
+    adapter = tmp_path / "lora" / "jarvis-lora.gguf"
+    adapter.parent.mkdir(parents=True, exist_ok=True)
+    adapter.write_bytes(b"gguf")
+
+    harness = RuntimeHarness()
+    manager = _manager(tmp_path, harness, local_runtime_lora_path=adapter)
+    manager.ensure_ready()
+
+    command = harness.spawned[0][0]
+    assert command[command.index("--lora") + 1] == str(adapter)
+
+    # Sin adapter configurado, el arranque no cambia (workspace aparte:
+    # _settings crea su arbol de directorios y no admite repetir).
+    limpio_root = tmp_path / "limpio"
+    limpio_root.mkdir()
+    limpio = RuntimeHarness()
+    _manager(limpio_root, limpio).ensure_ready()
+    assert "--lora" not in limpio.spawned[0][0]
+
+
+def test_quantized_kv_cache_enables_flash_attn_and_cache_types(tmp_path) -> None:
+    """KV en q8_0 activa cache-type y enciende flash-attn (lo exige llama.cpp)."""
+
+    harness = RuntimeHarness()
+    manager = _manager(tmp_path, harness, local_runtime_kv_cache_type="q8_0")
+    manager.ensure_ready()
+
+    command = harness.spawned[0][0]
+    assert command[command.index("--cache-type-k") + 1] == "q8_0"
+    assert command[command.index("--cache-type-v") + 1] == "q8_0"
+    assert command[command.index("--flash-attn") + 1] == "on"
+
+    # En f16 (default) no se toca ni el KV ni flash-attn.
+    limpio_root = tmp_path / "f16"
+    limpio_root.mkdir()
+    limpio = RuntimeHarness()
+    _manager(limpio_root, limpio).ensure_ready()
+    comando_f16 = limpio.spawned[0][0]
+    assert "--cache-type-k" not in comando_f16
+    assert comando_f16[comando_f16.index("--flash-attn") + 1] == "off"
+
+
 def test_owned_process_records_pid_and_is_stopped_cleanly(tmp_path) -> None:
     harness = RuntimeHarness()
     manager = _manager(tmp_path, harness)

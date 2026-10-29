@@ -142,7 +142,13 @@ class ModelService:
                 metadata = dict(request.metadata)
                 metadata["role_context_exceeded"] = details
                 fallback_context = self._model_roles.context_limit("primary") or int(
-                    getattr(self._settings, "local_runtime_context_size", context_limit)
+                    getattr(
+                        self._settings,
+                        "local_runtime_effective_context_size",
+                        getattr(
+                            self._settings, "local_runtime_context_size", context_limit
+                        ),
+                    )
                 )
                 if estimated_input + safety + required_output > fallback_context:
                     raise ContextLimitError(

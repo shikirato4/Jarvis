@@ -63,6 +63,9 @@ class LocalModelProfile:
         "compact_large_registry",
     )
     llama_cpp_args: tuple[tuple[str, str | None], ...] = ()
+    # Adapter LoRA (GGUF) del fine-tune de JARVIS: se aplica en el servidor,
+    # separado del modelo base, para poder prenderlo y apagarlo.
+    lora_path: Path | None = None
 
     def __post_init__(self) -> None:
         values = {
@@ -81,6 +84,8 @@ class LocalModelProfile:
             raise LocalModelProfileConfigurationError("profile gguf_path must end in .gguf")
         if self.mmproj_path is not None and Path(self.mmproj_path).suffix.casefold() != ".gguf":
             raise LocalModelProfileConfigurationError("profile mmproj_path must end in .gguf")
+        if self.lora_path is not None and Path(self.lora_path).suffix.casefold() != ".gguf":
+            raise LocalModelProfileConfigurationError("profile lora_path must end in .gguf")
         aliases = tuple(dict.fromkeys(str(alias).strip() for alias in self.model_aliases if str(alias).strip()))
         object.__setattr__(self, "model_aliases", aliases)
         checked_args: list[tuple[str, str | None]] = []
@@ -147,6 +152,7 @@ def baseline_local_model_profile(settings: Settings) -> LocalModelProfile:
             ("image",) if _discover_mmproj(path, settings.local_runtime_mmproj_path) is not None else ()
         ),
         llama_cpp_args=(),
+        lora_path=settings.local_runtime_lora_path,
     )
 
 
@@ -172,6 +178,7 @@ def registered_local_model_profiles(settings: Settings) -> tuple[LocalModelProfi
                 if _discover_mmproj(_QWEN35_PATH, settings.local_runtime_mmproj_path) is not None
                 else ()
             ),
+            lora_path=settings.local_runtime_lora_path,
         ),
     )
 
@@ -204,6 +211,15 @@ def _configured_folder(settings: Settings) -> Path:
     return folder.resolve(strict=False)
 
 
+def _is_base_model_gguf(candidate: Path) -> bool:
+    """Un sidecar mmproj o un adapter LoRA no son modelos base elegibles."""
+
+    nombre = candidate.name.casefold()
+    if nombre.startswith("mmproj-") or nombre == "mmproj.gguf":
+        return False
+    return "lora" not in nombre and "adapter" not in nombre
+
+
 def _configured_model_path(settings: Settings) -> Path:
     """Accept an explicit GGUF or discover the sole model in the shared folder."""
     configured = Path(settings.local_runtime_model_path).expanduser()
@@ -212,11 +228,18 @@ def _configured_model_path(settings: Settings) -> Path:
         return configured
 
     candidates = sorted(
-        candidate
-        for candidate in folder.glob("*.gguf")
-        if not candidate.name.casefold().startswith("mmproj-")
-        and candidate.name.casefold() != "mmproj.gguf"
+        candidate for candidate in folder.glob("*.gguf") if _is_base_model_gguf(candidate)
     )
+    if not candidates:
+        # Layout real del disco: models/llm/<modelo>/<modelo>.gguf. Si la
+        # carpeta compartida solo contiene subcarpetas por modelo, se busca
+        # un nivel abajo antes de declarar la configuracion rota, para no
+        # romper cuando el repo ya tiene descargas organizadas por modelo.
+        candidates = sorted(
+            candidate
+            for candidate in folder.glob("*/*.gguf")
+            if _is_base_model_gguf(candidate)
+        )
     if not candidates:
         raise LocalModelProfileConfigurationError(
             f"No hay un modelo GGUF en la carpeta local configurada: {folder}"
@@ -266,6 +289,7 @@ def configured_local_model_profile(settings: Settings) -> LocalModelProfile:
         audio_capable=False,
         video_capable=False,
         native_transport_modalities=("image",) if mmproj is not None else (),
+        lora_path=settings.local_runtime_lora_path,
     )
 
 

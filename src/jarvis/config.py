@@ -285,6 +285,37 @@ class Settings(BaseSettings):
             "local_runtime_context_override",
         ),
     )
+
+    @property
+    def local_runtime_effective_context_size(self) -> int:
+        """Ventana real del runtime local (el override manda sobre el default).
+
+        El servidor arranca con este valor, asi que el presupuesto del cliente
+        debe medir lo mismo: si el cliente cree que solo hay 8192 cuando el
+        servidor sirve 12288, recorta contexto antes de acercarse al limite.
+        """
+        return self.local_runtime_context_override or self.local_runtime_context_size
+
+    # Adapter LoRA (GGUF) del fine-tune: vacio = JARVIS corre con el base.
+    local_runtime_lora_path: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LOCAL_RUNTIME_LORA_PATH",
+            "JARVIS_LOCAL_RUNTIME_LORA_PATH",
+            "local_runtime_lora_path",
+        ),
+    )
+    # KV cache cuantizado: el KV de Qwen3.5 cuesta 128KB/token, asi que en
+    # q8_0 la misma VRAM alcanza para el doble de ventana (llama.cpp exige
+    # flash-attn para KV cuantizado; se enciende solo cuando aplica).
+    local_runtime_kv_cache_type: Literal["f16", "q8_0", "q4_0"] = Field(
+        default="f16",
+        validation_alias=AliasChoices(
+            "LOCAL_RUNTIME_KV_CACHE_TYPE",
+            "JARVIS_LOCAL_RUNTIME_KV_CACHE_TYPE",
+            "local_runtime_kv_cache_type",
+        ),
+    )
     local_runtime_ready_timeout_seconds: float = Field(default=120.0, gt=0)
     local_runtime_poll_interval_seconds: float = Field(default=0.5, gt=0)
     local_runtime_health_interval_seconds: float = Field(default=5.0, ge=0)

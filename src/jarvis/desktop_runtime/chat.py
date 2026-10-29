@@ -613,8 +613,8 @@ class DesktopChatEngine:
         model_context_tokens = getattr(
             self._bridge,
             "selected_model_context_tokens",
-            lambda: self._settings.local_runtime_context_size,
-        )() or self._settings.local_runtime_context_size
+            lambda: self._settings.local_runtime_effective_context_size,
+        )() or self._settings.local_runtime_effective_context_size
         context_budget = (
             min(self._settings.search_max_context_tokens, 2_600)
             if selected_mode == "local"
@@ -2568,7 +2568,7 @@ class DesktopChatEngine:
                 "web_used": False,
                 "adaptive_output_budget": True,
                 "auto_continue_text": True,
-                "output_context_tokens": self._settings.local_runtime_context_size,
+                "output_context_tokens": self._settings.local_runtime_effective_context_size,
                 "reasoning_preference": reasoning_resolved,
                 "reasoning_preference_requested": reasoning_requested,
                 "reasoning_preference_explicit": reasoning_requested != "auto",
@@ -2632,7 +2632,7 @@ class DesktopChatEngine:
         request_context_tokens = request.metadata.get("output_context_tokens")
         max_context_tokens = min(
             self._settings.conversation_context_max_tokens,
-            self._settings.local_runtime_context_size,
+            self._settings.local_runtime_effective_context_size,
         )
         if isinstance(request_context_tokens, int) and request_context_tokens > 0:
             max_context_tokens = min(max_context_tokens, request_context_tokens)

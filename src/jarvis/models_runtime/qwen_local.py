@@ -184,12 +184,24 @@ class QwenLocalProvider(OpenAICompatibleProvider):
         preference = str(
             request.metadata.get("reasoning_preference") or "auto"
         ).casefold()
-        if (
-            self.profile.reasoning_adapter
-            in {"qwen_enable_thinking", "qwen_enable_thinking_binary"}
-            and preference in {"off", "low"}
-            and preference in self.profile.reasoning_modes
-        ):
+        # Un presupuesto de salida corto no alcanza para el razonamiento
+        # oculto: el modelo gastaria todo el cupo en su "Thinking Process" y
+        # devolveria contenido VACIO (finish_reason=length). Medido en vivo:
+        # 200 tokens de cupo -> cero texto visible. Por eso, ademas de la
+        # preferencia explicita, se apaga cuando el cupo es corto.
+        presupuesto = request.max_tokens
+        presupuesto_corto = isinstance(presupuesto, int) and presupuesto <= 512
+        thinking_disponible = self.profile.reasoning_adapter in {
+            "qwen_enable_thinking",
+            "qwen_enable_thinking_binary",
+        }
+        apagar_por_preferencia = (
+            preference in {"off", "low"} and preference in self.profile.reasoning_modes
+        )
+        apagar_por_presupuesto = (
+            presupuesto_corto and "off" in self.profile.reasoning_modes
+        )
+        if thinking_disponible and (apagar_por_preferencia or apagar_por_presupuesto):
             payload["chat_template_kwargs"] = {"enable_thinking": False}
         elif isinstance(request.metadata.get("chat_template_kwargs"), dict):
             payload["chat_template_kwargs"] = dict(
