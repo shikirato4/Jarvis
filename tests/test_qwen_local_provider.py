@@ -167,6 +167,13 @@ def test_qwen_local_disables_thinking_when_completion_budget_is_small() -> None:
     payload = provider._request_payload(request, temperature=0.0, stream=False)  # noqa: SLF001
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}
 
+    # El perfil "detailed" del chat pide 1200: tambien se protege.
+    detallado = request.model_copy(update={"max_tokens": 1200})
+    detallado_payload = provider._request_payload(  # noqa: SLF001
+        detallado, temperature=0.0, stream=False
+    )
+    assert detallado_payload["chat_template_kwargs"] == {"enable_thinking": False}
+
     # Con cupo amplio el razonamiento sigue disponible.
     amplio = request.model_copy(update={"max_tokens": 4096})
     amplio_payload = provider._request_payload(  # noqa: SLF001

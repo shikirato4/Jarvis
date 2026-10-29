@@ -187,14 +187,21 @@ class QwenLocalProvider(OpenAICompatibleProvider):
         # Un presupuesto de salida corto no alcanza para el razonamiento
         # oculto: el modelo gastaria todo el cupo en su "Thinking Process" y
         # devolveria contenido VACIO (finish_reason=length). Medido en vivo:
-        # 200 tokens de cupo -> cero texto visible. Por eso, ademas de la
-        # preferencia explicita, se apaga cuando el cupo es corto.
+        # con 200 tokens de cupo no queda NI UN caracter visible. Los perfiles
+        # de chat piden 160 (fast) y 1200 (detailed), asi que el umbral cubre
+        # ambos: el thinking solo sobrevive en peticiones de cupo amplio.
         presupuesto = request.max_tokens
-        presupuesto_corto = isinstance(presupuesto, int) and presupuesto <= 512
+        presupuesto_corto = isinstance(presupuesto, int) and presupuesto <= 1500
         thinking_disponible = self.profile.reasoning_adapter in {
             "qwen_enable_thinking",
             "qwen_enable_thinking_binary",
-        }
+        } or "qwen" in str(self.profile.model_alias).casefold()
+        # El perfil configured-local-gguf declara reasoning_adapter="none" por
+        # neutralidad (puede apuntar a cualquier GGUF), pero este provider ES
+        # la ruta Qwen: si el alias identifica la familia, el switch del
+        # template existe. Sin esto, el thinking queda encendido siempre y un
+        # cupo corto se consume completo en razonamiento oculto (respuesta
+        # vacia con finish_reason=length, medido en vivo con el perfil real).
         apagar_por_preferencia = (
             preference in {"off", "low"} and preference in self.profile.reasoning_modes
         )
