@@ -24,6 +24,7 @@ import argparse
 import json
 import random
 import sys
+import uuid
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -126,6 +127,31 @@ def frases_familia(familia: str, defs: dict) -> list[dict]:
     elif familia == "terminal":
         add("terminal.run", "corre el comando dir", {"command": "dir"}, "Corrí el comando, aquí va la salida.")
         add("terminal.run", "ejecuta python --version en la terminal", {"command": "python --version"}, "Ya lo ejecuté: te muestro la versión.")
+    elif familia == "image":
+        for desc in IMAGENES:
+            for plantilla in (
+                f"genera una imagen de {desc}",
+                f"hazme una imagen de {desc}",
+                f"crea una imagen de {desc}",
+            ):
+                add(
+                    "image.generate",
+                    plantilla,
+                    {"prompt": desc, "width": 1024, "height": 1024},
+                    f"Listo, generé la imagen de {desc} con el modelo local.",
+                )
+        add(
+            "image.generate",
+            "hazme una infografía del café de Veracruz",
+            {"prompt": "infografía del café de Veracruz", "width": 1024, "height": 1024},
+            "Generé el arte con Qwen y escribí los textos con tipografía exacta.",
+        )
+        add(
+            "image.generate",
+            "genera un póster que diga BIENVENIDO en letras perfectas",
+            {"prompt": "póster con el texto BIENVENIDO", "width": 1024, "height": 1024},
+            "Pinté el fondo con el modelo y escribí BIENVENIDO con tipografía limpia.",
+        )
     return out
 
 
@@ -169,6 +195,157 @@ def payload_minimo(definicion) -> dict:
     return payload
 
 
+def frases_conversacionales(system: str) -> list[dict]:
+    """El modelo tambien debe aprender CUANDO NO llamar herramientas."""
+    sin_tools = [
+        ("hola jarvis", "¡Hola, Shiki! Aquí ando, dime qué necesitas."),
+        ("que eres?", "Soy JARVIS, tu asistente local: vivo en tu máquina, no envío nada a la nube salvo que me lo pidas, y controlo voz, navegador, imágenes y archivos."),
+        ("como estas?", "Perfecto, sistemas en línea y con ganas de echarle ganas. ¿Y tú?"),
+        ("gracias jarvis", "¡No hay de qué! Aquí estoy cuando me necesites."),
+        ("quien te creo?", "Me construye Shiki: un sistema operativo cognitivo local montado sobre Python, con modelos abiertos."),
+        ("que puedes hacer?", "Muchas cosas: busco en la web, abro páginas, genero imágenes con texto legible, leo y escribo archivos, controlo ventanas, transcribo audio y hasta bloqueo la laptop si aparece una cara baneada. Pídeme algo concreto y lo intento."),
+        ("buenas noches jarvis", "Buenas, Shiki. Voy a quedarme por aquí vigiendo. Descansa."),
+        ("eres mejor que siri?", "Distinto, más que mejor: soy tuyo, local, y con manos en tu sistema. Siri no te abre YouTube cuando se lo pides a mi manera."),
+        ("que modelo eres", "Soy Qwen corriendo en tu GPU vía llama.cpp, afinado para ser JARVIS: español informal y control directo de tus herramientas."),
+        ("me ayudarias con algo de matematicas?", "Claro: lo resuelvo directo si es simple, o uso la calculadora para lo gordo. Suéltame el problema."),
+    ]
+    return [
+        {"messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": u},
+            {"role": "assistant", "content": a},
+        ], "source": "conversacion"}
+        for u, a in sin_tools
+    ]
+
+
+def frases_imagenes(system: str) -> list[dict]:
+    """La familia image no vive en el registro de acciones del runtime
+    (es capacidad del servicio de imagenes), asi que se injerta aqui para
+    que el adapter aprenda la intencion 'genera una imagen de X'."""
+    casos: list[tuple[str, str, str]] = []
+    for desc in IMAGENES:
+        for plantilla in (
+            f"genera una imagen de {desc}",
+            f"hazme una imagen de {desc}",
+            f"crea una imagen de {desc}",
+        ):
+            casos.append(
+                (plantilla, desc, f"Listo, generé la imagen de {desc} con el modelo local.")
+            )
+    casos.append(
+        (
+            "hazme una infografía del café de Veracruz",
+            "infografía del café de Veracruz",
+            "Generé el arte con Qwen y escribí los textos con tipografía exacta.",
+        )
+    )
+    casos.append(
+        (
+            "genera un póster que diga BIENVENIDO en letras perfectas",
+            "póster con el texto BIENVENIDO",
+            "Pinté el fondo con el modelo y escribí BIENVENIDO con tipografía limpia.",
+        )
+    )
+
+    salida = []
+    for instruccion, prompt, final in casos:
+        cid = "call_" + uuid.uuid4().hex[:8]
+        salida.append(
+            {
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": instruccion},
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": cid,
+                                "type": "function",
+                                "function": {
+                                    "name": "image.generate",
+                                    "arguments": json.dumps(
+                                        {
+                                            "prompt": prompt,
+                                            "width": 1024,
+                                            "height": 1024,
+                                        },
+                                        ensure_ascii=False,
+                                    ),
+                                },
+                            }
+                        ],
+                    },
+                    {
+                        "role": "tool",
+                        "tool_call_id": cid,
+                        "content": json.dumps(
+                            {"status": "success", "message": "imagen generada"},
+                            ensure_ascii=False,
+                        ),
+                    },
+                    {"role": "assistant", "content": final},
+                ],
+                "source": "imagen",
+            }
+        )
+    return salida
+
+
+def flujos_encadenados(system: str) -> list[dict]:
+    """Secuencias de dos pasos: tool -> resultado -> segundo tool -> final."""
+    flujos = [
+        (
+            "busca lo ultimo de IA y guardame un resumen en apuntes_ia.txt",
+            "web.search", {"query": "ultimas noticias de IA", "max_results": 3},
+            "files.write_text", {"path": "apuntes_ia.txt", "content": "Resumen de las ultimas noticias de IA."},
+            "Listo: busqué las noticias y te dejé el resumen en apuntes_ia.txt.",
+        ),
+        (
+            "abre youtube y ponme el video de lofi mas popular",
+            "browser.open", {"url": "https://www.youtube.com"},
+            "browser.find", {"text": "lofi"},
+            "YouTube abierto y busqué lofi en la página. Elíge el que te llame.",
+        ),
+        (
+            "banea la cara que esta frente a la camara y muestrame el estado del guardian",
+            "faceguard.ban", {"reason": "peticion del usuario"},
+            "faceguard.status", {},
+            "Cara baneada y el guardián está vigilando con la lista actualizada.",
+        ),
+        (
+            "busca el archivo de presupuesto y dime que contiene",
+            "files.search", {"query": "presupuesto"},
+            "files.read_text", {"path": "presupuesto.xlsx"},
+            "Encontré el archivo y lo abrí: te resumo lo que trae.",
+        ),
+        (
+            "genera una imagen de un robot y guardala",
+            "image.generate", {"prompt": "un robot amigable", "width": 1024, "height": 1024},
+            "files.search", {"query": ".png"},
+            "Imagen del robot generada y guardada. La tienes lista en tu carpeta de salidas.",
+        ),
+    ]
+    salida = []
+    for instruccion, accion1, args1, accion2, args2, final in flujos:
+        id1, id2 = "call_" + uuid.uuid4().hex[:8], "call_" + uuid.uuid4().hex[:8]
+        salida.append({"messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": instruccion},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": id1, "type": "function", "function": {"name": accion1, "arguments": json.dumps(args1, ensure_ascii=False)}},
+            ]},
+            {"role": "tool", "tool_call_id": id1, "content": json.dumps({"status": "success", "message": "ok"}, ensure_ascii=False)},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": id2, "type": "function", "function": {"name": accion2, "arguments": json.dumps(args2, ensure_ascii=False)}},
+            ]},
+            {"role": "tool", "tool_call_id": id2, "content": json.dumps({"status": "success", "message": "ok"}, ensure_ascii=False)},
+            {"role": "assistant", "content": final},
+        ], "source": "flujo"})
+    return salida
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default="data/qlora")
@@ -191,10 +368,7 @@ def main() -> None:
         # system prompt real: manifiesto de capacidades (como en produccion)
         from jarvis.agent_runtime.prompt_policy import AgenticPromptPolicy
 
-        tools = [
-            {"name": d.name, "description": getattr(d, "description", "") or ""}
-            for d in defs
-        ]
+        tools = app.action_executor.tool_schemas()
         system_prompt = (
             "Eres JARVIS, el asistente local de Shiki. Respondes en español informal. "
             "Cuando una peticion necesita una herramienta, llamas a la accion exacta del "
@@ -237,6 +411,13 @@ def main() -> None:
             print(f"    (sin estadistica: {exc})")
 
         print("[4/4] escribiendo JSONL…")
+        # --- enriquecimientos: conversacion sin herramientas y flujos encadenados
+        print("[2b/4] conversacion sin herramientas + flujos encadenados…")
+        ejemplos.extend(frases_conversacionales(system_prompt))
+        ejemplos.extend(flujos_encadenados(system_prompt))
+        ejemplos.extend(frases_imagenes(system_prompt))
+        print(f"    ahora {len(ejemplos)} ejemplos")
+
         random.shuffle(ejemplos)
         corte = max(1, int(len(ejemplos) * 0.9))
         out_dir = Path(args.out)
@@ -245,6 +426,9 @@ def main() -> None:
             path = out_dir / f"{nombre_parte}.jsonl"
             with path.open("w", encoding="utf-8") as fh:
                 for f in lote:
+                    if "messages" in f:
+                        fh.write(json.dumps({"messages": f["messages"]}, ensure_ascii=False) + "\n")
+                        continue
                     llamada_id = f"call_{abs(hash(f['user'])) % 10**8}"
                     ejemplo = {
                         "messages": [
